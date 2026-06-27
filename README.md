@@ -6,7 +6,8 @@ Skills for **delegating coding work to a separate CLI agent and landing it yours
 orchestrator) writes a self-contained brief, hands it to an implementer CLI, then reviews the diff and
 commits — staying the reviewer the whole way.
 
-The first skill, **`codex-delegate`**, drives the OpenAI Codex CLI.
+Two skills ship today: **`codex-delegate`** drives the OpenAI Codex CLI, and **`opencode-delegate`**
+drives the OpenCode CLI. Same loop, different implementer.
 
 ## Install
 
@@ -21,6 +22,7 @@ Install the package, or just one skill:
 ```bash
 npx skills add amElnagdy/delegate-skills
 npx skills add amElnagdy/delegate-skills --skill codex-delegate
+npx skills add amElnagdy/delegate-skills --skill opencode-delegate
 ```
 
 Install for a specific agent, or globally:
@@ -76,6 +78,17 @@ land, multi-task queues) loaded only when needed, and one small helper script.
 handed to Codex, comes back as a clean diff with a structured report, and you commit it after re-running
 the gates yourself instead of typing it all by hand.
 
+### opencode-delegate
+
+Drive the OpenCode CLI as a background implementer: write the brief, dispatch via `relay.mjs`, review
+the diff, commit it yourself. Same four references and loop as `codex-delegate`. Autonomy is set by the
+**agent** rather than a sandbox enum — `build` (write-capable) by default, `plan` (read-only) for
+review/diagnosis — and the brief is piped to `opencode run` on stdin so multi-line XML briefs need no
+quoting.
+
+**You'll feel it when:** a bounded task gets handed to OpenCode, comes back as a clean diff with a
+structured report and the run's cost, and you commit it after re-running the gates yourself.
+
 ### gemini-delegate
 
 *Planned.* A delegate skill for the Gemini CLI, if and when it gains a comparable non-interactive mode.
@@ -83,7 +96,10 @@ Reserved so the umbrella can grow without a rename.
 
 ## Requirements
 
-- The [`codex` CLI](https://github.com/openai/codex) installed and authenticated (`codex login`).
+- For `codex-delegate`: the [`codex` CLI](https://github.com/openai/codex) installed and authenticated
+  (`codex login`).
+- For `opencode-delegate`: the [`opencode` CLI](https://opencode.ai) installed and authenticated
+  (`opencode auth login`).
 - Node 18+ and `git`.
 - An orchestrating agent that can run shell commands and read files.
 - Shell examples assume bash/zsh (macOS/Linux, or Git Bash/WSL on Windows).
@@ -92,22 +108,32 @@ Reserved so the umbrella can grow without a rename.
 
 This package is intentionally inspectable:
 
-- All skill content is Markdown, plus exactly **one** executable: `skills/codex-delegate/scripts/relay.mjs`.
-- `relay.mjs` itself makes no network calls, reads or writes no credentials, sends no telemetry, and
-  has no dependencies (Node built-ins only). It shells out only to `codex` and `git`. The `codex`
-  process it launches authenticates exactly as you do at the terminal. Read the script before you run it.
-- It never commits — committing is always the orchestrator's job, after review.
+- All skill content is Markdown, plus exactly **one** executable per skill — each a `scripts/relay.mjs`.
+- Each `relay.mjs` makes no network calls, reads or writes no credentials, sends no telemetry, and has
+  no dependencies (Node built-ins only). It shells out only to its implementer CLI (`codex` /
+  `opencode`) and `git`. That CLI authenticates exactly as you do at the terminal. Read the script
+  before you run it.
+- Neither ever commits — committing is always the orchestrator's job, after review.
 
-**Verification status:** the relay's `codex` integration (flags, exit codes, `result.json`) is verified;
-the end-to-end loop is designed for and run on Claude Code, but not yet formally verified across a full
-delegate → review → commit cycle. Other orchestrators (OpenCode, Cursor, …) are designed-for but
-unproven. This line gets upgraded to "verified end-to-end" with evidence, not assumption.
+**Verification status:** the `codex-delegate` relay's integration (flags, exit codes, `result.json`) is
+verified, and the `opencode-delegate` relay is verified end-to-end against `opencode` v1.17.6 (fresh
+write run, read-only `plan` run, `--resume-last`, session id, cost, and final-message capture). For both,
+the full delegate → review → commit loop is designed for and run on Claude Code but not yet formally
+verified across other orchestrators (Cursor, …), which are designed-for but unproven.
 
 ## Repository shape
 
 ```text
 skills/
-└── codex-delegate/
+├── codex-delegate/
+│   ├── SKILL.md
+│   ├── scripts/relay.mjs
+│   └── references/
+│       ├── writing-the-brief.md
+│       ├── dispatch-and-poll.md
+│       ├── review-and-land.md
+│       └── multi-task-queues.md
+└── opencode-delegate/
     ├── SKILL.md
     ├── scripts/relay.mjs
     └── references/

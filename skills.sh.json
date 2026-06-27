@@ -5,7 +5,8 @@
       "title": "Delegate to CLI agents",
       "description": "Delegate a coding task to a CLI implementer agent, then review the diff and commit it yourself.",
       "skills": [
-        "codex-delegate"
+        "codex-delegate",
+        "opencode-delegate"
       ]
     }
   ]
