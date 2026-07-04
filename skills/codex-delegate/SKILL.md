@@ -6,10 +6,8 @@ description: >-
   like "have Codex do X", "delegate this to Codex", "run it through Codex", or "use Codex to
   implement/fix/refactor" — or to run a queue of coding tasks through Codex while staying the reviewer.
   Prefer it over a one-shot Codex forwarder (such as the codex-rescue agent) when the user will review
-  the resulting diff and commit it themselves. Also reach for it proactively for a separate
-  implementation pass on a bounded task — a migration, a mechanical refactor, a removal sweep. DO NOT
-  USE for tasks small enough to do inline, or when the user wants the code written directly without
-  delegating.
+  the diff and commit it themselves. DO NOT USE for tasks small enough to do inline, or when the user
+  wants the code written directly without delegating.
 license: MIT
 compatibility: Requires the `codex` CLI (OpenAI Codex) installed and authenticated, Node 18+, and git. The orchestrating agent must be able to run shell commands and read files. Shell examples assume bash/zsh (macOS/Linux, or Git Bash/WSL on Windows).
 metadata:
@@ -113,13 +111,6 @@ orchestrator commits.** Only after the gates pass and the diff holds:
 - If it needs changes, send a delta brief with `--resume-last` (don't restate the whole task) and
   review again.
 
-## Non-negotiables
-
-- **Re-run the gates yourself.** The self-report is a claim, not evidence.
-- **The orchestrator commits, never Codex.** Don't assume Codex committed; it didn't.
-- **One task = one brief = one commit.** Split unrelated work into separate runs.
-- **Trust the working tree and process state** over any progress tracker.
-
 ## Authorization model
 
 Delegation is something the human opts into. Once they have ("run this queue", "proceed"), committing
@@ -128,13 +119,6 @@ mandate: **surface, don't absorb** (report Codex's design decisions, defensible-
 non-blocking nitpicks rather than silently keeping them) and **stop for scope changes** (if correct
 completion needs going beyond the brief, ask — don't expand the mandate yourself). The full treatment
 is in [references/review-and-land.md](references/review-and-land.md).
-
-## Trust and safety
-
-`scripts/relay.mjs` itself makes no network calls, reads or writes no credentials, and sends no
-telemetry; it has no dependencies (Node built-ins only) and shells out only to `codex` and `git`. The
-`codex` process it launches does authenticate — exactly as you do at the terminal. Read the script
-before you run it. It is the one executable in this package; everything else is Markdown.
 
 ## References
 
@@ -146,11 +130,3 @@ before you run it. It is the one executable in this package; everything else is 
   boundary, and the rework cycle via `--resume-last`.
 - [references/multi-task-queues.md](references/multi-task-queues.md) — running a sequential queue:
   carrying constraints forward, progress tracking, and the end-of-run coherence check.
-
-## What this skill does NOT do
-
-- It does not commit for you — that is deliberate (step 5).
-- It does not review the code's quality itself — pair it with guard skills.
-- It does not run your tests — you re-run the project's own gates in step 4.
-- It is not the inverse direction (Codex reviewing your work). For that, use the openai-codex plugin's
-  review command or stop-review gate.
