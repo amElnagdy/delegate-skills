@@ -6,7 +6,7 @@
  * capture the run, and write a structured result the orchestrating agent can
  * review. The orchestrator runs this one command and reads the result JSON —
  * every OpenCode-specific mechanic lives in here, which keeps the skill
- * orchestrator-agnostic. Verified against opencode CLI v1.17.6.
+ * orchestrator-agnostic. Verified against opencode CLI v1.17.13.
  *
  * Trust posture: relay.mjs itself makes no network calls, reads or writes no
  * credentials, and sends no telemetry; it has no dependencies (Node built-ins

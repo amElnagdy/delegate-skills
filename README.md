@@ -36,13 +36,13 @@ Works with any orchestrating agent the [Skills CLI](https://github.com/vercel-la
 
 ## What it does
 
-The loop, for `codex-delegate`:
+The loop:
 
-1. **Write a brief** — a self-contained task spec; Codex sees only what you send.
-2. **Dispatch** it with the bundled `relay.mjs` (a thin `codex exec` wrapper).
+1. **Write a brief** — a self-contained task spec; the implementer sees only what you send.
+2. **Dispatch** it with the bundled `relay.mjs`.
 3. **Wait** for completion — the helper writes a structured `result.json`.
 4. **Review** the diff — re-run the project's gates yourself; pair with [guard skills](https://github.com/amElnagdy/guard-skills).
-5. **Land** it — *you* commit, because the implementer's sandbox can't reliably write `.git`.
+5. **Land** it — *you* commit, because committing belongs to the reviewer.
 
 ```text
 Use $codex-delegate to have Codex implement the refactor in services/billing/, then review and commit it.
