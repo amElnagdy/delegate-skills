@@ -240,7 +240,7 @@ function makeResultWriter(opts, version, run) {
 }
 
 function reportUnavailable(writeResult, resultPath) {
-  const result = writeResult({ status: "codex_unavailable", exitCode: 127, threadId: null, finalMessage: "", touchedFiles: [] });
+  const result = writeResult({ status: "codex_unavailable", exitCode: 127, threadId: null, finalMessage: "", touchedFiles: null });
   printSummary(result, resultPath);
   process.stderr.write("relay: `codex` not found on PATH. Install it (npm i -g @openai/codex) and run `codex login`.\n");
   process.exit(127);
