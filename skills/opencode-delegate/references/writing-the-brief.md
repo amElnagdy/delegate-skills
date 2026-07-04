@@ -8,22 +8,20 @@ OpenCode. The single most common failure is a brief that assumes context OpenCod
 
 ## Match the model to the brief
 
-OpenCode has no default model, so every fresh dispatch names one with `--model provider/model`. That is
-not friction — it is the lever an OpenCode backend gives you that a single-model implementer can't: you
-choose which model does *this* job.
+OpenCode has no default model, so every fresh dispatch names one with `--model provider/model`. Which
+model is a two-owner decision: the **human** owns which models are allowed to run; **you, the
+orchestrator**, pick one of them to fit the task in front of you.
 
-- **Read the task's difficulty off the brief you just wrote.** A mechanical, well-bounded brief — a
-  rename sweep, a `moment`→`date-fns` migration, a dead-code removal — is safe to send to a cheap, fast
-  model. A brief whose risk lives in judgment — a concurrency fix, a money or auth path, an ambiguous
-  spec — wants a strong model, because the sweep's failure modes (plausible-but-wrong logic, swallowed
-  errors) are exactly what a weaker model produces more of.
-- **Pick from what you actually pay a flat rate for.** `opencode models` lists a few hundred models, but
-  most bill per token (OpenRouter and the like) and the CLI does not mark which are your subscriptions.
-  Name a plan model you hold — e.g. `opencode-go/…`, `zai-coding-plan/…`, `minimax-coding-plan/…` —
-  rather than the first match, or a routine sweep quietly runs up a metered bill.
-- **Encode your defaults once.** List your go-to delegation models in the target repo's `AGENTS.md` or
-  your `CLAUDE.md` (e.g. "delegate mechanical work to X, hard logic to Y") so the orchestrator picks from
-  your real, paid set instead of guessing — and the choice stays consistent across runs.
+- **The allowed set is the human's to state.** `opencode models` lists a few hundred models, but most
+  bill per token (OpenRouter and the like) and the CLI does not mark which are the human's
+  subscriptions. So they name their usable models — ideally once, in the target repo's `AGENTS.md` or
+  their `CLAUDE.md` (e.g. `opencode-go/…`, `zai-coding-plan/…`, `minimax-coding-plan/…`). If they
+  haven't, ask before dispatching rather than guessing a model and risking a metered bill.
+- **Read the task's difficulty off the brief you just wrote, and match within that set.** A mechanical,
+  well-bounded brief — a rename sweep, a `moment`→`date-fns` migration, a dead-code removal — is safe on
+  a cheap, fast model. A brief whose risk lives in judgment — a concurrency fix, a money or auth path,
+  an ambiguous spec — wants a strong one, because the sweep's failure modes (plausible-but-wrong logic,
+  swallowed errors) are exactly what a weaker model produces more of.
 - **A resumed run keeps the first run's model.** `--resume-last` / `--session` don't take `--model`; the
   session already has one. Send only the delta brief.
 

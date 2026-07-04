@@ -42,18 +42,22 @@ orchestrators as designed-for, not yet proven.)
 
 ## Choose the implementer model
 
-OpenCode has **no safe default** — a bare `opencode run` errors, so the relay requires `--model` on
-every fresh run (a resumed run inherits its session's model). Picking the model is the point of an
-OpenCode backend, and it is yours to make:
+OpenCode has **no safe default** — a bare `opencode run` errors — so the relay requires `--model` on
+every fresh run (a resumed run inherits its session's model). Naming the model is the one decision a
+single-model backend like codex-delegate never had, and it has two owners:
 
-- **Match the model to the task** — a cheap, fast model for a mechanical sweep (rename, migration,
-  removal); a strong one for a subtle bug or a money/security path.
-- **Name a model you pay a flat rate for.** `opencode models` is a large catalog where most entries
-  meter you per token and the CLI can't flag which are your subscriptions — so choose deliberately (e.g.
-  an `opencode-go/*` or `zai-coding-plan/*` plan you hold), not the first match in the list.
-- **State your usable set once** in your own `AGENTS.md`/`CLAUDE.md` so the orchestrator picks from what
-  you actually have instead of guessing. More depth:
-  [references/writing-the-brief.md](references/writing-the-brief.md).
+- **The human owns which models are allowed.** `opencode models` lists hundreds of entries, most billed
+  per token (OpenRouter and the like); only the human knows which are their flat-rate subscriptions, and
+  the CLI can't tell them apart. So the usable set is theirs — ideally stated once in the repo's
+  `AGENTS.md` or their `CLAUDE.md` (e.g. "delegate mechanical work to `opencode-go/…`, hard logic to
+  `…`").
+- **You, the orchestrator, pick per task — from that set.** Match the model to the brief: a cheap, fast
+  model for a mechanical sweep (rename, migration, removal); a strong one for a subtle bug or a
+  money/security path.
+- **If no usable set is stated, ask — don't guess.** Guessing from the catalog risks a metered model and
+  a surprise bill. Name the constraint to the human and let them choose.
+
+More depth: [references/writing-the-brief.md](references/writing-the-brief.md).
 
 ## The loop
 
