@@ -35,8 +35,10 @@ orchestrators as designed-for, not yet proven.)
 
 ## Prerequisites (check once)
 
-1. `cursor-agent --version` succeeds. If not, install (`curl https://cursor.com/install -fsS | bash`;
-   Cursor's docs also list a native Windows PowerShell installer) and `cursor-agent login`.
+1. `cursor-agent --version` succeeds. If not, install it — download Cursor's installer and review it
+   before running (`curl -fsS https://cursor.com/install -o cursor-install.sh`, read the script, then
+   `bash cursor-install.sh`; Cursor's docs also list a native Windows PowerShell installer) — and
+   `cursor-agent login`.
 2. **Confirm which `cursor-agent` is on PATH.** The installer also links a plain `agent` alias — the
    relay invokes `cursor-agent`, so that name must resolve. `command -v cursor-agent` shows the active
    binary and `cursor-agent --version` its version. The relay records the version it ran into

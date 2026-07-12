@@ -95,7 +95,9 @@ process has exited and `result.json` is written — not when a status line says 
 ## When a run misbehaves
 
 - **`status: cursor_agent_unavailable` (exit 127):** `cursor-agent` isn't on PATH or isn't found.
-  Install (`curl https://cursor.com/install -fsS | bash`) and `cursor-agent login`, then re-dispatch.
+  Install it — download Cursor's installer and review it before running (`curl -fsS
+  https://cursor.com/install -o cursor-install.sh`, read it, then `bash cursor-install.sh`) — then
+  `cursor-agent login` and re-dispatch.
 - **`status: failed` with a "timed out after …" `error`:** the run exceeded the relay's `--timeout`
   budget (default 60m) and was terminated. Re-dispatch with a bigger `--timeout`, or split the brief
   into smaller tasks.

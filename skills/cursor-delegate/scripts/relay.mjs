@@ -257,7 +257,7 @@ function makeResultWriter(opts, version, run) {
 function reportUnavailable(writeResult, resultPath) {
   const result = writeResult({ status: "cursor_agent_unavailable", exitCode: 127, sessionId: null, finalMessage: "", touchedFiles: null, usage: null });
   printSummary(result, resultPath);
-  process.stderr.write("relay: `cursor-agent` not found on PATH. Install it (curl https://cursor.com/install -fsS | bash) and run `cursor-agent login`.\n");
+  process.stderr.write("relay: `cursor-agent` not found on PATH. Install it (see https://cursor.com/docs/cli — download the installer and review it before running) and run `cursor-agent login`.\n");
   process.exit(127);
 }
 

@@ -258,7 +258,7 @@ function makeResultWriter(opts, version, run) {
 function reportUnavailable(writeResult, resultPath) {
   const result = writeResult({ status: "agy_unavailable", exitCode: 127, conversationId: null, finalMessage: "", touchedFiles: null });
   printSummary(result, resultPath);
-  process.stderr.write("relay: `agy` not found on PATH. Install the Antigravity CLI (curl -fsSL https://antigravity.google/cli/install.sh | bash) and sign in on first run.\n");
+  process.stderr.write("relay: `agy` not found on PATH. Install the Antigravity CLI (see https://antigravity.google/docs/cli-install — download the installer and review it before running) and sign in on first run.\n");
   process.exit(127);
 }
 

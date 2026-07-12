@@ -39,8 +39,10 @@ orchestrators as designed-for, not yet proven.)
 
 ## Prerequisites (check once)
 
-1. `agy --version` succeeds. If not, install (`curl -fsSL https://antigravity.google/cli/install.sh |
-   bash`; Antigravity's docs also list native Windows installers) and sign in on first run.
+1. `agy --version` succeeds. If not, install it — download the installer and review it before running
+   (`curl -fsSL https://antigravity.google/cli/install.sh -o agy-install.sh`, read the script, then
+   `bash agy-install.sh`; Antigravity's docs also list native Windows installers) — and sign in on
+   first run.
 2. **Confirm which `agy` is on PATH.** `command -v agy` shows the active binary and `agy --version` its
    version. The relay records the version it ran into `result.json`, so a stale binary is visible after
    the fact.

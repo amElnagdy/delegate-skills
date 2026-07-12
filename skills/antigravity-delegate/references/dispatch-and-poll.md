@@ -90,9 +90,9 @@ process has exited and `result.json` is written — not when a status line says 
 
 ## When a run misbehaves
 
-- **`status: agy_unavailable` (exit 127):** `agy` isn't on PATH or isn't found. Install
-  (`curl -fsSL https://antigravity.google/cli/install.sh | bash`), sign in on first run, then
-  re-dispatch.
+- **`status: agy_unavailable` (exit 127):** `agy` isn't on PATH or isn't found. Install it — download
+  the installer and review it before running (`curl -fsSL https://antigravity.google/cli/install.sh -o
+  agy-install.sh`, read it, then `bash agy-install.sh`) — sign in on first run, then re-dispatch.
 - **`status: failed` with "timeout waiting for response" in `stderrTail` or `finalMessage`:** the run
   exceeded its `--print-timeout` budget (relay default 60m). Re-dispatch with a bigger `--timeout`, or
   split the brief into smaller tasks.
