@@ -6,8 +6,9 @@ Skills for **delegating coding work to a separate CLI agent and landing it yours
 orchestrator) writes a self-contained brief, hands it to an implementer CLI, then reviews the diff and
 commits — staying the reviewer the whole way.
 
-Two skills ship today: **`codex-delegate`** drives the OpenAI Codex CLI, and **`opencode-delegate`**
-drives the OpenCode CLI. Same loop, different implementer.
+Four skills ship today: **`codex-delegate`** drives the OpenAI Codex CLI, **`opencode-delegate`**
+drives the OpenCode CLI, **`cursor-delegate`** drives the Cursor CLI, and **`antigravity-delegate`**
+drives Google's Antigravity CLI. Same loop, different implementer.
 
 ## Install
 
@@ -23,6 +24,8 @@ Install the package, or just one skill:
 npx skills add amElnagdy/delegate-skills
 npx skills add amElnagdy/delegate-skills --skill codex-delegate
 npx skills add amElnagdy/delegate-skills --skill opencode-delegate
+npx skills add amElnagdy/delegate-skills --skill cursor-delegate
+npx skills add amElnagdy/delegate-skills --skill antigravity-delegate
 ```
 
 Install for a specific agent, or globally:
@@ -89,10 +92,43 @@ quoting.
 **You'll feel it when:** a bounded task gets handed to OpenCode, comes back as a clean diff with a
 structured report and the run's cost, and you commit it after re-running the gates yourself.
 
+### cursor-delegate
+
+Drive the Cursor CLI (`cursor-agent`) as a background implementer: write the brief, dispatch via
+`relay.mjs`, review the diff, commit it yourself. Same four references and loop as its siblings.
+Headless permissions have two switches, and the relay sets both: file edits apply without prompting,
+and `--force` (the relay default) lets approval-gated shell commands auto-run so the brief's gate
+commands actually execute. `--read-only` maps to cursor-agent's `plan` mode, which is **enforced** —
+a plan run cannot write the tree. The brief is piped on stdin, so multi-line XML briefs need no quoting.
+
+**You'll feel it when:** a bounded task gets handed to Cursor, comes back as a clean diff with a
+structured report, the session id for rework, and the run's token usage — and you commit it after
+re-running the gates yourself.
+
+### antigravity-delegate
+
+Drive Google's Antigravity CLI (`agy`) as a background implementer: write the brief, dispatch via
+`relay.mjs`, review the diff, commit it yourself. Same four references and loop as its siblings, with
+two verified agy quirks encoded: the relay always adds the working root to agy's workspace
+(`--add-dir` — without it agy edits its own scratch directory, not the repo), and it offers **no
+`--read-only` flag** because agy has no enforced read-only mode (`--mode plan` can still write the
+tree). It also raises agy's 5-minute print timeout to a delegation-sized default.
+
+**You'll feel it when:** a bounded task gets handed to Antigravity, comes back as a clean diff with a
+structured report and the conversation id for rework — and you commit it after re-running the gates
+yourself.
+
 ### gemini-delegate
 
 *Planned.* A delegate skill for the Gemini CLI, if and when it gains a comparable non-interactive mode.
 Reserved so the umbrella can grow without a rename.
+
+### What about ZCode?
+
+No skill — for now, deliberately. Z.ai's ZCode is a desktop app with no CLI or headless mode, so there
+is nothing for a relay to drive. Its GLM models are still reachable for delegation today through
+`opencode-delegate` (pick a GLM model with `--model`). If ZCode ships an official CLI, a
+`zcode-delegate` sibling can join without a rename.
 
 ## Requirements
 
@@ -100,6 +136,11 @@ Reserved so the umbrella can grow without a rename.
   (`codex login`).
 - For `opencode-delegate`: the [`opencode` CLI](https://opencode.ai) installed and authenticated
   (`opencode auth login`).
+- For `cursor-delegate`: the [`cursor-agent` CLI](https://cursor.com/docs/cli) installed and
+  authenticated (`cursor-agent login`). The installer links the same binary as both `cursor-agent` and
+  `agent`; the relay invokes `cursor-agent`, so that name must resolve.
+- For `antigravity-delegate`: the [`agy` CLI](https://antigravity.google/docs/cli-install) installed
+  and signed in with a Google account (first run opens the sign-in flow).
 - Node 18+ and `git`.
 - An orchestrating agent that can run shell commands and read files.
 - Shell examples assume bash/zsh (macOS/Linux, or Git Bash/WSL on Windows).
@@ -111,16 +152,24 @@ This package is intentionally inspectable:
 - All skill content is Markdown, plus exactly **one** executable per skill — each a `scripts/relay.mjs`.
 - Each `relay.mjs` makes no network calls, reads or writes no credentials, sends no telemetry, and has
   no dependencies (Node built-ins only). It shells out only to its implementer CLI (`codex` /
-  `opencode`) and `git`. That CLI authenticates exactly as you do at the terminal. Read the script
-  before you run it.
-- Neither ever commits — committing is always the orchestrator's job, after review.
+  `opencode` / `cursor-agent` / `agy`) and `git`. (The `antigravity-delegate` relay additionally reads
+  one local agy cache file — the per-directory conversation-id map — so `result.json` can carry the id
+  for a later resume.) That CLI authenticates exactly as you do at the terminal. Read the script before
+  you run it.
+- None of them ever commits — committing is always the orchestrator's job, after review.
 
 **Verification status:** each relay's mechanics are verified — argument handling, exit codes,
 `result.json`, resume, and (for `opencode-delegate`) the required-model guard, since OpenCode has no safe
-default. The full delegate → review → commit loop is designed for and run on Claude Code but not yet
-formally verified end-to-end here (OpenCode's cold start is slow in constrained shells, so exercise a
-real run in a normal terminal). Other orchestrators (Cursor, …) are designed-for but unproven. This line
-gets upgraded to "verified end-to-end" with evidence, not assumption.
+default. For `cursor-delegate` and `antigravity-delegate` the dispatch mechanics were verified with live
+runs against `cursor-agent` 2026.07.09 and `agy` 1.1.1: headless write runs, resume, result capture,
+plan-mode read-only enforcement (Cursor — enforced; Antigravity — **not** enforced, which is why its
+relay refuses `--read-only`), and agy's scratch-directory behavior without `--add-dir`. Those live runs
+were on macOS: **native Windows smoke testing has not been performed**, so the win32 launch paths (the
+`shell:true` handling in the `codex`, `opencode`, and `cursor-agent` relays, and the shell-less `agy`
+launch) remain designed-for but unverified. The full delegate → review → commit loop is designed for
+and run on Claude Code but not yet formally verified end-to-end here on a real task. Other
+orchestrators are designed-for but unproven. This line gets upgraded to "verified end-to-end" with
+evidence, not assumption.
 
 ## Repository shape
 
@@ -134,14 +183,18 @@ skills/
 │       ├── dispatch-and-poll.md
 │       ├── review-and-land.md
 │       └── multi-task-queues.md
-└── opencode-delegate/
+├── opencode-delegate/
+│   ├── SKILL.md
+│   ├── scripts/relay.mjs
+│   └── references/ (same four)
+├── cursor-delegate/
+│   ├── SKILL.md
+│   ├── scripts/relay.mjs
+│   └── references/ (same four)
+└── antigravity-delegate/
     ├── SKILL.md
     ├── scripts/relay.mjs
-    └── references/
-        ├── writing-the-brief.md
-        ├── dispatch-and-poll.md
-        ├── review-and-land.md
-        └── multi-task-queues.md
+    └── references/ (same four)
 ```
 
 The `SKILL.md` stays small so it loads cheaply; the references load only when the task needs them.
