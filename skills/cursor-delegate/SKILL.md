@@ -83,9 +83,10 @@ use that same directory — if unsure where it landed, run
 
 ```bash
 node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
-# pick a model explicitly:                 add --model <name>   (default: the account's configured model)
-# read-only (review/diagnosis, no edits):  add --read-only      (cursor-agent's enforced plan mode)
-# continue the previous session:           add --resume-last    (delta brief only)
+# pick a model explicitly:                 add --model <name>       (default: the account's configured model)
+# read-only (review/diagnosis, no edits):  add --read-only          (cursor-agent's enforced plan mode)
+# continue the previous session:           add --resume-last        (delta brief only)
+# longer/shorter run budget:               add --timeout <duration> (default 60m, relay-enforced)
 # see all options:                         node .../relay.mjs --help
 ```
 

@@ -36,6 +36,7 @@ Options:
 | `--no-force` | The relay passes cursor-agent's `--force` (auto-run approval-gated shell commands) **by default** so the brief's gate commands actually execute; `--no-force` drops it, and such commands are then refused rather than prompted (a headless run never prompts). Headless **file edits are applied either way** — `--force` only governs commands. A `--read-only` run never gets `--force`. |
 | `--resume-last` | Continue the most recent cursor-agent session; send only the delta brief (see review-and-land). |
 | `--session <id>` | Continue a specific session id; send only the delta brief. |
+| `--timeout <duration>` | Run budget, Go duration format (e.g. `90s`, `45m`, `2h`). Default `60m`. cursor-agent has no timeout flag of its own, so the relay terminates a run that exceeds the budget and reports it `failed`. |
 | `--out-dir <dir>` | Where artifacts go (default: a fresh dir under the system temp dir). |
 
 Every run also gets cursor-agent's `--trust` — without it, a dispatch into a not-yet-trusted workspace
@@ -95,6 +96,9 @@ process has exited and `result.json` is written — not when a status line says 
 
 - **`status: cursor_agent_unavailable` (exit 127):** `cursor-agent` isn't on PATH or isn't found.
   Install (`curl https://cursor.com/install -fsS | bash`) and `cursor-agent login`, then re-dispatch.
+- **`status: failed` with a "timed out after …" `error`:** the run exceeded the relay's `--timeout`
+  budget (default 60m) and was terminated. Re-dispatch with a bigger `--timeout`, or split the brief
+  into smaller tasks.
 - **`status: failed`:** read `result.json`'s `stderrTail` and the tail of `eventsPath` for the cause.
   Common causes: an auth lapse (`cursor-agent status`), or an unknown `--model` — cursor-agent rejects
   it up front and lists the valid names. Fix the cause and re-dispatch; don't paper over it by doing

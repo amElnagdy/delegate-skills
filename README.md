@@ -137,7 +137,8 @@ is nothing for a relay to drive. Its GLM models are still reachable for delegati
 - For `opencode-delegate`: the [`opencode` CLI](https://opencode.ai) installed and authenticated
   (`opencode auth login`).
 - For `cursor-delegate`: the [`cursor-agent` CLI](https://cursor.com/docs/cli) installed and
-  authenticated (`cursor-agent login`).
+  authenticated (`cursor-agent login`). The installer links the same binary as both `cursor-agent` and
+  `agent`; the relay invokes `cursor-agent`, so that name must resolve.
 - For `antigravity-delegate`: the [`agy` CLI](https://antigravity.google/docs/cli-install) installed
   and signed in with a Google account (first run opens the sign-in flow).
 - Node 18+ and `git`.
@@ -162,10 +163,13 @@ This package is intentionally inspectable:
 default. For `cursor-delegate` and `antigravity-delegate` the dispatch mechanics were verified with live
 runs against `cursor-agent` 2026.07.09 and `agy` 1.1.1: headless write runs, resume, result capture,
 plan-mode read-only enforcement (Cursor — enforced; Antigravity — **not** enforced, which is why its
-relay refuses `--read-only`), and agy's scratch-directory behavior without `--add-dir`. The full
-delegate → review → commit loop is designed for and run on Claude Code but not yet formally verified
-end-to-end here on a real task. Other orchestrators are designed-for but unproven. This line gets
-upgraded to "verified end-to-end" with evidence, not assumption.
+relay refuses `--read-only`), and agy's scratch-directory behavior without `--add-dir`. Those live runs
+were on macOS: **native Windows smoke testing has not been performed**, so the win32 launch paths (the
+`shell:true` handling in the `codex`, `opencode`, and `cursor-agent` relays, and the shell-less `agy`
+launch) remain designed-for but unverified. The full delegate → review → commit loop is designed for
+and run on Claude Code but not yet formally verified end-to-end here on a real task. Other
+orchestrators are designed-for but unproven. This line gets upgraded to "verified end-to-end" with
+evidence, not assumption.
 
 ## Repository shape
 

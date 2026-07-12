@@ -44,6 +44,9 @@
  *   --resume-last           Continue the most recent cursor-agent session; send only the
  *                           delta brief.
  *   --session <id>          Continue a specific session id; send only the delta brief.
+ *   --timeout <duration>    Run budget, Go duration format (e.g. 90s, 45m, 2h; default: 60m).
+ *                           cursor-agent has no timeout flag of its own, so the relay
+ *                           terminates a run that exceeds the budget and reports it failed.
  *   --out-dir <dir>         Where to write run artifacts (default: a fresh dir under
  *                           the system temp dir, so the repo under review stays clean).
  *   -h, --help              Show this help.
@@ -82,6 +85,7 @@ function parseArgs(argv) {
     force: true,
     resumeLast: false,
     session: null,
+    timeout: "60m",
     outDir: null,
   };
   for (let i = 0; i < argv.length; i += 1) {
@@ -106,6 +110,7 @@ function parseArgs(argv) {
       case "--no-force": opts.force = false; break;
       case "--resume-last": opts.resumeLast = true; break;
       case "--session": opts.session = next(); break;
+      case "--timeout": opts.timeout = next(); break;
       case "--out-dir": opts.outDir = resolve(next()); break;
       default:
         fail(`unknown option: ${arg}`);
@@ -147,6 +152,17 @@ function cursorAgentVersion() {
   } catch {
     return null;
   }
+}
+
+function parseDurationMs(text) {
+  // Go duration format, same as the sibling agy relay's --timeout: "90s", "45m",
+  // "2h", "1h30m". Returns milliseconds, or null when the text doesn't parse.
+  if (!/^(\d+[hms])+$/.test(text)) return null;
+  let ms = 0;
+  for (const [, count, unit] of text.matchAll(/(\d+)([hms])/g)) {
+    ms += Number(count) * (unit === "h" ? 3600000 : unit === "m" ? 60000 : 1000);
+  }
+  return ms;
 }
 
 function gitTouchedFiles(cwd) {
@@ -223,6 +239,7 @@ function makeResultWriter(opts, version, run) {
       mode: opts.readOnly ? "plan" : "default",
       force: opts.force && !opts.readOnly,
       model: opts.model,
+      timeout: opts.timeout,
       resumeLast: opts.resumeLast,
       cursorAgentVersion: version,
       startedAt: run.startedAt,
@@ -253,7 +270,8 @@ function dispatchToCursorAgent(opts, brief, run, writeResult) {
   // shell:true on win32 for parity with a shim-wrapped install (see
   // cursorAgentVersion). Safe: the brief is fed via child.stdin below — never
   // argv — and argv holds only flag names, a mode enum, a model string, and a
-  // session id, with no shell metacharacters or spaceable paths.
+  // session id; main() rejects whitespace in the user-provided values on win32,
+  // where the shell would split them.
   const child = spawn("cursor-agent", argv, {
     cwd: opts.cd,
     env: { ...process.env, PWD: opts.cd },
@@ -267,6 +285,17 @@ function dispatchToCursorAgent(opts, brief, run, writeResult) {
   const assistantParts = [];
   const stderrTail = [];
   let stdoutBuf = "";
+
+  // cursor-agent has no run-budget flag of its own (agy has --print-timeout), so
+  // the relay enforces one: past the budget the child is terminated and the run
+  // reported failed. On win32 with shell:true this kills the wrapping shell;
+  // ponytail: a detached grandchild could survive — acceptable for a budget
+  // whose job is unblocking the orchestrator, not process hygiene.
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    child.kill("SIGTERM");
+  }, opts.timeoutMs);
 
   const handleEvent = (event) => {
     if (event.session_id) sessionId = event.session_id;
@@ -314,21 +343,24 @@ function dispatchToCursorAgent(opts, brief, run, writeResult) {
   };
 
   child.on("error", (err) => {
+    clearTimeout(timer);
     const result = writeResult({ status: "failed", exitCode: 1, sessionId, finalMessage: assembleFinal(), touchedFiles: gitTouchedFiles(opts.cd), usage: null, error: String(err && err.message ? err.message : err) });
     printSummary(result, run.resultPath);
     process.exit(1);
   });
 
   child.on("close", (code) => {
+    clearTimeout(timer);
     if (stdoutBuf.trim()) {
       appendFileSync(run.eventsPath, `${stdoutBuf}\n`, "utf8");
       try { handleEvent(JSON.parse(stdoutBuf)); } catch { /* non-JSON tail; kept in events.jsonl */ }
     }
     const finalMessage = assembleFinal();
     // A run can exit 0 yet report is_error in its result event; treat either
-    // signal as failure so the orchestrator never mistakes it for success.
+    // signal — or a relay-enforced timeout — as failure so the orchestrator
+    // never mistakes it for success.
     const isError = Boolean(resultEvent && resultEvent.is_error);
-    const failed = code !== 0 || isError;
+    const failed = code !== 0 || isError || timedOut;
     const result = writeResult({
       status: failed ? "failed" : "completed",
       exitCode: code === null ? 1 : code,
@@ -337,6 +369,7 @@ function dispatchToCursorAgent(opts, brief, run, writeResult) {
       finalMessage,
       touchedFiles: gitTouchedFiles(opts.cd),
       usage: resultEvent && resultEvent.usage ? resultEvent.usage : null,
+      ...(timedOut ? { error: `timed out after ${opts.timeout}; the run was terminated (re-dispatch with a bigger --timeout, or split the brief)` } : {}),
       ...(failed ? { stderrTail: stderrTail.slice(-20) } : {}),
     });
     printSummary(result, run.resultPath);
@@ -358,6 +391,20 @@ function main() {
   // contradiction, and buildArgv would silently prefer --session. Reject it rather than guess.
   if (opts.session && opts.resumeLast) {
     fail("--session and --resume-last are mutually exclusive; pass only one");
+  }
+  opts.timeoutMs = parseDurationMs(opts.timeout);
+  if (opts.timeoutMs === null || opts.timeoutMs <= 0) {
+    fail(`invalid --timeout "${opts.timeout}" (Go duration format, e.g. 90s, 45m, 2h)`);
+  }
+  // On win32 the launch goes through a shell (see dispatchToCursorAgent), which
+  // would split a value containing whitespace. Cursor model ids and session ids
+  // never legitimately contain it, so reject early instead of mangling silently.
+  if (process.platform === "win32") {
+    for (const [flag, value] of [["--model", opts.model], ["--session", opts.session]]) {
+      if (value && /\s/.test(value)) {
+        fail(`${flag} value contains whitespace, which the win32 shell launch would split: "${value}"`);
+      }
+    }
   }
 
   const version = cursorAgentVersion();

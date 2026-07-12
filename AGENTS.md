@@ -58,9 +58,11 @@ CLI flag, field, and command in the docs must match the installed implementer CL
   `--read-only` run against a throwaway repo) before relying on it.
 - If you touch how a `relay.mjs` launches its implementer CLI, smoke-test on Windows too (native
   PowerShell/cmd, not just Git Bash/WSL): the `codex` and `opencode` launches need `shell:true` on
-  win32 to resolve the `.cmd` shim. The `agy` launch must **never** get `shell:true` — the brief
-  travels in argv (agy takes the prompt as the `--print` value, not on stdin), and agy is a real
-  native binary on every platform.
+  win32 to resolve the `.cmd` shim, and the `cursor-agent` launch keeps `shell:true` on win32 too (its
+  official installer ships a real binary, but the flag also resolves any shim-wrapped install; its argv
+  is guarded against whitespace on win32 for that reason). The `agy` launch must **never** get
+  `shell:true` — the brief travels in argv (agy takes the prompt as the `--print` value, not on
+  stdin), and agy is a real native binary on every platform.
 - Keep the README's "Verification status" honest — claim only what's been run.
 
 ## Local Claude Code config
