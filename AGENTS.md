@@ -2,8 +2,9 @@
 
 This repo is a [Skills CLI](https://github.com/vercel-labs/skills) package of **delegation skills** —
 skills that let an orchestrating agent drive a separate CLI coding agent as an implementer, then review
-and land the result. Two skills ship today: `codex-delegate` (OpenAI Codex) and `opencode-delegate`
-(OpenCode); siblings like `gemini-delegate` can be added later without renaming the repo.
+and land the result. Four skills ship today: `codex-delegate` (OpenAI Codex), `opencode-delegate`
+(OpenCode), `cursor-delegate` (Cursor CLI), and `antigravity-delegate` (Google Antigravity CLI);
+siblings like `gemini-delegate` can be added later without renaming the repo.
 
 ## Vocabulary
 
@@ -14,7 +15,7 @@ jargon. Use these terms; don't invent synonyms.
 | --- | --- | --- |
 | **delegate** / **delegation** | the activity, and this skill family | "relay" (as the activity), "hand-off", "offload" |
 | **orchestrator** | the driving agent (Claude Code, …) | "controller", "driver" |
-| **implementer** | the worker agent (Codex, OpenCode) | "worker", "sub-agent", "executor" |
+| **implementer** | the worker agent (Codex, OpenCode, Cursor, Antigravity) | "worker", "sub-agent", "executor" |
 | **brief** | the self-contained task spec sent to the implementer | "task file", "the prompt", "the spec" |
 | **gates** | the project's test/lint/build commands | "checks", "CI" |
 | **dispatch** | sending the brief to the implementer | "fire off", "kick off" |
@@ -22,6 +23,8 @@ jargon. Use these terms; don't invent synonyms.
 | **relay** / `relay.mjs` | the dispatch **script** only | never a *category* of skills |
 | `exec`, `sandbox`, `resume`, `session` | Codex's own terms — use verbatim | don't paraphrase them |
 | `run`, `agent` (`build`/`plan`), `session` | OpenCode's own terms — use verbatim | "sandbox" (OpenCode has no sandbox enum; autonomy is the agent) |
+| `--print`, `--force`, `--trust`, `--mode` (`plan`/`ask`), `session` | Cursor CLI's own terms — use verbatim; the binary is `cursor-agent` | "yolo" (an alias; docs use `--force`) |
+| `--print`, `--add-dir`, `workspace`, `conversation`, `--dangerously-skip-permissions` | Antigravity CLI's own terms — use verbatim; the binary is `agy` | "session" (agy's term is conversation); any claim that `--mode plan` is read-only (verified: it is not enforced) |
 
 Banned on sight: coined umbrella terms in user-facing surfaces (README headings, `skills.sh.json`
 titles); any reference to the author's local machine or config; model/version pins (`GPT-5.x` →
@@ -42,10 +45,11 @@ CLI flag, field, and command in the docs must match the installed implementer CL
   the skill otherwise.
 - **Progressive disclosure:** keep `SKILL.md` lean; push depth into `references/*.md` that load only
   when needed.
-- **Executables:** keep them minimal and inspectable. Today there is one per skill —
-  `skills/codex-delegate/scripts/relay.mjs` and `skills/opencode-delegate/scripts/relay.mjs` — each
-  Node built-ins only, no dependencies, no network calls of its own, no credentials, no telemetry. New
-  scripts must hold the same line, and the README's trust section must stay accurate.
+- **Executables:** keep them minimal and inspectable. Today there is one per skill — each skill's
+  `scripts/relay.mjs` — each Node built-ins only, no dependencies, no network calls of its own, no
+  credentials, no telemetry. (The `antigravity-delegate` relay additionally reads agy's local
+  conversation-id cache; any such read must be disclosed in the relay header and the README's trust
+  section.) New scripts must hold the same line, and the README's trust section must stay accurate.
 
 ## Before publishing a change
 
@@ -53,8 +57,10 @@ CLI flag, field, and command in the docs must match the installed implementer CL
 - Smoke-test any changed script directly (e.g. `node skills/<skill>/scripts/relay.mjs --help`, and a
   `--read-only` run against a throwaway repo) before relying on it.
 - If you touch how a `relay.mjs` launches its implementer CLI, smoke-test on Windows too (native
-  PowerShell/cmd, not just Git Bash/WSL): both the `codex` and `opencode` launches need `shell:true` on
-  win32 to resolve the `.cmd` shim.
+  PowerShell/cmd, not just Git Bash/WSL): the `codex` and `opencode` launches need `shell:true` on
+  win32 to resolve the `.cmd` shim. The `agy` launch must **never** get `shell:true` — the brief
+  travels in argv (agy takes the prompt as the `--print` value, not on stdin), and agy is a real
+  native binary on every platform.
 - Keep the README's "Verification status" honest — claim only what's been run.
 
 ## Local Claude Code config
