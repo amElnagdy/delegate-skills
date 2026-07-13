@@ -6,8 +6,9 @@ Skills for **delegating coding work to a separate CLI agent and landing it yours
 orchestrator) writes a self-contained brief, hands it to an implementer CLI, then reviews the diff and
 commits — staying the reviewer the whole way.
 
-Two skills ship today: **`codex-delegate`** drives the OpenAI Codex CLI, and **`opencode-delegate`**
-drives the OpenCode CLI. Same loop, different implementer.
+Three skills ship today: **`codex-delegate`** drives the OpenAI Codex CLI, **`opencode-delegate`**
+drives the OpenCode CLI, and **`grok-delegate`** drives the Grok Build CLI. Same loop, different
+implementer.
 
 ## Install
 
@@ -23,6 +24,7 @@ Install the package, or just one skill:
 npx skills add amElnagdy/delegate-skills
 npx skills add amElnagdy/delegate-skills --skill codex-delegate
 npx skills add amElnagdy/delegate-skills --skill opencode-delegate
+npx skills add amElnagdy/delegate-skills --skill grok-delegate
 ```
 
 Install for a specific agent, or globally:
@@ -89,6 +91,17 @@ quoting.
 **You'll feel it when:** a bounded task gets handed to OpenCode, comes back as a clean diff with a
 structured report and the run's cost, and you commit it after re-running the gates yourself.
 
+### grok-delegate
+
+Drive the Grok Build CLI (`grok`) as a background implementer: write the brief, dispatch via
+`relay.mjs`, review the diff, commit it yourself. Same four references and loop as the siblings.
+Autonomy is set explicitly because Grok's default is `ask` (which would hang a headless pipe) —
+default is `--always-approve --sandbox workspace`, `--read-only` uses `--sandbox read-only`, and
+`--full-access` is the unrestricted opt-in.
+
+**You'll feel it when:** a bounded task gets handed to Grok Build, comes back as a clean diff with a
+structured report, and you commit it after re-running the gates yourself.
+
 ### gemini-delegate
 
 *Planned.* A delegate skill for the Gemini CLI, if and when it gains a comparable non-interactive mode.
@@ -100,6 +113,8 @@ Reserved so the umbrella can grow without a rename.
   (`codex login`).
 - For `opencode-delegate`: the [`opencode` CLI](https://opencode.ai) installed and authenticated
   (`opencode auth login`).
+- For `grok-delegate`: the [`grok` CLI](https://x.ai/cli) (Grok Build) installed and authenticated
+  (`grok login`, or `XAI_API_KEY`; beta access needs an eligible xAI subscription).
 - Node 18+ and `git`.
 - An orchestrating agent that can run shell commands and read files.
 - Shell examples assume bash/zsh (macOS/Linux, or Git Bash/WSL on Windows).
@@ -111,16 +126,19 @@ This package is intentionally inspectable:
 - All skill content is Markdown, plus exactly **one** executable per skill — each a `scripts/relay.mjs`.
 - Each `relay.mjs` makes no network calls, reads or writes no credentials, sends no telemetry, and has
   no dependencies (Node built-ins only). It shells out only to its implementer CLI (`codex` /
-  `opencode`) and `git`. That CLI authenticates exactly as you do at the terminal. Read the script
-  before you run it.
-- Neither ever commits — committing is always the orchestrator's job, after review.
+  `opencode` / `grok`) and `git`. That CLI authenticates exactly as you do at the terminal. Read the
+  script before you run it.
+- None of them ever commit — committing is always the orchestrator's job, after review.
 
 **Verification status:** each relay's mechanics are verified — argument handling, exit codes,
 `result.json`, resume, and (for `opencode-delegate`) the required-model guard, since OpenCode has no safe
-default. The full delegate → review → commit loop is designed for and run on Claude Code but not yet
-formally verified end-to-end here (OpenCode's cold start is slow in constrained shells, so exercise a
-real run in a normal terminal). Other orchestrators (Cursor, …) are designed-for but unproven. This line
-gets upgraded to "verified end-to-end" with evidence, not assumption.
+default. For `grok-delegate`, relay mechanics (arg handling, exit codes, `result.json`, autonomy flag
+assembly, resume/session mutual exclusion, missing-binary `grok_unavailable`) are exercised; a full
+authenticated `grok -p` end-to-end run is not claimed here (Grok Build is beta-gated). The full
+delegate → review → commit loop is designed for and run on Claude Code but not yet formally verified
+end-to-end here (OpenCode's cold start is slow in constrained shells, so exercise a real run in a
+normal terminal). Other orchestrators (Cursor, …) are designed-for but unproven. This line gets
+upgraded to "verified end-to-end" with evidence, not assumption.
 
 ## Repository shape
 
@@ -134,7 +152,15 @@ skills/
 │       ├── dispatch-and-poll.md
 │       ├── review-and-land.md
 │       └── multi-task-queues.md
-└── opencode-delegate/
+├── opencode-delegate/
+│   ├── SKILL.md
+│   ├── scripts/relay.mjs
+│   └── references/
+│       ├── writing-the-brief.md
+│       ├── dispatch-and-poll.md
+│       ├── review-and-land.md
+│       └── multi-task-queues.md
+└── grok-delegate/
     ├── SKILL.md
     ├── scripts/relay.mjs
     └── references/
