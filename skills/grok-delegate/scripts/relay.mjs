@@ -2,13 +2,13 @@
 /**
  * delegate-skills · grok-delegate · relay.mjs
  *
- * Dispatch a self-contained brief to the Grok Build CLI (`grok -p`),
+ * Dispatch a self-contained brief to the Grok Build CLI (`grok --prompt-file`),
  * capture the run, and write a structured result the orchestrating agent can
  * review. The orchestrator runs this one command and reads the result JSON —
  * every Grok-specific mechanic lives in here, which keeps the skill
- * orchestrator-agnostic. Designed against the Grok Build headless docs; other
- * shell-capable agents (Claude Code, Cursor, …) are designed-for but not yet
- * verified end-to-end here.
+ * orchestrator-agnostic. Verified end-to-end on macOS against grok 0.2.101;
+ * other shell-capable agents (Claude Code, Cursor, …) are designed-for but not
+ * yet verified there.
  *
  * Trust posture: relay.mjs itself makes no network calls, reads or writes no
  * credentials, and sends no telemetry; it has no dependencies (Node built-ins
@@ -22,8 +22,18 @@
  * Grok's default permission mode is `ask`, which blocks on approval prompts in
  * a non-interactive pipe. The relay therefore sets autonomy explicitly:
  *   default        — `--always-approve --sandbox workspace` (write in CWD)
- *   --read-only    — `--sandbox read-only --permission-mode plan` (no edits)
+ *   --read-only    — `--sandbox read-only --permission-mode plan` (review intent)
  *   --full-access  — `--always-approve --sandbox off` (unrestricted; opt-in)
+ *
+ * `--read-only` is best-effort, NOT a hard guarantee: on grok 0.2.101 the
+ * read-only sandbox governs out-of-workspace filesystem/network access, not the
+ * agent's own edit tool, and headless `plan` mode is advisory — a determined run
+ * can still write the working tree. Always confirm `touchedFiles` after a
+ * read-only run; don't rely on the flag alone.
+ *
+ * The brief is handed to grok via `--prompt-file`, never argv: it stays out of
+ * the host process list, isn't bounded by the OS arg-length cap, and a brief
+ * that starts with "-" can't be misread as a flag.
  *
  * Usage:
  *   node relay.mjs --brief <file> [options]
@@ -40,17 +50,15 @@
  *                           send only the delta brief.
  *   --session <id>          Continue a specific session id; send only the delta brief.
  *                           Mutually exclusive with --resume-last.
- *   --prompt-stdin          Experimental: pipe the brief on stdin and pass `-p -`
- *                           instead of putting the brief in argv. Unverified —
- *                           use while testing which delivery path Grok accepts.
  *   --out-dir <dir>         Where to write run artifacts (default: a fresh dir under
  *                           the system temp dir, so the repo under review stays clean).
  *   -h, --help              Show this help.
  *
  * Result: written to <out-dir>/result.json and summarized on stdout —
  *   status, exitCode, grokVersion, sessionId (for a later resume), finalMessage
- *   (Grok's own report), touchedFiles (git porcelain, null if git can't report), and the
- *   paths to events.jsonl and final.txt.
+ *   (Grok's own report), usage (token counts from the run's end event, null if
+ *   none), touchedFiles (git porcelain, null if git can't report), and the paths
+ *   to events.jsonl and final.txt.
  *
  * Exit codes: a pre-run usage error (bad/missing args, empty brief) exits 2
  * before any run and writes no result file; a missing `grok` binary exits 127;
@@ -81,7 +89,6 @@ function parseArgs(argv) {
     autonomy: "workspace-write",
     resumeLast: false,
     session: null,
-    promptStdin: false,
     outDir: null,
   };
   for (let i = 0; i < argv.length; i += 1) {
@@ -106,7 +113,6 @@ function parseArgs(argv) {
       case "--full-access": opts.autonomy = "full-access"; break;
       case "--resume-last": opts.resumeLast = true; break;
       case "--session": opts.session = next(); break;
-      case "--prompt-stdin": opts.promptStdin = true; break;
       case "--out-dir": opts.outDir = resolve(next()); break;
       default:
         fail(`unknown option: ${arg}`);
@@ -125,7 +131,7 @@ function headerComment() {
   // The leading block comment doubles as --help text.
   const src = readFileSync(new URL(import.meta.url), "utf8");
   const match = src.match(/\/\*\*([\s\S]*?)\*\//);
-  if (!match) return "relay.mjs — dispatch a brief to grok -p\n";
+  if (!match) return "relay.mjs — dispatch a brief to grok --prompt-file\n";
   return match[1].replace(/^\s*\* ?/gm, "").trim() + "\n";
 }
 
@@ -182,9 +188,11 @@ function autonomyFlags(autonomy) {
   // Maps the relay's three autonomy modes onto Grok's native --sandbox /
   // --always-approve / --permission-mode flags. Grok's default permission mode
   // is `ask`, which hangs a headless pipe — so every path sets autonomy
-  // explicitly. Sandbox profiles (from the Enterprise docs):
+  // explicitly. Sandbox profiles (verified valid on grok 0.2.101):
   //   workspace  — write CWD /tmp ~/.grok/   (workspace-write analog)
-  //   read-only  — no working-tree writes    (review/diagnosis)
+  //   read-only  — review intent ONLY; the sandbox restricts out-of-workspace
+  //                access, not grok's own edit tool, so a headless run can still
+  //                write the tree. Best-effort — verify touchedFiles afterward.
   //   off        — unrestricted              (full-access opt-in)
   switch (autonomy) {
     case "read-only":
@@ -197,12 +205,7 @@ function autonomyFlags(autonomy) {
   }
 }
 
-function quoteForCmd(value) {
-  // cmd.exe quoting when shell:true on win32: wrap in ", double internal ".
-  return `"${String(value).replace(/"/g, '""')}"`;
-}
-
-function buildArgv(opts, brief) {
+function buildArgv(opts, run) {
   // Always: automation hygiene + structured events + working root.
   const argv = [
     "--no-auto-update",
@@ -220,16 +223,10 @@ function buildArgv(opts, brief) {
   if (opts.model) argv.push("--model", opts.model);
   if (opts.effort) argv.push("--effort", opts.effort);
 
-  // Prompt delivery: default puts the brief in `-p` argv; --prompt-stdin is the
-  // experimental alternate (pipe + `-p -`). Isolated here so A/B testing is a
-  // one-flag change. See deliverPrompt().
-  if (opts.promptStdin) {
-    argv.push("-p", "-");
-  } else {
-    // On win32 + shell:true the brief must be cmd-quoted or spaces/newlines split.
-    const prompt = process.platform === "win32" ? quoteForCmd(brief) : brief;
-    argv.push("-p", prompt);
-  }
+  // Deliver the brief via a file, not argv: keeps it out of the host process
+  // list, isn't bounded by the OS arg-length cap, and a brief that begins with
+  // "-" can't be misread as a flag. prepareRunDir already wrote run.briefPath.
+  argv.push("--prompt-file", run.briefPath);
   return argv;
 }
 
@@ -276,38 +273,23 @@ function makeEventScanner(onObject) {
 }
 
 function extractSessionId(event) {
+  // grok's streaming-json carries sessionId (camelCase) on the end event; the
+  // extra fallbacks tolerate a shape drift across versions.
   return (
     event.sessionId ??
     event.session_id ??
-    event.sessionID ??
-    (event.session && (event.session.id ?? event.session.sessionId ?? event.session.session_id)) ??
-    event.params?.sessionId ??
-    event.params?.session_id ??
+    (event.session && (event.session.id ?? event.session.sessionId)) ??
     null
   );
 }
 
 function extractTextChunk(event) {
-  // Tolerant of several plausible streaming-json / ACP-like shapes until a real
-  // event stream confirms the canonical field names (see plan §6.4).
+  // grok streams the assistant reply as {"type":"text","data":"…"}; reasoning
+  // arrives as type:"thought" and is deliberately kept out of the report.
+  // The type:"text"+event.text fallback covers a possible field rename.
+  if (event.type !== "text") return null;
+  if (typeof event.data === "string") return event.data;
   if (typeof event.text === "string") return event.text;
-  if (typeof event.message === "string") return event.message;
-  if (typeof event.content === "string") return event.content;
-  if (event.content && typeof event.content.text === "string") return event.content.text;
-  if (event.delta && typeof event.delta.text === "string") return event.delta.text;
-  if (event.part && typeof event.part.text === "string") return event.part.text;
-  const update = event.params?.update ?? event.update;
-  if (update?.sessionUpdate === "agent_message_chunk" && update.content?.text) {
-    return update.content.text;
-  }
-  if (update?.content?.text) return update.content.text;
-  // type:"text" / type:"assistant" / type:"message" with nested text
-  if ((event.type === "text" || event.type === "assistant" || event.type === "message" ||
-       event.type === "agent_message" || event.type === "result") &&
-      typeof (event.text ?? event.message ?? event.result) === "string") {
-    return event.text ?? event.message ?? event.result;
-  }
-  if (event.type === "result" && typeof event.result?.text === "string") return event.result.text;
   return null;
 }
 
@@ -342,7 +324,6 @@ function makeResultWriter(opts, version, run) {
       model: opts.model,
       effort: opts.effort,
       resumeLast: opts.resumeLast,
-      promptStdin: opts.promptStdin,
       grokVersion: version,
       startedAt: run.startedAt,
       finishedAt: new Date().toISOString(),
@@ -357,36 +338,26 @@ function makeResultWriter(opts, version, run) {
 }
 
 function reportUnavailable(writeResult, resultPath) {
-  const result = writeResult({ status: "grok_unavailable", exitCode: 127, sessionId: null, finalMessage: "", touchedFiles: null });
+  const result = writeResult({ status: "grok_unavailable", exitCode: 127, sessionId: null, finalMessage: "", usage: null, touchedFiles: null });
   printSummary(result, resultPath);
   process.stderr.write("relay: `grok` not found on PATH. Install it (curl -fsSL https://x.ai/cli/install.sh | bash, or npm i -g @xai-official/grok) and run `grok login`.\n");
   process.exit(127);
 }
 
-function deliverPrompt(child, brief, opts) {
-  // Isolated seam for A/B testing prompt delivery (plan §2e / §6.1).
-  // Default: brief already in `-p` argv — close stdin.
-  // --prompt-stdin: write brief to stdin (paired with `-p -` in buildArgv).
-  child.stdin.on("error", () => {});
-  if (opts.promptStdin) {
-    child.stdin.write(brief);
-  }
-  child.stdin.end();
-}
-
-function dispatchToGrok(opts, brief, run, writeResult) {
-  const argv = buildArgv(opts, brief);
-  // shell:true on Windows so the grok.cmd shim resolves (see grokVersion).
-  // When the brief is in argv on win32 it is cmd-quoted in buildArgv; prefer
-  // --prompt-stdin for pathological multi-line briefs if quoting misbehaves.
+function dispatchToGrok(opts, run, writeResult) {
+  const argv = buildArgv(opts, run);
+  // shell:true on Windows so the grok.cmd shim resolves (see grokVersion). Safe:
+  // the brief is delivered via --prompt-file (never argv), and argv holds only
+  // flag names, enums, a model id, and file paths — no shell metacharacters.
   const child = spawn("grok", argv, {
     cwd: opts.cd,
     env: { ...process.env },
-    stdio: ["pipe", "pipe", "pipe"],
+    stdio: ["ignore", "pipe", "pipe"],
     shell: process.platform === "win32",
   });
 
   let sessionId = opts.session || null;
+  let usage = null;
   const textChunks = [];
   const stderrTail = [];
 
@@ -395,6 +366,7 @@ function dispatchToGrok(opts, brief, run, writeResult) {
     if (sid) sessionId = sid;
     const chunk = extractTextChunk(event);
     if (chunk) textChunks.push(chunk);
+    if (event.usage && typeof event.usage === "object") usage = event.usage;
   });
 
   child.stdout.on("data", (chunk) => {
@@ -424,6 +396,7 @@ function dispatchToGrok(opts, brief, run, writeResult) {
       exitCode: 1,
       sessionId,
       finalMessage: assembleFinal(),
+      usage,
       touchedFiles: gitTouchedFiles(opts.cd),
       error: String(err && err.message ? err.message : err),
     });
@@ -438,14 +411,13 @@ function dispatchToGrok(opts, brief, run, writeResult) {
       exitCode: code === null ? 1 : code,
       sessionId,
       finalMessage,
+      usage,
       touchedFiles: gitTouchedFiles(opts.cd),
       ...(code === 0 ? {} : { stderrTail: stderrTail.slice(-20) }),
     });
     printSummary(result, run.resultPath);
     process.exit(result.exitCode);
   });
-
-  deliverPrompt(child, brief, opts);
 }
 
 function main() {
@@ -462,7 +434,7 @@ function main() {
     return;
   }
 
-  dispatchToGrok(opts, brief, run, writeResult);
+  dispatchToGrok(opts, run, writeResult);
 }
 
 function printSummary(result, resultPath) {
@@ -474,7 +446,10 @@ function printSummary(result, resultPath) {
   else if (result.sessionId && result.status !== "grok_unavailable") {
     lines.push(`session id (resume with: --session ${result.sessionId}): ${result.sessionId}`);
   }
-  if (result.promptStdin) lines.push("prompt delivery: stdin (-p -)  [experimental]");
+  if (result.usage) {
+    const u = result.usage;
+    lines.push(`tokens: ${u.total_tokens ?? "?"} total (in ${u.input_tokens ?? "?"}, out ${u.output_tokens ?? "?"})`);
+  }
   const touched = result.touchedFiles;
   if (touched === null) {
     lines.push("touched files: git unavailable — inspect the working tree directly");
