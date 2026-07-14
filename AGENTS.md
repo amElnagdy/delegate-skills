@@ -2,8 +2,9 @@
 
 This repo is a [Skills CLI](https://github.com/vercel-labs/skills) package of **delegation skills** —
 skills that let an orchestrating agent drive a separate CLI coding agent as an implementer, then review
-and land the result. Two skills ship today: `codex-delegate` (OpenAI Codex) and `opencode-delegate`
-(OpenCode); siblings like `gemini-delegate` can be added later without renaming the repo.
+and land the result. Three skills ship today: `codex-delegate` (OpenAI Codex), `opencode-delegate`
+(OpenCode), and `agy-delegate` (Google Antigravity); siblings like `gemini-delegate` can be added later
+without renaming the repo.
 
 ## Vocabulary
 
@@ -14,7 +15,7 @@ jargon. Use these terms; don't invent synonyms.
 | --- | --- | --- |
 | **delegate** / **delegation** | the activity, and this skill family | "relay" (as the activity), "hand-off", "offload" |
 | **orchestrator** | the driving agent (Claude Code, …) | "controller", "driver" |
-| **implementer** | the worker agent (Codex, OpenCode) | "worker", "sub-agent", "executor" |
+| **implementer** | the worker agent (Codex, OpenCode, Antigravity) | "worker", "sub-agent", "executor" |
 | **brief** | the self-contained task spec sent to the implementer | "task file", "the prompt", "the spec" |
 | **gates** | the project's test/lint/build commands | "checks", "CI" |
 | **dispatch** | sending the brief to the implementer | "fire off", "kick off" |
@@ -22,6 +23,7 @@ jargon. Use these terms; don't invent synonyms.
 | **relay** / `relay.mjs` | the dispatch **script** only | never a *category* of skills |
 | `exec`, `sandbox`, `resume`, `session` | Codex's own terms — use verbatim | don't paraphrase them |
 | `run`, `agent` (`build`/`plan`), `session` | OpenCode's own terms — use verbatim | "sandbox" (OpenCode has no sandbox enum; autonomy is the agent) |
+| `project`, `conversation`, `model`, `permissions`, `sandbox`, `TUI`, `tasks`, `subagents` | Antigravity's own terms — use verbatim when discussing `agy` | don't use `subagents` as a generic synonym for implementer |
 
 Banned on sight: coined umbrella terms in user-facing surfaces (README headings, `skills.sh.json`
 titles); any reference to the author's local machine or config; model/version pins (`GPT-5.x` →
@@ -43,18 +45,20 @@ CLI flag, field, and command in the docs must match the installed implementer CL
 - **Progressive disclosure:** keep `SKILL.md` lean; push depth into `references/*.md` that load only
   when needed.
 - **Executables:** keep them minimal and inspectable. Today there is one per skill —
-  `skills/codex-delegate/scripts/relay.mjs` and `skills/opencode-delegate/scripts/relay.mjs` — each
-  Node built-ins only, no dependencies, no network calls of its own, no credentials, no telemetry. New
-  scripts must hold the same line, and the README's trust section must stay accurate.
+  `skills/codex-delegate/scripts/relay.mjs`, `skills/opencode-delegate/scripts/relay.mjs`, and
+  `skills/agy-delegate/scripts/relay.mjs` — each Node built-ins only, no dependencies, no network calls
+  of its own, no credentials, no telemetry. New scripts must hold the same line, and the README's trust
+  section must stay accurate.
 
 ## Before publishing a change
 
 - Validate the package locally: `npx skills add . --list`.
 - Smoke-test any changed script directly (e.g. `node skills/<skill>/scripts/relay.mjs --help`, and a
-  `--read-only` run against a throwaway repo) before relying on it.
+  no-write or read-only run against a throwaway repo) before relying on it.
 - If you touch how a `relay.mjs` launches its implementer CLI, smoke-test on Windows too (native
   PowerShell/cmd, not just Git Bash/WSL): both the `codex` and `opencode` launches need `shell:true` on
-  win32 to resolve the `.cmd` shim.
+  win32 to resolve the `.cmd` shim; `agy` is documented as a native binary, but still needs its own
+  Windows smoke before claiming support.
 - Keep the README's "Verification status" honest — claim only what's been run.
 
 ## Local Claude Code config
