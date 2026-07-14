@@ -35,8 +35,9 @@ orchestrators as designed-for, not yet proven.)
 ## Prerequisites (check once)
 
 1. `grok version` succeeds. If not, install on any platform with
-   `npm i -g @xai-official/grok` and authenticate (`grok login`, or `grok login --device-auth` on
-   headless hosts, or set `XAI_API_KEY`).
+   `npm i -g @xai-official/grok` (or use the installer from xAI's official Grok CLI docs) and
+   authenticate (`grok login`, or `grok login --device-auth` on headless hosts, or set
+   `XAI_API_KEY`).
 2. **Confirm which `grok` is on PATH.** `command -v grok` shows the active binary and `grok version`
    its version — the relay records the version it ran into `result.json`, so a stale binary is visible
    after the fact.

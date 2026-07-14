@@ -216,12 +216,18 @@ function autonomyFlags(autonomy) {
 }
 
 function buildArgv(opts, run) {
+  // ponytail: shell:true on win32 (needed for the grok.cmd shim) doesn't quote
+  // args, so a path with spaces (C:\Users\First Last\...) splits before grok
+  // sees it. Quote the two spaceable path args; --model/--effort/--session are
+  // already restricted to safe tokens at parse time.
+  // Ceiling: if quoting proves too blunt, drop shell:true and resolve the shim.
+  const quotePath = (p) => (process.platform === "win32" ? `"${p}"` : p);
   // Always: automation hygiene + structured events + working root.
   const argv = [
     "--no-auto-update",
     "--no-alt-screen",
     "--output-format", "streaming-json",
-    "--cwd", opts.cd,
+    "--cwd", quotePath(opts.cd),
   ];
 
   if (opts.resumeLast) argv.push("--continue");
@@ -236,7 +242,7 @@ function buildArgv(opts, run) {
   // Deliver the brief via a file, not argv: keeps it out of the host process
   // list, isn't bounded by the OS arg-length cap, and a brief that begins with
   // "-" can't be misread as a flag. prepareRunDir already wrote run.briefPath.
-  argv.push("--prompt-file", run.briefPath);
+  argv.push("--prompt-file", quotePath(run.briefPath));
   return argv;
 }
 
@@ -357,8 +363,9 @@ function reportUnavailable(writeResult, resultPath) {
 function dispatchToGrok(opts, run, writeResult) {
   const argv = buildArgv(opts, run);
   // shell:true on Windows so the grok.cmd shim resolves (see grokVersion). Safe:
-  // the brief is delivered via --prompt-file (never argv), and argv holds only
-  // flag names, enums, a model id, and file paths — no shell metacharacters.
+  // the brief is delivered via --prompt-file (never argv), --model/--effort/--session
+  // are restricted to safe tokens at parse time, and the two path args are
+  // quoted for win32 in buildArgv.
   const child = spawn("grok", argv, {
     cwd: opts.cd,
     env: { ...process.env },
