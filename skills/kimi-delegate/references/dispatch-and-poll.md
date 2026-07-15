@@ -30,7 +30,7 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 | `--model <alias>` | Kimi model alias for this run (default: Kimi's own `default_model`). |
 | `--session <id>` | Resume a specific Kimi session; send only the delta brief. |
 | `--resume-last` | Resume the most recent Kimi session for this cwd (`kimi --continue`); send only the delta brief. |
-| `--add-dir <dir>` | Add an extra workspace directory. Repeatable. |
+| `--add-dir <dir>` | Add an extra workspace directory. Repeatable. Edits there are not reported in `touchedFiles`. |
 | `--timeout <dur>` | Relay watchdog (default: `30m`; h/m/s strings). Kimi has no timeout flag. |
 | `--out-dir <dir>` | Artifact directory (default: a fresh directory under the system temp dir). |
 | `-h`, `--help` | Print the relay's header help. |
@@ -44,7 +44,8 @@ Headless `-p` mode always uses Kimi's auto permission mode. Kimi rejects `--prom
 
 ## Artifacts and result fields
 
-Artifacts live outside the repo by default, so the relay itself never shows up in `touchedFiles`:
+Artifacts live outside the repo by default, so they do not appear in `touchedFiles`; an `--out-dir`
+inside the worktree can make the artifacts appear there:
 
 - `brief.txt` - the exact brief.
 - `events.jsonl` - raw Kimi stdout events.
@@ -61,10 +62,11 @@ Artifacts live outside the repo by default, so the relay itself never shows up i
 - `briefPath`, `finalPath`, `eventsPath`, and `stderrPath`.
 - `finalMessage` - assistant `content` strings joined with `"\n\n"`; tool calls and tool results are
   excluded.
-- `touchedFiles` - `git status --porcelain` lines for the **final working tree**, not an attribution
-  of Kimi's edits: anything already dirty before dispatch shows up too. Dispatch from a clean tree
-  when you want the list to read as "what Kimi changed". `null` means git could not report; `[]`
-  means git ran and the tree is clean.
+- `touchedFiles` - `git status --porcelain` lines for the **final working tree under `--cd` only**,
+  not an attribution of Kimi's edits: anything already dirty before dispatch shows up too, and edits
+  Kimi makes inside `--add-dir` workspaces do not show up at all - inspect those trees yourself.
+  Dispatch from a clean tree when you want the list to read as "what Kimi changed". `null` means git
+  could not report; `[]` means git ran and the tree is clean.
 - `stderrTail` - the last 20 non-empty stderr lines on failure.
 - `error` - present for launch failures or when the relay watchdog fires.
 
