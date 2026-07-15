@@ -7,7 +7,7 @@ orchestrator) writes a self-contained brief, hands it to an implementer CLI, the
 commits — staying the reviewer the whole way.
 
 Three skills ship today: **`codex-delegate`** drives the OpenAI Codex CLI, **`opencode-delegate`** drives
-the OpenCode CLI, and **`grok-delegate`** drives Grok Build headlessly. Same loop, different implementer.
+the OpenCode CLI, and **`grok-delegate`** drives Grok Build. Same loop, different implementer.
 
 ## Install
 
@@ -47,17 +47,23 @@ The loop:
 
 ```text
 Use $codex-delegate to have Codex implement the refactor in services/billing/, then review and commit it.
-Use $grok-delegate to have Grok Build implement the migration, then review the diff and land it yourself.
+Use $codex-delegate to run this queue of migration tasks through Codex while I review each one.
+Use $grok-delegate to have Grok Build implement the migration, then review and commit it.
 ```
 
 ## How this differs from the OpenAI Codex plugin
 
-The official openai-codex Claude Code plugin is excellent and **complementary** — this skill builds on
-the same `codex` CLI, it doesn't replace the plugin. They point in different directions:
+The official openai-codex Claude Code plugin is excellent and
+**complementary** — this skill builds on the same `codex` CLI, it doesn't replace the plugin. They
+point in different directions:
 
-- The plugin's `codex:codex-rescue` agent is a **forwarder**: it hands one task to Codex and returns the output.
+- The plugin's `codex:codex-rescue` agent is a **forwarder**: it hands one task to Codex and returns
+  the output. It deliberately does not poll, review, or commit.
 - The plugin's review command and stop-review gate run the **inverse** direction: **Codex reviews your work**.
-- `codex-delegate` is the orchestration loop in the other direction: brief → dispatch → poll → review → commit.
+- `codex-delegate` is the **orchestration loop in the other direction**: *you* drive Codex to
+  implement across one task or a queue, and *you* review and land each result. That loop — brief →
+  dispatch → poll → review → commit, with the orchestrator owning the commit — is what the plugin
+  leaves to you, and what this skill encodes.
 
 If you have the plugin installed, its companion CLI is an optional alternative dispatch backend; the
 bundled `relay.mjs` is the default because it needs nothing but the `codex` binary.
@@ -67,29 +73,47 @@ bundled `relay.mjs` is the default because it needs nothing but the `codex` bina
 ### codex-delegate
 
 Drive the OpenAI Codex CLI as a background implementer: write the brief, dispatch via `relay.mjs`,
-review the diff, commit it yourself.
+review the diff, commit it yourself. Ships four references (writing the brief, dispatch/poll, review/
+land, multi-task queues) loaded only when needed, and one small helper script.
+
+**You'll feel it when:** a bounded task — a migration, a mechanical refactor, a removal sweep — gets
+handed to Codex, comes back as a clean diff with a structured report, and you commit it after re-running
+the gates yourself instead of typing it all by hand.
 
 ### opencode-delegate
 
-Drive the OpenCode CLI as a background implementer. Autonomy is selected through the OpenCode agent:
-`build` for implementation and `plan` for read-only review.
+Drive the OpenCode CLI as a background implementer: write the brief, dispatch via `relay.mjs`, review
+the diff, commit it yourself. Same four references and loop as `codex-delegate`. Autonomy is set by the
+**agent** rather than a sandbox enum — `build` (write-capable) by default, `plan` (read-only) for
+review/diagnosis — and the brief is piped to `opencode run` on stdin so multi-line XML briefs need no
+quoting.
+
+**You'll feel it when:** a bounded task gets handed to OpenCode, comes back as a clean diff with a
+structured report and the run's cost, and you commit it after re-running the gates yourself.
 
 ### grok-delegate
 
-Drive Grok Build through its documented headless mode with newline-delimited `streaming-json` output,
-session resume/continue support, and a stable relay `result.json`. Implementation runs auto-approve tool
-calls by default; read-only runs remove write/edit tools, avoid auto-approval, and detect working-tree
-status changes. Raw events are retained so CLI output changes remain diagnosable.
+Drive Grok Build as a headless implementer through its documented `streaming-json` mode: write the
+brief, dispatch via `relay.mjs`, resume the same session for corrections, review the diff, and commit it
+yourself. The relay preserves raw events, records a stable `result.json`, and adds a guarded read-only
+review mode that detects working-tree status changes.
+
+**You'll feel it when:** Grok handles a bounded implementation pass unattended, returns a reviewable
+working-tree diff and structured report, and you remain the party that verifies and lands it.
 
 ### gemini-delegate
 
 *Planned.* A delegate skill for the Gemini CLI, if and when it gains a comparable non-interactive mode.
+Reserved so the umbrella can grow without a rename.
 
 ## Requirements
 
-- For `codex-delegate`: the [`codex` CLI](https://github.com/openai/codex), authenticated with `codex login`.
-- For `opencode-delegate`: the [`opencode` CLI](https://opencode.ai), authenticated with `opencode auth login`.
-- For `grok-delegate`: the [Grok Build CLI](https://docs.x.ai/build/cli/headless-scripting), authenticated with `grok login`.
+- For `codex-delegate`: the [`codex` CLI](https://github.com/openai/codex) installed and authenticated
+  (`codex login`).
+- For `opencode-delegate`: the [`opencode` CLI](https://opencode.ai) installed and authenticated
+  (`opencode auth login`).
+- For `grok-delegate`: the [Grok Build CLI](https://docs.x.ai/build/cli/headless-scripting) installed and
+  authenticated (`grok login`; use `grok login --device-auth` on a headless host).
 - Node 18+ and `git`.
 - An orchestrating agent that can run shell commands and read files.
 - Shell examples assume bash/zsh (macOS/Linux, or Git Bash/WSL on Windows).
@@ -99,22 +123,23 @@ status changes. Raw events are retained so CLI output changes remain diagnosable
 This package is intentionally inspectable:
 
 - All skill content is Markdown, plus exactly **one** executable per skill — each a `scripts/relay.mjs`.
-- Each relay uses Node built-ins only, makes no network calls itself, reads or writes no credentials, and
-  shells out only to its implementer CLI and `git`.
-- Relays never commit — committing is always the orchestrator's job after review.
+- Each `relay.mjs` makes no network calls, reads or writes no credentials, sends no telemetry, and has
+  no dependencies (Node built-ins only). It shells out only to its implementer CLI (`codex` /
+  `opencode` / `grok`) and `git`. That CLI authenticates exactly as you do at the terminal. Read the
+  script before you run it.
+- None ever commits — committing is always the orchestrator's job, after review.
 
-**Verification status:** Codex and OpenCode retain their existing verification status. The new Grok relay
-has implementation-level validation for argument handling, result generation, missing-binary behavior,
-signal reporting, raw event preservation, and read-only git-status detection. A real authenticated Grok
-run remains required before claiming end-to-end verification against a specific Grok CLI version.
+**Verification status:** the Codex and OpenCode relays retain their existing verification status. The
+Grok relay's mechanics are implementation-reviewed, but a real authenticated Grok run is still required
+before claiming end-to-end verification against a specific CLI version. The full delegate → review →
+commit loop is designed for and run on Claude Code but not yet formally verified across other
+orchestrators (Cursor, …), which are designed-for but unproven.
 
 ## Repository shape
 
 ```text
 skills/
 ├── codex-delegate/
-├── opencode-delegate/
-├── grok-delegate/
 │   ├── SKILL.md
 │   ├── scripts/relay.mjs
 │   └── references/
@@ -122,10 +147,25 @@ skills/
 │       ├── dispatch-and-poll.md
 │       ├── review-and-land.md
 │       └── multi-task-queues.md
-└── gemini-delegate/ (planned)
+├── opencode-delegate/
+│   ├── SKILL.md
+│   ├── scripts/relay.mjs
+│   └── references/
+│       ├── writing-the-brief.md
+│       ├── dispatch-and-poll.md
+│       ├── review-and-land.md
+│       └── multi-task-queues.md
+└── grok-delegate/
+    ├── SKILL.md
+    ├── scripts/relay.mjs
+    └── references/
+        ├── writing-the-brief.md
+        ├── dispatch-and-poll.md
+        ├── review-and-land.md
+        └── multi-task-queues.md
 ```
 
-The `SKILL.md` stays small so it loads cheaply; references load only when needed.
+The `SKILL.md` stays small so it loads cheaply; the references load only when the task needs them.
 
 ## License
 
