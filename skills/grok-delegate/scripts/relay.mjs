@@ -44,6 +44,7 @@
  *   --cd <dir>              Working root for Grok (default: current directory).
  *   --model <name>          Grok model (default: Grok's own configured default).
  *   --effort <level>        Reasoning effort for this run (passed as `--effort`).
+ *   --max-turns <n>         Maximum number of agent turns for this run.
  *   --read-only             Review/diagnosis with no edits (`--sandbox read-only`).
  *   --full-access           Unrestricted auto-approve (`--sandbox off`); opt-in.
  *   --resume-last           Continue the most recent Grok session for this cwd;
@@ -88,6 +89,7 @@ function parseArgs(argv) {
     cd: process.cwd(),
     model: null,
     effort: null,
+    maxTurns: null,
     autonomy: "workspace-write",
     resumeLast: false,
     session: null,
@@ -111,6 +113,7 @@ function parseArgs(argv) {
       case "--cd": opts.cd = resolve(next()); break;
       case "--model": opts.model = next(); break;
       case "--effort": opts.effort = next(); break;
+      case "--max-turns": opts.maxTurns = next(); break;
       case "--read-only": opts.autonomy = "read-only"; break;
       case "--full-access": opts.autonomy = "full-access"; break;
       case "--resume-last": opts.resumeLast = true; break;
@@ -132,6 +135,10 @@ function parseArgs(argv) {
     if (opts[flag] !== null && !safeToken.test(opts[flag])) {
       fail(`--${flag} value contains unsupported characters (allowed: letters, digits, . _ : / -)`);
     }
+  }
+  // Digits-only also keeps the value safe for the win32 shell launch.
+  if (opts.maxTurns !== null && !/^[1-9]\d*$/.test(opts.maxTurns)) {
+    fail("--max-turns must be a positive integer");
   }
   return opts;
 }
@@ -240,6 +247,7 @@ function buildArgv(opts, run) {
 
   if (opts.model) argv.push("--model", opts.model);
   if (opts.effort) argv.push("--effort", opts.effort);
+  if (opts.maxTurns) argv.push("--max-turns", opts.maxTurns);
 
   // Deliver the brief via a file, not argv: keeps it out of the host process
   // list, isn't bounded by the OS arg-length cap, and a brief that begins with
@@ -363,6 +371,10 @@ function reportUnavailable(writeResult, resultPath) {
 }
 
 function dispatchToGrok(opts, run, writeResult) {
+  // grok cannot be prevented from writing headlessly (the read-only sandbox and
+  // plan mode are advisory), so a --read-only run snapshots the tree up front
+  // and flags a violation in the result instead of pretending to enforce.
+  const beforeTree = opts.autonomy === "read-only" ? gitTouchedFiles(opts.cd) : null;
   const argv = buildArgv(opts, run);
   // shell:true on Windows so the grok.cmd shim resolves (see grokVersion). Safe:
   // the brief is delivered via --prompt-file (never argv), --model/--effort/--session
@@ -431,6 +443,7 @@ function dispatchToGrok(opts, run, writeResult) {
     if (settled) return;
     settled = true;
     const finalMessage = assembleFinal();
+    const touchedFiles = gitTouchedFiles(opts.cd);
     const result = writeResult({
       status: code === 0 ? "completed" : "failed",
       exitCode: code ?? (constants.signals[signal] ? 128 + constants.signals[signal] : 1),
@@ -438,7 +451,10 @@ function dispatchToGrok(opts, run, writeResult) {
       sessionId,
       finalMessage,
       usage,
-      touchedFiles: gitTouchedFiles(opts.cd),
+      touchedFiles,
+      ...(opts.autonomy === "read-only"
+        ? { readOnlyViolation: beforeTree !== null && touchedFiles !== null && JSON.stringify(beforeTree) !== JSON.stringify(touchedFiles) }
+        : {}),
       ...(code === 0 ? {} : { stderrTail: stderrTail.slice(-20) }),
     });
     printSummary(result, run.resultPath);
@@ -468,6 +484,7 @@ function printSummary(result, resultPath) {
   lines.push("");
   lines.push(`relay: ${result.status} (exit ${result.exitCode}${result.signal ? `, killed by ${result.signal}` : ""})  ·  grok ${result.grokVersion ?? "?"}`);
   if (result.signal === "SIGKILL") lines.push("hint: the host killed the process (commonly the OOM killer or a supervisor timeout) — this is not a grok error; check host memory and re-dispatch, or split the task into smaller briefs.");
+  if (result.readOnlyViolation) lines.push("warning: this --read-only run modified the working tree — grok's read-only is best-effort; review the diff before trusting the run.");
   lines.push(`autonomy: ${result.autonomy}`);
   if (result.resumeLast) lines.push("mode: resumed most recent session (--continue)");
   else if (result.sessionId && result.status !== "grok_unavailable") {

@@ -36,7 +36,8 @@ Options:
 | `--cd <dir>` | Working root for Grok (default: current directory); passed as `--cwd`. |
 | `--model <name>` | Grok model (default: Grok's own configured default). |
 | `--effort <level>` | Reasoning effort for this run (`--effort`). |
-| `--read-only` | Review/diagnosis intent (`--sandbox read-only --permission-mode plan`). **Best-effort, not enforced** — grok can still edit the tree headlessly, so always verify `touchedFiles`. |
+| `--max-turns <n>` | Maximum number of agent turns for this run (`--max-turns`). |
+| `--read-only` | Review/diagnosis intent (`--sandbox read-only --permission-mode plan`). **Best-effort, not enforced** — grok can still edit the tree headlessly. The relay snapshots `git status` before the run and sets `readOnlyViolation: true` in `result.json` if the tree changed. |
 | `--full-access` | Unrestricted auto-approve (`--always-approve --sandbox off`); opt-in. |
 | `--resume-last` | Continue the most recent Grok session for this cwd; send only the delta brief. |
 | `--session <id>` | Continue a specific session id; mutually exclusive with `--resume-last`. |
@@ -65,6 +66,8 @@ touched-files report shows only Grok's edits and nothing of the helper's own.
 - `touchedFiles` — `git status --porcelain` lines in the working root: your review starting point. `null` (not `[]`) when git can't report; `[]` means git ran and the tree is clean
 - `briefPath` / `eventsPath` / `finalPath` — the exact brief relay sent, the raw streaming-json event stream, and the final-message file
 - `workdir`, `autonomy`, `model`, `effort`, `resumeLast`, `startedAt`, `finishedAt`
+- `readOnlyViolation` — present on `--read-only` runs only: `true` when the working tree changed
+  between dispatch and completion, i.e. the best-effort read-only was not honored
 - `stderrTail` — last ~20 stderr lines; present **only** on a failed run (a non-zero Grok exit), absent on `completed`, `grok_unavailable`, and launch failures
 - `error` — present **only** if Grok failed to launch
 

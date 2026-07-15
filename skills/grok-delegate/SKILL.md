@@ -132,7 +132,9 @@ safe. Reach for `--full-access` only when the human asks for it.
 **`--read-only` is best-effort, not a hard guarantee.** The read-only sandbox restricts out-of-workspace
 filesystem/network access, not grok's own edit tool, and headless `plan` mode is advisory — a run
 verified here still wrote the working tree when told to. Use `--read-only` to *signal* review intent,
-but always confirm `touchedFiles` afterward; treat the diff, not the flag, as the guarantee.
+but always confirm `touchedFiles` afterward; treat the diff, not the flag, as the guarantee. The relay
+automates the check: it snapshots `git status` before a `--read-only` run and sets
+`readOnlyViolation: true` in `result.json` (with a summary warning) when the tree changed anyway.
 
 ## Authorization model
 
