@@ -6,8 +6,9 @@ Skills for **delegating coding work to a separate CLI agent and landing it yours
 orchestrator) writes a self-contained brief, hands it to an implementer CLI, then reviews the diff and
 commits — staying the reviewer the whole way.
 
-Two skills ship today: **`codex-delegate`** drives the OpenAI Codex CLI, and **`opencode-delegate`**
-drives the OpenCode CLI. Same loop, different implementer.
+Three skills ship today: **`codex-delegate`** drives the OpenAI Codex CLI, **`opencode-delegate`**
+drives the OpenCode CLI, and **`kimi-delegate`** drives the Kimi Code CLI. Same loop, different
+implementer.
 
 ## Install
 
@@ -23,6 +24,7 @@ Install the package, or just one skill:
 npx skills add amElnagdy/delegate-skills
 npx skills add amElnagdy/delegate-skills --skill codex-delegate
 npx skills add amElnagdy/delegate-skills --skill opencode-delegate
+npx skills add amElnagdy/delegate-skills --skill kimi-delegate
 ```
 
 Install for a specific agent, or globally:
@@ -47,6 +49,7 @@ The loop:
 ```text
 Use $codex-delegate to have Codex implement the refactor in services/billing/, then review and commit it.
 Use $codex-delegate to run this queue of migration tasks through Codex while I review each one.
+Use $kimi-delegate to have Kimi implement the UI cleanup, then review and commit it.
 ```
 
 ## How this differs from the OpenAI Codex plugin
@@ -89,6 +92,16 @@ quoting.
 **You'll feel it when:** a bounded task gets handed to OpenCode, comes back as a clean diff with a
 structured report and the run's cost, and you commit it after re-running the gates yourself.
 
+### kimi-delegate
+
+Drive the Kimi Code CLI (`kimi`) as a background implementer: write the brief, dispatch via
+`relay.mjs`, review the diff, and commit it yourself. Same four references and loop as the other
+delegate skills. Headless Kimi always uses auto permission mode, so the relay passes no autonomy flags;
+the child cwd pins the workspace, and `touchedFiles` shows what changed.
+
+**You'll feel it when:** a bounded task gets handed to Kimi, comes back as a clean diff with a
+structured report and session id, and you commit it after re-running the gates yourself.
+
 ### gemini-delegate
 
 *Planned.* A delegate skill for the Gemini CLI, if and when it gains a comparable non-interactive mode.
@@ -100,6 +113,9 @@ Reserved so the umbrella can grow without a rename.
   (`codex login`).
 - For `opencode-delegate`: the [`opencode` CLI](https://opencode.ai) installed and authenticated
   (`opencode auth login`).
+- For `kimi-delegate`: the [`kimi` CLI](https://moonshotai.github.io/kimi-code/en/) installed via
+  Homebrew (`brew install kimi-code`) or the official native installer, and authenticated via
+  `kimi login`.
 - Node 18+ and `git`.
 - An orchestrating agent that can run shell commands and read files.
 - Shell examples assume bash/zsh (macOS/Linux, or Git Bash/WSL on Windows).
@@ -111,9 +127,9 @@ This package is intentionally inspectable:
 - All skill content is Markdown, plus exactly **one** executable per skill — each a `scripts/relay.mjs`.
 - Each `relay.mjs` makes no network calls, reads or writes no credentials, sends no telemetry, and has
   no dependencies (Node built-ins only). It shells out only to its implementer CLI (`codex` /
-  `opencode`) and `git`. That CLI authenticates exactly as you do at the terminal. Read the script
-  before you run it.
-- Neither ever commits — committing is always the orchestrator's job, after review.
+  `opencode` / `kimi`) and `git`. That CLI authenticates exactly as you do at the terminal. Read the
+  script before you run it.
+- None ever commits — committing is always the orchestrator's job, after review.
 
 **Verification status:** each relay's mechanics are verified — argument handling, exit codes,
 `result.json`, resume, and (for `opencode-delegate`) the required-model guard, since OpenCode has no safe
@@ -121,6 +137,10 @@ default. The full delegate → review → commit loop is designed for and run on
 formally verified end-to-end here (OpenCode's cold start is slow in constrained shells, so exercise a
 real run in a normal terminal). Other orchestrators (Cursor, …) are designed-for but unproven. This line
 gets upgraded to "verified end-to-end" with evidence, not assumption.
+
+`kimi-delegate`'s relay mechanics are verified against `kimi` 0.24.0 on macOS (headless `-p` edit
+run, stream-json parsing, `--session`/`--continue` resume, unavailable/127); Windows launch is pending
+a native smoke.
 
 ## Repository shape
 
@@ -134,7 +154,15 @@ skills/
 │       ├── dispatch-and-poll.md
 │       ├── review-and-land.md
 │       └── multi-task-queues.md
-└── opencode-delegate/
+├── opencode-delegate/
+│   ├── SKILL.md
+│   ├── scripts/relay.mjs
+│   └── references/
+│       ├── writing-the-brief.md
+│       ├── dispatch-and-poll.md
+│       ├── review-and-land.md
+│       └── multi-task-queues.md
+└── kimi-delegate/
     ├── SKILL.md
     ├── scripts/relay.mjs
     └── references/
