@@ -27,6 +27,9 @@
  *   --brief <file>          Path to the brief. If omitted, the brief is read from stdin.
  *   --cd <dir>              Working root for Codex (default: current directory).
  *   --model <name>          Codex model (default: Codex's own configured default).
+ *   --effort <level>        Reasoning effort, passed to Codex as
+ *                           `-c model_reasoning_effort=<level>` (e.g. low, medium, high,
+ *                           xhigh, max, ultra; default: Codex's own configured default).
  *   --sandbox <mode>        read-only | workspace-write | danger-full-access
  *                           (default: workspace-write).
  *   --read-only             Shortcut for --sandbox read-only (review/diagnosis, no edits).
@@ -70,6 +73,7 @@ function parseArgs(argv) {
     brief: null,
     cd: process.cwd(),
     model: null,
+    effort: null,
     sandbox: "workspace-write",
     resumeLast: false,
     skipGitRepoCheck: false,
@@ -92,6 +96,7 @@ function parseArgs(argv) {
       case "--brief": opts.brief = next(); break;
       case "--cd": opts.cd = resolve(next()); break;
       case "--model": opts.model = next(); break;
+      case "--effort": opts.effort = next(); break;
       case "--sandbox": opts.sandbox = next(); break;
       case "--read-only": opts.sandbox = "read-only"; break;
       case "--resume-last": opts.resumeLast = true; break;
@@ -103,6 +108,12 @@ function parseArgs(argv) {
   }
   if (!SANDBOX_MODES.has(opts.sandbox)) {
     fail(`invalid --sandbox "${opts.sandbox}" (expected: ${[...SANDBOX_MODES].join(", ")})`);
+  }
+  // Codex owns the set of valid levels (it varies by model and CLI version); the
+  // relay only enforces a bare token so argv keeps its no-shell-metacharacters
+  // invariant (see the shell:true note in dispatchToCodex).
+  if (opts.effort && !/^[a-z][a-z0-9-]*$/i.test(opts.effort)) {
+    fail(`invalid --effort "${opts.effort}" (expected a bare level name, e.g. low, medium, high, xhigh, max, ultra)`);
   }
   return opts;
 }
@@ -177,6 +188,9 @@ function buildArgv(opts, finalPath) {
     argv.push("-s", opts.sandbox);
   }
   if (opts.model) argv.push("-m", opts.model);
+  // `-c` is accepted by `exec resume` (unlike `-s`/`-C`), so the effort override
+  // applies to fresh and resumed runs alike.
+  if (opts.effort) argv.push("-c", `model_reasoning_effort=${opts.effort}`);
   if (opts.skipGitRepoCheck) argv.push("--skip-git-repo-check");
   argv.push("-"); // read the prompt from stdin
   return argv;
@@ -231,6 +245,7 @@ function makeResultWriter(opts, version, run) {
       workdir: opts.cd,
       sandbox: opts.resumeLast ? "(inherited from resumed session)" : opts.sandbox,
       model: opts.model,
+      effort: opts.effort,
       resumeLast: opts.resumeLast,
       codexVersion: version,
       startedAt: run.startedAt,
@@ -256,7 +271,8 @@ function dispatchToCodex(opts, brief, run, writeResult) {
   const argv = buildArgv(opts, run.finalPath);
   // shell:true on Windows so the codex.cmd shim resolves (see codexVersion). Safe:
   // the brief is fed via child.stdin below — never argv — and argv holds only
-  // sandbox enums, model names, and file paths, with no shell metacharacters.
+  // sandbox enums, model names, a pattern-checked effort level, and file paths,
+  // with no shell metacharacters.
   const child = spawn("codex", argv, { cwd: opts.cd, stdio: ["pipe", "pipe", "pipe"], shell: process.platform === "win32" });
 
   let threadId = null;
