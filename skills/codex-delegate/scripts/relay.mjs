@@ -56,6 +56,7 @@ import { spawn, execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync, readFileSync, existsSync, appendFileSync } from "node:fs";
 import { join, resolve, basename } from "node:path";
 import { constants, tmpdir } from "node:os";
+import { StringDecoder } from "node:string_decoder";
 
 const SANDBOX_MODES = new Set(["read-only", "workspace-write", "danger-full-access"]);
 
@@ -262,8 +263,13 @@ function dispatchToCodex(opts, brief, run, writeResult) {
   let stdoutBuf = "";
   const stderrTail = [];
 
+  // Decode across chunk boundaries: a multibyte UTF-8 character split between
+  // two data events would otherwise decode as U+FFFD and corrupt the report.
+  const stdoutDecoder = new StringDecoder("utf8");
+  const stderrDecoder = new StringDecoder("utf8");
+
   child.stdout.on("data", (chunk) => {
-    stdoutBuf += chunk.toString();
+    stdoutBuf += stdoutDecoder.write(chunk);
     let nl;
     while ((nl = stdoutBuf.indexOf("\n")) !== -1) {
       const line = stdoutBuf.slice(0, nl);
@@ -275,8 +281,8 @@ function dispatchToCodex(opts, brief, run, writeResult) {
   });
 
   child.stderr.on("data", (chunk) => {
-    const text = chunk.toString();
-    process.stderr.write(text); // surface Codex progress live for the orchestrator
+    process.stderr.write(chunk); // surface Codex progress live for the orchestrator
+    const text = stderrDecoder.write(chunk);
     for (const line of text.split("\n")) {
       if (line.trim()) stderrTail.push(line.trimEnd());
     }
