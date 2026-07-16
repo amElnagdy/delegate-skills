@@ -66,6 +66,7 @@ import { spawn, execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync, readFileSync, existsSync, appendFileSync } from "node:fs";
 import { join, resolve, basename } from "node:path";
 import { constants, tmpdir } from "node:os";
+import { StringDecoder } from "node:string_decoder";
 
 const DEFAULT_TIMEOUT = "30m";
 
@@ -311,16 +312,21 @@ function dispatchToKimi(opts, brief, run, writeResult) {
     }
   });
 
+  // Decode across chunk boundaries: a multibyte UTF-8 character split between
+  // two data events would otherwise decode as U+FFFD and corrupt the report.
+  // Files get the raw bytes; only in-memory parsing goes through the decoders.
+  const stdoutDecoder = new StringDecoder("utf8");
+  const stderrDecoder = new StringDecoder("utf8");
+
   child.stdout.on("data", (chunk) => {
-    const text = chunk.toString();
-    appendFileSync(run.eventsPath, text, "utf8");
-    scan(text);
+    appendFileSync(run.eventsPath, chunk);
+    scan(stdoutDecoder.write(chunk));
   });
 
   child.stderr.on("data", (chunk) => {
-    const text = chunk.toString();
-    process.stderr.write(text);
-    appendFileSync(run.stderrPath, text, "utf8");
+    process.stderr.write(chunk);
+    appendFileSync(run.stderrPath, chunk);
+    const text = stderrDecoder.write(chunk);
     for (const line of text.split("\n")) {
       if (line.trim()) stderrTail.push(line.trimEnd());
     }
