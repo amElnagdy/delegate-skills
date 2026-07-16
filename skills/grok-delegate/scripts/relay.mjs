@@ -75,6 +75,7 @@ import { spawn, execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync, readFileSync, existsSync, appendFileSync } from "node:fs";
 import { join, resolve, basename } from "node:path";
 import { constants, tmpdir } from "node:os";
+import { StringDecoder } from "node:string_decoder";
 
 const AUTONOMY_MODES = new Set(["workspace-write", "read-only", "full-access"]);
 
@@ -400,15 +401,19 @@ function dispatchToGrok(opts, run, writeResult) {
     if (event.usage && typeof event.usage === "object") usage = event.usage;
   });
 
+  // Decode across chunk boundaries: a multibyte UTF-8 character split between
+  // two data events would otherwise decode as U+FFFD and corrupt the report.
+  const stdoutDecoder = new StringDecoder("utf8");
+  const stderrDecoder = new StringDecoder("utf8");
+
   child.stdout.on("data", (chunk) => {
-    const text = chunk.toString();
-    appendFileSync(run.eventsPath, text, "utf8"); // faithful raw record
-    scan(text);
+    appendFileSync(run.eventsPath, chunk); // faithful raw record
+    scan(stdoutDecoder.write(chunk));
   });
 
   child.stderr.on("data", (chunk) => {
-    const text = chunk.toString();
-    process.stderr.write(text); // surface Grok progress live for the orchestrator
+    process.stderr.write(chunk); // surface Grok progress live for the orchestrator
+    const text = stderrDecoder.write(chunk);
     for (const line of text.split("\n")) {
       if (line.trim()) stderrTail.push(line.trimEnd());
     }

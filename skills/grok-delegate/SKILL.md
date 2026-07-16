@@ -135,6 +135,8 @@ verified here still wrote the working tree when told to. Use `--read-only` to *s
 but always confirm `touchedFiles` afterward; treat the diff, not the flag, as the guarantee. The relay
 automates the check: it snapshots `git status` before a `--read-only` run and sets
 `readOnlyViolation: true` in `result.json` (with a summary warning) when the tree changed anyway.
+It's a porcelain-level tripwire — an edit inside an already-dirty file can evade it, so on a dirty
+tree the diff review stays the only real guarantee.
 
 ## Authorization model
 
