@@ -47,13 +47,15 @@
  *   -h, --help              Show this help.
  *
  * Result: written to <out-dir>/result.json and summarized on stdout —
- *   status, exitCode, opencodeVersion, sessionId (for a later resume), finalMessage
+ *   status, exitCode, signal, opencodeVersion, sessionId (for a later resume), finalMessage
  *   (OpenCode's own report), touchedFiles (git porcelain, null if git can't report), and the
  *   paths to events.jsonl and final.txt.
  *
  * Exit codes: a pre-run usage error (bad/missing args, empty brief) exits 2
  * before any run and writes no result file; a missing `opencode` binary exits 127;
  * otherwise the exit code mirrors OpenCode's own (0 success, non-zero failure).
+ * If the child dies on a signal, the exit code is 128 plus the signal number and
+ * `result.json` records the signal.
  * Once the brief validates, `result.json` is written on every outcome —
  * completed, failed, or opencode_unavailable. An orchestrator that polls for the
  * file must therefore also treat a non-zero exit with no file as a usage error.
@@ -62,7 +64,7 @@
 import { spawn, execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync, readFileSync, existsSync, appendFileSync } from "node:fs";
 import { join, resolve, basename } from "node:path";
-import { tmpdir } from "node:os";
+import { constants, tmpdir } from "node:os";
 
 function fail(message, code = 2) {
   process.stderr.write(`relay: ${message}\n`);
@@ -129,6 +131,9 @@ function readBrief(opts) {
     return readFileSync(opts.brief, "utf8");
   }
   // No --brief: read from stdin (fd 0). Empty stdin is an error.
+  if (process.stdin.isTTY) {
+    fail("no --brief given and stdin is a TTY; pass --brief <file> or pipe the brief on stdin");
+  }
   let stdin = "";
   try {
     stdin = readFileSync(0, "utf8");
@@ -297,7 +302,7 @@ function makeResultWriter(opts, version, run) {
 }
 
 function reportUnavailable(writeResult, resultPath) {
-  const result = writeResult({ status: "opencode_unavailable", exitCode: 127, sessionId: null, finalMessage: "", touchedFiles: null, cost: null });
+  const result = writeResult({ status: "opencode_unavailable", exitCode: 127, signal: null, sessionId: null, finalMessage: "", touchedFiles: null, cost: null });
   printSummary(result, resultPath);
   process.stderr.write("relay: `opencode` not found on PATH. Install it (npm i -g opencode-ai) and run `opencode auth login`.\n");
   process.exit(127);
@@ -369,17 +374,23 @@ function dispatchToOpenCode(opts, brief, run, writeResult) {
     return message;
   };
 
+  let settled = false;
   child.on("error", (err) => {
-    const result = writeResult({ status: "failed", exitCode: 1, sessionId, finalMessage: assembleFinal(), touchedFiles: gitTouchedFiles(opts.cd), cost: sawCost ? totalCost : null, error: String(err && err.message ? err.message : err) });
+    if (settled) return;
+    settled = true;
+    const result = writeResult({ status: "failed", exitCode: 1, signal: null, sessionId, finalMessage: assembleFinal(), touchedFiles: gitTouchedFiles(opts.cd), cost: sawCost ? totalCost : null, error: String(err && err.message ? err.message : err) });
     printSummary(result, run.resultPath);
     process.exit(1);
   });
 
-  child.on("close", (code) => {
+  child.on("close", (code, signal) => {
+    if (settled) return;
+    settled = true;
     const finalMessage = assembleFinal();
     const result = writeResult({
       status: code === 0 ? "completed" : "failed",
-      exitCode: code === null ? 1 : code,
+      exitCode: code ?? (constants.signals[signal] ? 128 + constants.signals[signal] : 1),
+      signal: signal ?? null,
       sessionId,
       finalMessage,
       touchedFiles: gitTouchedFiles(opts.cd),
@@ -427,7 +438,8 @@ function main() {
 function printSummary(result, resultPath) {
   const lines = [];
   lines.push("");
-  lines.push(`relay: ${result.status} (exit ${result.exitCode})  ·  opencode ${result.opencodeVersion ?? "?"}`);
+  lines.push(`relay: ${result.status} (exit ${result.exitCode}${result.signal ? `, killed by ${result.signal}` : ""})  ·  opencode ${result.opencodeVersion ?? "?"}`);
+  if (result.signal === "SIGKILL") lines.push("hint: the host killed the process (commonly the OOM killer or a supervisor timeout) — this is not an opencode error; check host memory and re-dispatch, or split the task into smaller briefs.");
   if (result.resumeLast || result.agent === "(inherited from resumed session)") lines.push("mode: resumed existing session");
   if (result.sessionId) lines.push(`session id (resume with: --session ${result.sessionId}): ${result.sessionId}`);
   if (typeof result.cost === "number") lines.push(`cost: $${result.cost}`);

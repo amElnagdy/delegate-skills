@@ -38,13 +38,15 @@
  *   -h, --help              Show this help.
  *
  * Result: written to <out-dir>/result.json and summarized on stdout —
- *   status, exitCode, codexVersion, threadId (for a later resume), finalMessage
+ *   status, exitCode, signal, codexVersion, threadId (for a later resume), finalMessage
  *   (Codex's own report), touchedFiles (git porcelain, null if git can't report), and the paths to
  *   events.jsonl and final.txt.
  *
  * Exit codes: a pre-run usage error (bad/missing args, empty brief) exits 2
  * before any run and writes no result file; a missing `codex` binary exits 127;
  * otherwise the exit code mirrors Codex's own (0 success, non-zero failure).
+ * If the child dies on a signal, the exit code is 128 plus the signal number and
+ * `result.json` records the signal.
  * Once the brief validates, `result.json` is written on every outcome —
  * completed, failed, or codex_unavailable. An orchestrator that polls for the
  * file must therefore also treat a non-zero exit with no file as a usage error.
@@ -53,7 +55,7 @@
 import { spawn, execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync, readFileSync, existsSync, appendFileSync } from "node:fs";
 import { join, resolve, basename } from "node:path";
-import { tmpdir } from "node:os";
+import { constants, tmpdir } from "node:os";
 
 const SANDBOX_MODES = new Set(["read-only", "workspace-write", "danger-full-access"]);
 
@@ -118,6 +120,9 @@ function readBrief(opts) {
     return readFileSync(opts.brief, "utf8");
   }
   // No --brief: read from stdin (fd 0). Empty stdin is an error.
+  if (process.stdin.isTTY) {
+    fail("no --brief given and stdin is a TTY; pass --brief <file> or pipe the brief on stdin");
+  }
   let stdin = "";
   try {
     stdin = readFileSync(0, "utf8");
@@ -240,7 +245,7 @@ function makeResultWriter(opts, version, run) {
 }
 
 function reportUnavailable(writeResult, resultPath) {
-  const result = writeResult({ status: "codex_unavailable", exitCode: 127, threadId: null, finalMessage: "", touchedFiles: null });
+  const result = writeResult({ status: "codex_unavailable", exitCode: 127, signal: null, threadId: null, finalMessage: "", touchedFiles: null });
   printSummary(result, resultPath);
   process.stderr.write("relay: `codex` not found on PATH. Install it (npm i -g @openai/codex) and run `codex login`.\n");
   process.exit(127);
@@ -278,13 +283,18 @@ function dispatchToCodex(opts, brief, run, writeResult) {
     while (stderrTail.length > 20) stderrTail.shift();
   });
 
+  let settled = false;
   child.on("error", (err) => {
-    const result = writeResult({ status: "failed", exitCode: 1, threadId, finalMessage: "", touchedFiles: gitTouchedFiles(opts.cd), error: String(err && err.message ? err.message : err) });
+    if (settled) return;
+    settled = true;
+    const result = writeResult({ status: "failed", exitCode: 1, signal: null, threadId, finalMessage: "", touchedFiles: gitTouchedFiles(opts.cd), error: String(err && err.message ? err.message : err) });
     printSummary(result, run.resultPath);
     process.exit(1);
   });
 
-  child.on("close", (code) => {
+  child.on("close", (code, signal) => {
+    if (settled) return;
+    settled = true;
     if (stdoutBuf.trim()) {
       const tid = recordEventLine(run.eventsPath, stdoutBuf);
       if (tid) threadId = tid;
@@ -292,7 +302,8 @@ function dispatchToCodex(opts, brief, run, writeResult) {
     const finalMessage = existsSync(run.finalPath) ? readFileSync(run.finalPath, "utf8").trim() : "";
     const result = writeResult({
       status: code === 0 ? "completed" : "failed",
-      exitCode: code === null ? 1 : code,
+      exitCode: code ?? (constants.signals[signal] ? 128 + constants.signals[signal] : 1),
+      signal: signal ?? null,
       threadId,
       finalMessage,
       touchedFiles: gitTouchedFiles(opts.cd),
@@ -329,7 +340,8 @@ function main() {
 function printSummary(result, resultPath) {
   const lines = [];
   lines.push("");
-  lines.push(`relay: ${result.status} (exit ${result.exitCode})  ·  codex ${result.codexVersion ?? "?"}`);
+  lines.push(`relay: ${result.status} (exit ${result.exitCode}${result.signal ? `, killed by ${result.signal}` : ""})  ·  codex ${result.codexVersion ?? "?"}`);
+  if (result.signal === "SIGKILL") lines.push("hint: the host killed the process (commonly the OOM killer or a supervisor timeout) — this is not a codex error; check host memory and re-dispatch, or split the task into smaller briefs.");
   if (result.resumeLast) lines.push("mode: resumed most recent session");
   if (result.threadId) lines.push(`thread id (resume with: codex exec resume ${result.threadId}): ${result.threadId}`);
   const touched = result.touchedFiles;

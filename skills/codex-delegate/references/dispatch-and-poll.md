@@ -50,7 +50,8 @@ touched-files report shows only Codex's edits and nothing of the helper's own.
 
 - `schema` — the result-format version (currently `delegate-relay.result.v1`)
 - `status` — `completed` | `failed` | `codex_unavailable`
-- `exitCode` — mirrors Codex's exit code; `127` if `codex` isn't on PATH
+- `exitCode` — mirrors Codex's exit code; `128` plus the signal number if the child was killed; `127` if `codex` isn't on PATH
+- `signal` — the signal that killed the child, otherwise `null`
 - `codexVersion` — the binary that actually ran
 - `threadId` — feed this to a later `codex exec resume <id>` (or use `--resume-last`)
 - `finalMessage` — Codex's own final report (the `<structured_output_contract>` you asked for)
@@ -87,6 +88,9 @@ process has exited and `result.json` is written — not when a status line says 
   Common causes: an auth lapse, an invalid `--model`, or a sandbox that blocked something the task
   needed. Fix the cause and re-dispatch; don't paper over it by doing the work yourself unless that's
   what the user wants.
+- **`status: failed` with `signal: "SIGKILL"`:** the host ended the child — commonly the OOM killer
+  or a supervisor timeout, not an implementer error. Free up host memory or split the task into
+  smaller briefs, then re-dispatch.
 - **Empty `finalMessage`:** Codex exited before producing a final message. Treat as a failed run;
   the events log usually shows where it stopped.
 
