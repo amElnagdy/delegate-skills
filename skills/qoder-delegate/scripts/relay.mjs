@@ -408,7 +408,7 @@ function dispatch(opts, brief, run, writeResult) {
       finalMessage: assembleFinal(),
       touchedFiles: gitTouchedFiles(opts.cd),
       ...(succeeded ? {} : { stderrTail: stderrTail.slice(-20) }),
-      ...(watchdogFired ? { error: `qodercli did not finish within --timeout ${opts.timeout}; killed by the relay watchdog` } : {}),
+      ...(watchdogFired ? { error: `qodercli run did not close within --timeout ${opts.timeout}; terminated by the relay watchdog` } : {}),
     });
     printSummary(result, run.resultPath);
     process.exit(exitCode);
