@@ -28,11 +28,11 @@ gates, and deciding what to land.
 ## Workflow
 
 1. Inspect the repository and collect only the context needed for the request.
-2. Choose the appropriate mode:
-   - `plan` before a non-trivial implementation.
-   - `advise` when the design or implementation approach is uncertain.
-   - `review` after implementation and project gates.
-3. Prepare a self-contained brief. Do not include credentials or unrelated repository content.
+2. Choose the mode that best fits the question:
+   - `plan` when an independent implementation plan would be useful.
+   - `advise` when a design or implementation decision would benefit from a second opinion.
+   - `review` when implemented changes would benefit from an independent review.
+3. Prepare a self-contained brief. Use [writing-the-brief.md](references/writing-the-brief.md) as optional guidance. Do not include credentials or unrelated repository content.
 4. Run the bundled relay script:
 
    ```bash
@@ -42,16 +42,10 @@ gates, and deciding what to land.
    ```
 
 5. Read `result.json` and `final.txt` from the output directory.
-6. Treat the delegated response as advisory and verify relevant claims against the repository.
+6. Treat the delegated response as advisory. Use [reviewing-the-result.md](references/reviewing-the-result.md) as optional guidance when evaluating it.
 7. Keep repository edits, project commands, gates, commits, and final decisions with the orchestrator.
 
-For a non-trivial implementation:
-
-1. Use `plan` before editing.
-2. Implement the change.
-3. Run the relevant gates.
-4. Use `review` with the requirements, final diff, and gate results.
-5. Resolve valid findings and rerun affected gates.
+For a non-trivial implementation, one useful pattern is to consult `plan` before editing and `review` after the relevant project gates. Adapt or skip those steps when they do not fit the task or the project's normal development process.
 
 Do not invoke Bifrost for trivial changes where delegation would add no useful value.
 
