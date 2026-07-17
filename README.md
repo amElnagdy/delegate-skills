@@ -103,10 +103,11 @@ CLI-enforced read-only mode — `touchedFiles` and the diff, not a flag, are the
 
 ### qoder-delegate
 
-Same loop for Qoder CLI (`qodercli`). The relay verifies the installed binary, accepts only a model
-name selected from the account's live `qodercli --list-models` output, and forwards an optional
-positive `--context-window` value for models that support explicit sizing. Non-interactive runs use
-Qoder's `accept_edits` permission mode by default; bypass remains opt-in.
+Same loop for Qoder CLI (`qodercli`). The relay verifies the installed binary and forwards a requested
+model; the skill requires the orchestrator to select that name from the account's live
+`qodercli --list-models` output. It also forwards an optional positive `--context-window` value for
+models that support explicit sizing. Non-interactive runs use Qoder's `accept_edits` permission mode
+by default; bypass remains opt-in.
 
 ### gemini-delegate
 
@@ -154,16 +155,15 @@ This package is intentionally inspectable:
 
 **Verification status** — claims here are backed by runs, not assumptions:
 
-- Every relay's mechanics are verified: argument handling, exit codes, `result.json`, resume, signal
-  reporting, and the implementer-specific guards.
 - `agy-delegate` — verified end-to-end on macOS against `agy` 1.0.16 (headless edit run, `--print=`
   delivery, absolute `--add-dir` workspace pin).
 - `grok-delegate` — verified end-to-end on macOS against `grok` 0.2.101 (streaming-json report capture,
   file-based brief delivery, resume; read-only is best-effort by measurement, hence the violation flag).
 - `kimi-delegate` — verified end-to-end on macOS against `kimi` 0.24.0 (headless `-p` edit run,
   stream-json parsing, `--session`/`--continue` resume).
-- `qoder-delegate` — verified end-to-end on macOS against `qodercli` 1.0.47 (Lite edit run,
-  `stream-json` parsing, `accept_edits`, explicit model and 32768-token context window, no commit).
+- `qoder-delegate` — contract-tested for argument validation, missing binary, model/context forwarding,
+  result parsing, and watchdog cleanup; verified end-to-end on macOS against `qodercli` 1.0.47 (Lite
+  edit run, `accept_edits`, explicit model and 32768-token context window, no commit).
 - `opencode-delegate` — requires `--model`, since OpenCode has no safe default.
 - Windows: the codex/opencode launches handle the `.cmd` shim (`shell:true` + quoting); native Windows
   launch smokes for `agy`/`grok`/`kimi`/`qoder` are still pending.

@@ -349,6 +349,10 @@ function dispatch(opts, brief, run, writeResult) {
   let sigkillTimer = null;
   const watchdogTimer = setTimeout(() => {
     watchdogFired = true;
+    child.once("exit", () => {
+      child.stdout.destroy();
+      child.stderr.destroy();
+    });
     child.kill("SIGTERM");
     sigkillTimer = setTimeout(() => {
       if (!settled) child.kill("SIGKILL");

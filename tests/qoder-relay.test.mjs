@@ -25,6 +25,7 @@ function run(args, env = process.env) {
   return spawnSync(process.execPath, [relay, ...args], {
     encoding: "utf8",
     env,
+    timeout: 3500,
   });
 }
 
@@ -35,6 +36,11 @@ const fs = require("node:fs");
 if (process.argv.includes("--version")) {
   console.log("1.0.47");
   process.exit(0);
+}
+if (process.env.QODER_FAKE_MODE === "watchdog") {
+  const { spawn } = require("node:child_process");
+  spawn(process.execPath, ["-e", "setTimeout(() => {}, 6000)"], {stdio:["ignore","inherit","inherit"]});
+  setInterval(() => {}, 1000);
 }
 fs.writeFileSync(process.env.QODER_ARGS_FILE, JSON.stringify(process.argv.slice(2)));
 console.log(JSON.stringify({type:"system",subtype:"init",qodercli_version:"1.0.47",model:"performance",permissionMode:"acceptEdits",session_id:"session-1"}));
@@ -114,4 +120,25 @@ test("forwards Qoder options and captures the structured result", () => {
   assert.equal(report.actualModel, "performance");
   assert.equal(report.finalMessage, "done");
   assert.deepEqual(report.usage, { input_tokens: 3, output_tokens: 1 });
+});
+
+test("watchdog finishes when a terminated Qoder child leaves inherited pipes open", () => {
+  const { root, bin, work, out } = fixture();
+  fakeQoder(bin);
+  const result = run([
+    "--brief", join(work, "brief.txt"),
+    "--cd", work,
+    "--timeout", "1s",
+    "--out-dir", out,
+  ], {
+    ...process.env,
+    PATH: `${bin}:${process.env.PATH}`,
+    QODER_ARGS_FILE: join(root, "args.json"),
+    QODER_FAKE_MODE: "watchdog",
+  });
+
+  assert.notEqual(result.status, null, result.error?.message);
+  const report = JSON.parse(readFileSync(join(out, "result.json"), "utf8"));
+  assert.equal(report.status, "failed");
+  assert.match(report.error, /relay watchdog/);
 });

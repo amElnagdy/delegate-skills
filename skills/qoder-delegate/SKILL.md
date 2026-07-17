@@ -12,7 +12,7 @@ metadata:
 
 # Qoder Delegate
 
-You are the **orchestrator**. Hand one bounded coding task to a separate **implementer** - Qoder CLI -
+You are the **orchestrator**. Delegate one bounded coding task to a separate **implementer** - Qoder CLI -
 then review what it produced and land it yourself. You write the brief and own the judgment; Qoder
 edits the working tree in its session; you verify and commit.
 
@@ -84,6 +84,8 @@ file contains a `status`; do not trust a progress display.
 
 A pre-run usage error exits 2 and writes no result. Missing `qodercli` exits 127 and writes
 `status: "qoder_unavailable"` with installation guidance.
+
+Native Windows relay launch is not yet verified; do not claim it until a native Windows smoke passes.
 
 ### 4. Review - do not trust the self-report
 
