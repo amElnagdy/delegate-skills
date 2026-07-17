@@ -104,6 +104,10 @@ function loadConfig(path) {
     fail("config must be a JSON object");
   }
 
+  if (config.apiKey !== undefined && typeof config.apiKey !== "string") {
+    fail("config.apiKey must be a string");
+  }
+
   if (typeof config.baseUrl !== "string" || !config.baseUrl.trim()) {
     fail("config.baseUrl must be a non-empty string");
   }
@@ -145,9 +149,11 @@ function validatePositiveInteger(value, name, optional = false) {
   if (!Number.isInteger(value) || value <= 0) fail(`${name} must be a positive integer`);
 }
 
-function requireApiKey() {
-  const key = process.env.BIFROST_API_KEY;
-  if (!key) fail("BIFROST_API_KEY is not set");
+function requireApiKey(config) {
+  const key = process.env.BIFROST_API_KEY || config.apiKey?.trim();
+  if (!key || key === "your-bifrost-key") {
+    fail("set BIFROST_API_KEY or config.apiKey");
+  }
   return key;
 }
 
@@ -262,7 +268,7 @@ async function run() {
 
   const configPath = resolveConfigPath(options);
   const config = loadConfig(configPath);
-  const apiKey = requireApiKey();
+  const apiKey = requireApiKey(config);
   const timeoutSeconds = options.timeoutSeconds ?? config.request?.timeoutSeconds ?? 180;
   validatePositiveInteger(timeoutSeconds, "timeout");
 
