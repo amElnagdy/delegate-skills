@@ -162,6 +162,8 @@ This package is intentionally inspectable:
   file-based brief delivery, resume; read-only is best-effort by measurement, hence the violation flag).
 - `kimi-delegate` — verified end-to-end on macOS against `kimi` 0.24.0 (headless `-p` edit run,
   stream-json parsing, `--session`/`--continue` resume).
+- `qoder-delegate` — verified end-to-end on macOS against `qodercli` 1.0.47 (Lite edit run,
+  `stream-json` parsing, `accept_edits`, explicit model and 32768-token context window, no commit).
 - `opencode-delegate` — requires `--model`, since OpenCode has no safe default.
 - Windows: the codex/opencode launches handle the `.cmd` shim (`shell:true` + quoting); native Windows
   launch smokes for `agy`/`grok`/`kimi`/`qoder` are still pending.
