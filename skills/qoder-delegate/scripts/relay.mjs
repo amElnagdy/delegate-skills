@@ -349,14 +349,19 @@ function dispatch(opts, brief, run, writeResult) {
   let sigkillTimer = null;
   const watchdogTimer = setTimeout(() => {
     watchdogFired = true;
-    child.once("exit", () => {
+    const destroyStreams = () => {
       child.stdout.destroy();
       child.stderr.destroy();
-    });
-    child.kill("SIGTERM");
-    sigkillTimer = setTimeout(() => {
-      if (!settled) child.kill("SIGKILL");
-    }, 10_000);
+    };
+    if (child.exitCode !== null || child.signalCode !== null) {
+      destroyStreams();
+    } else {
+      child.once("exit", destroyStreams);
+      child.kill("SIGTERM");
+      sigkillTimer = setTimeout(() => {
+        if (!settled) child.kill("SIGKILL");
+      }, 10_000);
+    }
   }, parseDuration(opts.timeout) ?? parseDuration(DEFAULT_TIMEOUT));
 
   child.on("error", (error) => {
