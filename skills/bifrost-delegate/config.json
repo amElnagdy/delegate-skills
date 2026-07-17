@@ -1,4 +1,5 @@
 {
+  "apiKey": "your-bifrost-key",
   "baseUrl": "http://localhost:1002",
   "models": {
     "plan": "",
