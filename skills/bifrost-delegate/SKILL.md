@@ -1,13 +1,13 @@
 ---
 name: bifrost-delegate
 description: >-
-  Delegate software-engineering planning, implementation advice, or code review to a model exposed by a
-  Bifrost gateway. Use when an orchestrating agent needs a second opinion from Bedrock, NVIDIA, or another
-  Bifrost-backed provider while keeping repository edits, gates, and final decisions with the orchestrator.
+	Delegate software-engineering planning, implementation advice, or code review to a model exposed by a
+	Bifrost gateway. Use when an orchestrating agent needs a second opinion from Bedrock, NVIDIA, or another
+	Bifrost-backed provider while keeping repository edits, gates, and final decisions with the orchestrator.
 license: MIT
 compatibility: Requires Node 18+ and a reachable Bifrost gateway.
 metadata:
-  version: 0.1.0
+	version: 0.1.0
 ---
 
 # Bifrost Delegate
@@ -29,9 +29,9 @@ gates, and deciding what to land.
 
 1. Inspect the repository and collect only the context needed for the request.
 2. Choose the mode that best fits the question:
-   - `plan` when an independent implementation plan would be useful.
-   - `advise` when a design or implementation decision would benefit from a second opinion.
-   - `review` when implemented changes would benefit from an independent review.
+	- `plan` when an independent implementation plan would be useful.
+	- `advise` when a design or implementation decision would benefit from a second opinion.
+	- `review` when implemented changes would benefit from an independent review.
 3. Prepare a self-contained brief. Use [writing-the-brief.md](references/writing-the-brief.md) as optional guidance. Do not include credentials or unrelated repository content.
 4. Run the bundled relay script:
 
@@ -48,6 +48,34 @@ gates, and deciding what to land.
 For a non-trivial implementation, one useful pattern is to consult `plan` before editing and `review` after the relevant project gates. Adapt or skip those steps when they do not fit the task or the project's normal development process.
 
 Do not invoke Bifrost for trivial changes where delegation would add no useful value.
+
+## Relay execution
+
+The bundled relay requires Node.js 18+ regardless of the target project's programming language.
+
+- Use `node` from the current shell when available.
+- If `node` is not on `PATH`, locate an existing compatible Node.js executable and use its absolute path.
+- Do not install Node.js or modify shell configuration unless the user requests it.
+- If no compatible Node.js executable is available, report the delegation failure and stop.
+
+## Project environment
+
+The relay runtime is independent from the project runtime. A delegated task may concern PHP, Python,
+Java, Node.js, or another stack.
+
+Use the project's existing tools and development workflow only when repository inspection, validation,
+or tests are needed. Do not install or reconfigure project runtimes merely to perform delegation.
+
+## Delegation success
+
+Treat delegation as successful only when:
+
+- the relay exits with status `0`;
+- `result.json` exists;
+- the result status is `completed`.
+
+Otherwise, report the actual failure and stop. Do not generate a substitute delegated response or claim
+that the configured model was used.
 
 ## Configure once
 
