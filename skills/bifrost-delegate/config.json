@@ -1,0 +1,13 @@
+{
+  "baseUrl": "http://localhost:1002",
+  "models": {
+    "plan": "",
+    "advise": "",
+    "review": ""
+  },
+  "request": {
+    "timeoutSeconds": 180,
+    "maxTokens": 6000,
+    "temperature": 0.1
+  }
+}
