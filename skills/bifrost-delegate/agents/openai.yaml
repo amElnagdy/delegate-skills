@@ -1,0 +1,7 @@
+interface:
+    display_name: "Bifrost Delegate"
+    short_description: "Consult Bifrost models for planning, implementation advice, and code review."
+    default_prompt: "Use Bifrost Delegate to obtain an independent engineering opinion for this task."
+
+policy:
+    allow_implicit_invocation: true
