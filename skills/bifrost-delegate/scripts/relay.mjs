@@ -149,6 +149,20 @@ function loadConfig(path) {
     fail("config.request.temperature must be a number between 0 and 2");
   }
 
+  const cache = request.cache;
+  if (cache !== undefined) {
+    if (!cache || typeof cache !== "object" || Array.isArray(cache)) {
+      fail("config.request.cache must be an object");
+    }
+    if (cache.enabled !== undefined && typeof cache.enabled !== "boolean") {
+      fail("config.request.cache.enabled must be a boolean");
+    }
+    if (cache.key !== undefined && (typeof cache.key !== "string" || !cache.key.trim())) {
+      fail("config.request.cache.key must be a non-empty string");
+    }
+    validatePositiveInteger(cache.ttl, "config.request.cache.ttl", true);
+  }
+
   return config;
 }
 
@@ -167,6 +181,20 @@ function requireApiKey(config) {
 
 function endpoint(baseUrl, path) {
   return `${baseUrl.replace(/\/+$/, "")}${path}`;
+}
+
+function cacheHeaders(config, mode) {
+  const cache = config.request?.cache;
+  if (!cache?.enabled) return {};
+
+  const key = cache.key?.trim() || "bifrost-delegate";
+  const ttl = cache.ttl ?? 300;
+
+  return {
+    "x-bf-cache-key": `${key}:${mode}`,
+    "x-bf-cache-type": "direct",
+    "x-bf-cache-ttl": String(ttl),
+  };
 }
 
 async function bifrostRequest(url, apiKey, init, timeoutSeconds) {
@@ -327,6 +355,7 @@ async function run() {
       apiKey,
       {
         method: "POST",
+        headers: cacheHeaders(config, options.mode),
         body: JSON.stringify({
           model,
           messages: [
