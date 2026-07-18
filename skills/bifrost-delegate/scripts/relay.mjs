@@ -1,6 +1,14 @@
 #!/usr/bin/env node
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
@@ -214,9 +222,11 @@ async function listModels(config, apiKey, timeoutSeconds) {
     timeoutSeconds,
   );
 
-  const ids = Array.isArray(body?.data)
-    ? body.data.map((item) => item?.id).filter((id) => typeof id === "string")
-    : [];
+  if (!Array.isArray(body?.data)) {
+    throw new Error("Bifrost models response did not contain a data array");
+  }
+
+  const ids = body.data.map((item) => item?.id).filter((id) => typeof id === "string");
 
   return ids.sort((left, right) => left.localeCompare(right));
 }
@@ -246,18 +256,29 @@ function readBrief(path) {
 }
 
 function createRunDir(outDir) {
-  const resolved = outDir
-    ? resolve(outDir)
-    : join(tmpdir(), "delegate-relay", `bifrost-${new Date().toISOString().replace(/[:.]/g, "-")}`);
-  mkdirSync(resolved, { recursive: true });
-  return resolved;
+  if (outDir) {
+    const resolved = resolve(outDir);
+    mkdirSync(resolved, { recursive: true });
+    return resolved;
+  }
+
+  const runDir = mkdtempSync(join(tmpdir(), "bifrost-"));
+  chmodSync(runDir, 0o700);
+  return runDir;
 }
 
 function writeResult(runDir, result) {
   const resultPath = join(runDir, "result.json");
-  writeFileSync(resultPath, `${JSON.stringify(result, null, 2)}\n`, "utf8");
+  const finalPath = join(runDir, "final.txt");
+  if (result.status === "failed" && existsSync(finalPath)) {
+    unlinkSync(finalPath);
+  }
+
+  writeFileSync(resultPath, `${JSON.stringify(result, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  chmodSync(resultPath, 0o600);
   if (result.finalMessage) {
-    writeFileSync(join(runDir, "final.txt"), `${result.finalMessage}\n`, "utf8");
+    writeFileSync(finalPath, `${result.finalMessage}\n`, { encoding: "utf8", mode: 0o600 });
+    chmodSync(finalPath, 0o600);
   }
   return resultPath;
 }
@@ -339,6 +360,7 @@ async function run() {
       finalMessage,
       usage: body?.usage || null,
       requestId: headers.get("x-request-id") || headers.get("x-bifrost-trace-id") || null,
+      sessionId: null,
       touchedFiles: [],
     };
 
@@ -362,6 +384,7 @@ async function run() {
         statusCode: error.statusCode || null,
         message: error.message,
       },
+      sessionId: null,
       touchedFiles: [],
     };
     const resultPath = writeResult(runDir, result);

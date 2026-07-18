@@ -1,13 +1,13 @@
 ---
 name: bifrost-delegate
 description: >-
-	Delegate software-engineering planning, implementation advice, or code review to a model exposed by a
-	Bifrost gateway. Use when an orchestrating agent needs a second opinion from Bedrock, NVIDIA, or another
-	Bifrost-backed provider while keeping repository edits, gates, and final decisions with the orchestrator.
+  Delegate software-engineering planning, implementation advice, or code review to a model exposed by a
+  Bifrost gateway. Use when an orchestrator needs a second opinion from Bedrock, NVIDIA, or another
+  Bifrost-backed provider while keeping repository edits, gates, and final decisions with the orchestrator.
 license: MIT
 compatibility: Requires Node 18+ and a reachable Bifrost gateway.
 metadata:
-	version: 0.1.0
+version: 0.1.0
 ---
 
 # Bifrost Delegate
