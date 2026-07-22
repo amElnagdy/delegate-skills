@@ -83,8 +83,9 @@ dispatches.
 The implementer starts from the brief's facts and there is no steering channel mid-run. Audit the
 fact block before sending — ownership, target branch, constraints, anything a judgment call rests
 on. If a premise turns out wrong while the run is live, stop the run and re-dispatch a corrected
-brief rather than discounting the output afterwards; for a write-capable run, inspect the working
-tree before the re-dispatch.
+brief rather than discounting the output afterward; for a write-capable run, inspect the working
+tree and reconcile any partial or premise-contaminated edits — keep or revert them — before the
+re-dispatch.
 
 ## A worked example
 

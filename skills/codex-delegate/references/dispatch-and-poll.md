@@ -107,9 +107,9 @@ process has exited and `result.json` is written — not when a status line says 
 ## Recovering lost work
 
 `events.jsonl` in the run directory records every event the implementer streamed, including its
-edits. If finished work is lost — the run killed late, or the working tree damaged afterwards —
-read the event log before re-dispatching: the recorded edits often reconstruct the completed
-change exactly, instead of paying for the run again.
+edits. If finished work is lost — the run killed late, or the working tree damaged afterward —
+read the event log before re-dispatching: its recorded tool calls and edits can often rebuild the
+lost work. Validate any reconstruction against the working-tree diff before relying on it.
 
 ## What the helper is doing (and the alternatives)
 

@@ -65,8 +65,8 @@ When the gates pass and the diff holds, **you commit** - the orchestrator, never
 a clear message describing what landed. If your project attributes co-authorship, that is the place for
 it.
 
-From dispatch until that commit, the uncommitted working tree is the only copy of the
-implementer's work. Never run `git checkout`, `reset`, `clean`, or a branch switch in the
+From dispatch until that commit, the uncommitted working tree is the authoritative copy of the
+implementer's work — the only one you can commit from, and often the only copy at all. Never run `git checkout`, `reset`, `clean`, or a branch switch in the
 workspace between those two points — however messy an interrupted run looks, inspect it with
 `git status` and `git diff` first. The tree is evidence, not clutter.
 
