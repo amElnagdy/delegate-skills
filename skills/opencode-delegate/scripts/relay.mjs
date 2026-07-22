@@ -145,8 +145,10 @@ function killChild(child) {
   // /f forces it. This is the same idiom tree-kill and npm/pnpm use. POSIX keeps real signals
   // (the SIGKILL escalation at each call site still applies there).
   if (process.platform === "win32") {
-    try { execFileSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore" }); }
-    catch { /* already exited, or no such pid */ }
+    // stderr is inherited so a real taskkill failure (e.g. access denied) is visible to the operator;
+    // its non-zero exit when the tree is already gone is the expected race and carries nothing to do.
+    try { execFileSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: ["ignore", "ignore", "inherit"] }); }
+    catch { /* already gone — nothing left to kill */ }
   } else {
     child.kill("SIGTERM");
   }
