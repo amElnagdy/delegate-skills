@@ -85,6 +85,11 @@ workaround for a missing feature; it's the deliberate boundary. Codex's sandbox 
 a clear message describing what landed. If your project attributes co-authorship, that's the place
 for it.
 
+From dispatch until that commit, the uncommitted working tree is the only copy of the
+implementer's work. Never run `git checkout`, `reset`, `clean`, or a branch switch in the
+workspace between those two points — however messy an interrupted run looks, inspect it with
+`git status` and `git diff` first. The tree is evidence, not clutter.
+
 ## Reworking: send the delta, not the whole task
 
 If the review turns up problems, don't restate the entire brief. Continue the same Codex session with

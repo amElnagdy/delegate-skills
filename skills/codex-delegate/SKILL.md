@@ -87,7 +87,8 @@ when it returns:
   a `result.json` with status `codex_unavailable`.)
 
 Do not trust progress trackers over reality: a run is finished when `result.json` is written and the
-process has exited. Read the working tree, not a status line.
+process has exited. Read the working tree, not a status line. The implementer's full report is
+`result.json`'s `finalMessage` field; the stdout summary prints only its tail.
 
 ### 4. Review — do not trust the self-report
 
@@ -111,6 +112,14 @@ orchestrator commits.** Only after the gates pass and the diff holds:
 - Commit the verified work yourself, with a clear message.
 - If it needs changes, send a delta brief with `--resume-last` (don't restate the whole task) and
   review again.
+
+## Read-only second opinions
+
+The relay doubles as a clean way to get an adversarial second opinion with no write risk: dispatch
+`--read-only` with a brief that lists the agreed points, then each contested point with both
+positions, and ask Codex to defend or concede each — deliverable in its final message, touching no
+files. This shape has settled design debates before any implementation was briefed; any relay with
+a read-only mode can run the same play.
 
 ## Authorization model
 

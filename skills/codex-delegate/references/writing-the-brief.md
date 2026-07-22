@@ -75,6 +75,14 @@ Keep each brief to a single, bounded job. "Review this, fix what you find, updat
 suggest a roadmap" produces a muddled run; split it into separate dispatches. One brief → one Codex
 run → one commit keeps review and rollback clean, and lets a later task assume the earlier one landed.
 
+## Premises freeze at dispatch
+
+The implementer starts from the brief's facts and there is no steering channel mid-run. Audit the
+fact block before sending — ownership, target branch, constraints, anything a judgment call rests
+on. If a premise turns out wrong while the run is live, stop the run and re-dispatch a corrected
+brief rather than discounting the output afterwards; for a write-capable run, inspect the working
+tree before the re-dispatch.
+
 ## Expect environment preamble in the reply
 
 Codex's final message may carry environment noise on top of your requested report — a banner injected

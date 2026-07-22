@@ -84,7 +84,8 @@ resume when it returns:
   the result file.
 
 Do not trust progress trackers over reality: a run is finished when `result.json` is written and the
-process has exited. Read the working tree, not a status line.
+process has exited. Read the working tree, not a status line. The implementer's full report is
+`result.json`'s `finalMessage` field; the stdout summary prints only its tail.
 
 ### 4. Review - do not trust the self-report
 

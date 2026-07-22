@@ -101,6 +101,13 @@ A pre-run usage error exits 2 and writes no result. A missing `kimi` exits 127 a
 - **Empty `finalMessage`:** inspect `touchedFiles` and the diff. Add a
   `<structured_output_contract>` to the next brief to require a closing report.
 
+## Recovering lost work
+
+`events.jsonl` in the run directory records every event the implementer streamed, including its
+edits. If finished work is lost — the run killed late, or the working tree damaged afterwards —
+read the event log before re-dispatching: the recorded edits often reconstruct the completed
+change exactly, instead of paying for the run again. A kimi run's edits have been replayed from the event log byte-exact this way.
+
 ## What the relay runs
 
 The argv is equivalent to:

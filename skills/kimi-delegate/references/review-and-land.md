@@ -52,6 +52,11 @@ to the human. Run relevant guard skills if installed.
 When the gates pass and the diff holds, **the orchestrator commits**, never the implementer. Write a
 clear message describing what landed.
 
+From dispatch until that commit, the uncommitted working tree is the only copy of the
+implementer's work. Never run `git checkout`, `reset`, `clean`, or a branch switch in the
+workspace between those two points — however messy an interrupted run looks, inspect it with
+`git status` and `git diff` first. The tree is evidence, not clutter.
+
 ## Rework: send the delta
 
 Continue the same session with only the correction:

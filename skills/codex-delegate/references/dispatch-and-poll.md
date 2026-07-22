@@ -104,6 +104,13 @@ process has exited and `result.json` is written — not when a status line says 
 - **Empty `finalMessage`:** Codex exited before producing a final message. Treat as a failed run;
   the events log usually shows where it stopped.
 
+## Recovering lost work
+
+`events.jsonl` in the run directory records every event the implementer streamed, including its
+edits. If finished work is lost — the run killed late, or the working tree damaged afterwards —
+read the event log before re-dispatching: the recorded edits often reconstruct the completed
+change exactly, instead of paying for the run again.
+
 ## What the helper is doing (and the alternatives)
 
 Under the hood the helper runs roughly:

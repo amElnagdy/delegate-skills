@@ -118,6 +118,13 @@ process has exited and `result.json` is written — not when a status line says 
   you passed `--no-auto`. Either drop it, or set the agent's permissions to *allow* (not ask) the
   actions the task needs.
 
+## Recovering lost work
+
+`events.jsonl` in the run directory records every event the implementer streamed, including its
+edits. If finished work is lost — the run killed late, or the working tree damaged afterwards —
+read the event log before re-dispatching: the recorded edits often reconstruct the completed
+change exactly, instead of paying for the run again.
+
 ## What the helper is doing (and the alternatives)
 
 Under the hood the helper runs roughly:

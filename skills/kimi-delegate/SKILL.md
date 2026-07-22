@@ -76,7 +76,8 @@ background it in the shell and poll for `result.json`. A pre-run usage error exi
 result; a missing `kimi` exits 127 and writes `status: "kimi_unavailable"`.
 
 Trust process state and the working tree over a progress display. Completion means the process exited
-and `result.json` exists.
+and `result.json` exists. Kimi's full report is `result.json`'s `finalMessage` field; the stdout
+summary prints only its tail.
 
 ### 4. Review - do not trust the self-report
 
