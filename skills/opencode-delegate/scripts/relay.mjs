@@ -137,6 +137,21 @@ function parseDuration(duration) {
   return (Number(match[1] || 0) * 3600 + Number(match[2] || 0) * 60 + Number(match[3] || 0)) * 1000;
 }
 
+function killChild(child) {
+  // On Windows the child is the .cmd shim (the shell:true launch above), so signalling it does
+  // not reach the OpenCode process it spawned — the run would keep editing after the relay reports
+  // timeout/aborted. Windows has no process-group signals and Node can't kill a process family
+  // without a Job Object, so kill the tree by pid with the OS tool: /t includes descendants,
+  // /f forces it. This is the same idiom tree-kill and npm/pnpm use. POSIX keeps real signals
+  // (the SIGKILL escalation at each call site still applies there).
+  if (process.platform === "win32") {
+    try { execFileSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore" }); }
+    catch { /* already exited, or no such pid */ }
+  } else {
+    child.kill("SIGTERM");
+  }
+}
+
 function headerComment() {
   // The leading block comment doubles as --help text.
   const src = readFileSync(new URL(import.meta.url), "utf8");
@@ -410,7 +425,7 @@ function dispatchToOpenCode(opts, brief, run, writeResult) {
         child.stdout.destroy();
         child.stderr.destroy();
       });
-      child.kill("SIGTERM");
+      killChild(child);
       sigkillTimer = setTimeout(() => {
         if (!settled) child.kill("SIGKILL");
       }, 10_000);
@@ -443,7 +458,7 @@ function dispatchToOpenCode(opts, brief, run, writeResult) {
         error: `the relay was killed by ${sig}; opencode was terminated with it — inspect the working tree before re-dispatching`,
       });
       printSummary(result, run.resultPath);
-      child.kill("SIGTERM");
+      killChild(child);
       setTimeout(() => {
         try { child.kill("SIGKILL"); } catch { /* already gone */ }
         process.exit(result.exitCode);
