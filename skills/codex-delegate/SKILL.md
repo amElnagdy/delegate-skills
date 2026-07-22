@@ -118,10 +118,10 @@ orchestrator commits.** Only after the gates pass and the diff holds:
 The relay doubles as a clean way to get an adversarial second opinion with no write risk: dispatch
 `--read-only` with a brief that lists the agreed points, then each contested point with both
 positions, and ask Codex to defend or concede each — deliverable in its final message, touching no
-files. Any relay with a read-only mode supports the same use, but check how hard that mode's
-guarantee is first: Codex's sandbox enforces it, while Grok's is best-effort and only flagged
-after the fact (`readOnlyViolation`) — on those relays, verify `touchedFiles` came back empty
-instead of assuming no edits.
+files. Any delegation skill whose implementer offers a read-only mode supports the same use, but
+check how hard that mode's guarantee is first: Codex's sandbox enforces it, while Grok's is
+best-effort and only flagged after the fact (`readOnlyViolation`) — for those implementers,
+verify `touchedFiles` came back empty instead of assuming no edits.
 
 ## Authorization model
 
