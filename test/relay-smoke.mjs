@@ -7,16 +7,16 @@
  * not complete:
  *
  *   1. timeout  — the watchdog kills the implementer's WHOLE process tree and
- *                 result.json reports status "timeout". Driven for codex,
- *                 opencode and grok on every platform (on Windows they launch a
- *                 .cmd shim via shell:true — exactly the case a plain
- *                 child.kill would miss) and for kimi on POSIX. kimi and agy
- *                 spawn their binary directly, which never resolves a .cmd
- *                 shim, so a PATH stand-in cannot exist for them on Windows —
- *                 and neither has Windows-specific kill code to prove. agy's
- *                 watchdog is --print-timeout plus a fixed 60s grace, too slow
- *                 for a smoke; its changed code (signal handlers, snapshot
- *                 refresh) is exactly the aborted path below.
+ *                 result.json reports status "timeout". Driven for all five
+ *                 relays on both platforms. On Windows, codex/opencode/grok
+ *                 launch a .cmd shim via shell:true (exactly the case a plain
+ *                 child.kill would miss), while agy and kimi spawn a native
+ *                 binary directly — a .cmd stand-in can never represent them,
+ *                 so the smoke compiles a real fake .exe with the C# compiler
+ *                 that ships in-box with Windows (no install, no network) and
+ *                 puts it on PATH under their names. agy's watchdog is
+ *                 --print-timeout plus a fixed 60s grace, so its scenario is
+ *                 the slow one (about a minute) on every platform.
  *   2. aborted  — killing the relay itself still produces result.json with
  *                 status "aborted", and files the implementer flushes during
  *                 the shutdown grace window appear in the refreshed
@@ -24,7 +24,7 @@
  *                 delivers no catchable SIGTERM, so the scenario cannot be
  *                 driven there (the skill docs carry the same caveat).
  *
- * The fake CLI answers each relay's version preflight (--version, `version`,
+ * Every fake answers each relay's version preflight (--version, `version`,
  * `changelog`) and otherwise runs until killed. It also spawns a subprocess of
  * its own, and both scenarios assert that this grandchild dies with it — the
  * relays' kill must fell the whole process family (a process-group signal on
@@ -32,7 +32,7 @@
  * Node built-ins only.
  */
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, chmodSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, chmodSync, mkdirSync, copyFileSync } from "node:fs";
 import { join, delimiter, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -85,14 +85,57 @@ if (process.env.SMOKE_MODE === "abort") {
 setInterval(() => {}, 1000);
 `;
 
+// agy and kimi spawn a native binary without a shell, so on Windows their stand-in must be a
+// real .exe. The C# compiler ships in-box with the .NET Framework on every supported Windows,
+// which lets the smoke build one locally — no install, no network, still dependency-free.
+const FAKE_EXE_SOURCE = `using System;
+using System.Diagnostics;
+using System.IO;
+using System.Threading;
+class FakeCli {
+  static int Main(string[] args) {
+    if (Array.IndexOf(args, "--version") >= 0 || (args.Length > 0 && (args[0] == "version" || args[0] == "changelog"))) {
+      Console.WriteLine("fake-cli 0.0.0-smoke");
+      return 0;
+    }
+    var psi = new ProcessStartInfo {
+      FileName = Environment.GetEnvironmentVariable("SMOKE_NODE"),
+      Arguments = "-e setInterval(()=>{},1000)",
+      UseShellExecute = false,
+    };
+    var grand = Process.Start(psi);
+    File.WriteAllText(Environment.GetEnvironmentVariable("SMOKE_GRAND_PID_FILE"), grand.Id.ToString());
+    File.WriteAllText(Environment.GetEnvironmentVariable("SMOKE_PID_FILE"), Process.GetCurrentProcess().Id.ToString());
+    Thread.Sleep(Timeout.Infinite);
+    return 0;
+  }
+}
+`;
+
 const scratch = mkdtempSync(join(tmpdir(), "relay-smoke-"));
 const shimDir = join(scratch, "shim");
 mkdirSync(shimDir);
 writeFileSync(join(shimDir, "fake-cli.cjs"), FAKE);
-for (const skill of SKILLS) {
-  if (WIN) {
+if (WIN) {
+  for (const skill of ["codex", "opencode", "grok"]) {
     writeFileSync(join(shimDir, `${skill}.cmd`), `@node "%~dp0fake-cli.cjs" %*\r\n`);
-  } else {
+  }
+  const windir = process.env.WINDIR || "C:\\Windows";
+  const csc = [
+    join(windir, "Microsoft.NET", "Framework64", "v4.0.30319", "csc.exe"),
+    join(windir, "Microsoft.NET", "Framework", "v4.0.30319", "csc.exe"),
+  ].find((p) => existsSync(p));
+  check("windows: the in-box C# compiler exists (builds the native fake for agy/kimi)", Boolean(csc));
+  if (csc) {
+    const csFile = join(shimDir, "fake-cli.cs");
+    writeFileSync(csFile, FAKE_EXE_SOURCE);
+    const compiled = spawnSync(csc, ["/nologo", `/out:${join(shimDir, "kimi.exe")}`, csFile], { encoding: "utf8" });
+    check("windows: the native fake compiled", compiled.status === 0);
+    if (compiled.status === 0) copyFileSync(join(shimDir, "kimi.exe"), join(shimDir, "agy.exe"));
+    else console.error(`${compiled.stdout ?? ""}${compiled.stderr ?? ""}`);
+  }
+} else {
+  for (const skill of SKILLS) {
     const shim = join(shimDir, skill);
     writeFileSync(shim, `#!/bin/sh\nexec node "$(dirname "$0")/fake-cli.cjs" "$@"\n`);
     chmodSync(shim, 0o755);
@@ -100,7 +143,7 @@ for (const skill of SKILLS) {
 }
 const briefPath = join(scratch, "brief.txt");
 writeFileSync(briefPath, "smoke brief: run until killed.");
-const baseEnv = { ...process.env, PATH: shimDir + delimiter + process.env.PATH };
+const baseEnv = { ...process.env, PATH: shimDir + delimiter + process.env.PATH, SMOKE_NODE: process.execPath };
 
 const freshRepo = (name) => {
   const dir = join(scratch, name);
@@ -120,21 +163,29 @@ const result = (outDir) => JSON.parse(readFileSync(join(outDir, "result.json"), 
 // opencode refuses a fresh run without an explicit model
 const EXTRA_ARGS = { codex: [], opencode: ["--model", "fake/model"], agy: [], grok: [], kimi: [] };
 
-// ---- 1. the --timeout watchdog fells the whole tree ----
-const TIMEOUT_SKILLS = WIN ? ["codex", "opencode", "grok"] : ["codex", "opencode", "grok", "kimi"];
-for (const skill of TIMEOUT_SKILLS) {
+// ---- 1. the watchdog fells the whole tree ----
+// agy's watchdog flag is --print-timeout, and it always adds a fixed 60s grace on top,
+// so its run needs about a minute wherever it executes.
+const TIMEOUT_CASES = [
+  { skill: "codex", flags: ["--timeout", "6s"], exitDeadline: 45_000 },
+  { skill: "opencode", flags: ["--timeout", "6s"], exitDeadline: 45_000 },
+  { skill: "grok", flags: ["--timeout", "6s"], exitDeadline: 45_000 },
+  { skill: "kimi", flags: ["--timeout", "6s"], exitDeadline: 45_000 },
+  { skill: "agy", flags: ["--print-timeout", "1s"], exitDeadline: 120_000 },
+];
+for (const { skill, flags, exitDeadline } of TIMEOUT_CASES) {
   const outDir = join(scratch, `out-timeout-${skill}`);
   const pidFile = join(scratch, `pid-timeout-${skill}`);
   const grandPidFile = join(scratch, `grandpid-timeout-${skill}`);
   const workDir = freshRepo(`work-timeout-${skill}`);
-  const child = runRelay(skill, workDir, outDir, ["--timeout", "6s", ...EXTRA_ARGS[skill]], { SMOKE_PID_FILE: pidFile, SMOKE_GRAND_PID_FILE: grandPidFile, SMOKE_MODE: "timeout" });
+  const child = runRelay(skill, workDir, outDir, [...flags, ...EXTRA_ARGS[skill]], { SMOKE_PID_FILE: pidFile, SMOKE_GRAND_PID_FILE: grandPidFile, SMOKE_MODE: "timeout" });
   let stderr = "";
   child.stderr.on("data", (d) => { stderr += d; });
   check(`${skill} timeout: the fake implementer came up`, await until(() => existsSync(pidFile), 10_000));
   const implementerPid = existsSync(pidFile) ? Number(readFileSync(pidFile, "utf8")) : null;
   const grandPid = existsSync(grandPidFile) ? Number(readFileSync(grandPidFile, "utf8")) : null;
   const exited = await new Promise((res) => {
-    const t = setTimeout(() => res(false), 45_000);
+    const t = setTimeout(() => res(false), exitDeadline);
     child.on("close", () => { clearTimeout(t); res(true); });
   });
   check(`${skill} timeout: the relay exited on its own`, exited);
