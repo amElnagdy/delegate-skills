@@ -61,6 +61,7 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 # choose a configured model alias:       add --model <alias from your kimi config>
 # resume the most recent session:        add --resume-last  (delta brief only)
 # resume a specific session:             add --session <id> (delta brief only)
+# hard time limit (watchdog):            add --timeout 2h  (the 30m default suits short runs; implementation briefs routinely need 1-2h)
 # see all options:                       node .../relay.mjs --help
 ```
 

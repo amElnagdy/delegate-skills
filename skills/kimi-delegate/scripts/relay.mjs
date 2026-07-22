@@ -59,7 +59,9 @@
  * otherwise the exit code mirrors Kimi's own (0 success, non-zero failure). If
  * the child dies on a signal, the exit code is 128 plus the signal number and
  * `result.json` records the signal. Once the brief validates, `result.json` is
- * written on every outcome - completed, failed, or kimi_unavailable.
+ * written on every outcome - completed, failed, timeout (the --timeout watchdog
+ * fired), aborted (the relay itself was killed and forwarded the kill to kimi),
+ * or kimi_unavailable.
  */
 
 import { spawn, execFileSync } from "node:child_process";
@@ -355,6 +357,35 @@ function dispatchToKimi(opts, brief, run, writeResult) {
     }, 10_000);
   }, timeoutMs);
 
+  // The relay's own death must still produce a result: without this, a kill from the
+  // orchestrator's side (its command timeout, a stopped task, a closed terminal) writes
+  // no result.json and leaves the kimi child running or dying mid-edit with nothing
+  // recording why. SIGTERM/SIGHUP registration is a no-op on Windows; SIGINT works there.
+  for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) {
+    process.on(sig, () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(watchdogTimer);
+      if (sigkillTimer) clearTimeout(sigkillTimer);
+      const result = writeResult({
+        status: "aborted",
+        exitCode: 128 + (constants.signals[sig] || 15),
+        signal: sig,
+        sessionId,
+        finalMessage: assembleFinal(),
+        touchedFiles: gitTouchedFiles(opts.cd),
+        stderrTail: stderrTail.slice(-20),
+        error: `the relay was killed by ${sig}; kimi was terminated with it — inspect the working tree before re-dispatching`,
+      });
+      printSummary(result, run.resultPath);
+      child.kill("SIGTERM");
+      setTimeout(() => {
+        try { child.kill("SIGKILL"); } catch { /* already gone */ }
+        process.exit(result.exitCode);
+      }, 2000);
+    });
+  }
+
   child.on("error", (err) => {
     if (settled) return;
     settled = true;
@@ -385,7 +416,7 @@ function dispatchToKimi(opts, brief, run, writeResult) {
     const mapped = code ?? (constants.signals[signal] ? 128 + constants.signals[signal] : 1);
     const exitCode = succeeded ? 0 : mapped === 0 ? 1 : mapped;
     const result = writeResult({
-      status: succeeded ? "completed" : "failed",
+      status: succeeded ? "completed" : watchdogFired ? "timeout" : "failed",
       exitCode,
       signal: signal ?? null,
       sessionId,
@@ -428,6 +459,7 @@ function printSummary(result, resultPath) {
   lines.push("");
   lines.push(`relay: ${result.status} (exit ${result.exitCode}${result.signal ? `, killed by ${result.signal}` : ""})  ·  kimi ${result.kimiVersion ?? "?"}`);
   if (result.signal === "SIGKILL") lines.push("hint: the host killed the process (commonly the OOM killer or a supervisor timeout) — this is not a kimi error; check host memory and re-dispatch, or split the task into smaller briefs.");
+  if (result.signal === "SIGTERM" && result.status === "failed") lines.push("hint: something outside the relay terminated kimi (a supervisor, the session ending, or a manual kill) — when the relay itself does the killing it reports status \"timeout\" or \"aborted\" instead; inspect the working tree before re-dispatching.");
   if (result.resumed) lines.push("mode: resumed an existing session");
   if (result.sessionId) lines.push(`session id (resume with: --session ${result.sessionId}): ${result.sessionId}`);
   const touched = result.touchedFiles;

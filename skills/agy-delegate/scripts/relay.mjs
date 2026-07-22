@@ -59,7 +59,9 @@
  * If the child dies on a signal, the exit code is 128 plus the signal number and
  * `result.json` records the signal.
  * Once the brief validates, `result.json` is written on every outcome -
- * completed, failed, or agy_unavailable. An orchestrator that polls for the
+ * completed, failed, timeout (the relay watchdog fired after --print-timeout
+ * plus 60s grace), aborted (the relay itself was killed and forwarded the kill
+ * to agy), or agy_unavailable. An orchestrator that polls for the
  * file must therefore also treat a non-zero exit with no file as a usage error.
  */
 
@@ -344,6 +346,36 @@ function dispatchToAgy(opts, brief, run, writeResult) {
     }, 10_000);
   }, timeoutMs + 60_000);
 
+  // The relay's own death must still produce a result: without this, a kill from the
+  // orchestrator's side (its command timeout, a stopped task, a closed terminal) writes
+  // no result.json and leaves the agy child running or dying mid-edit with nothing
+  // recording why. SIGTERM/SIGHUP registration is a no-op on Windows; SIGINT works there.
+  for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) {
+    process.on(sig, () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(watchdogTimer);
+      if (sigkillTimer) clearTimeout(sigkillTimer);
+      const finalMessage = stdout.trim();
+      if (finalMessage) writeFileSync(run.finalPath, finalMessage, "utf8");
+      const result = writeResult({
+        status: "aborted",
+        exitCode: 128 + (constants.signals[sig] || 15),
+        signal: sig,
+        finalMessage,
+        touchedFiles: gitTouchedFiles(opts.cd),
+        stderrTail: stderrTail.slice(-20),
+        error: `the relay was killed by ${sig}; agy was terminated with it — inspect the working tree before re-dispatching`,
+      });
+      printSummary(result, run.resultPath);
+      child.kill("SIGTERM");
+      setTimeout(() => {
+        try { child.kill("SIGKILL"); } catch { /* already gone */ }
+        process.exit(result.exitCode);
+      }, 2000);
+    });
+  }
+
   // Decode across chunk boundaries: a multibyte UTF-8 character split between
   // two data events would otherwise decode as U+FFFD and corrupt the report.
   const stdoutDecoder = new StringDecoder("utf8");
@@ -394,7 +426,7 @@ function dispatchToAgy(opts, brief, run, writeResult) {
     const succeeded = code === 0 && !watchdogFired;
     const mapped = code ?? (constants.signals[signal] ? 128 + constants.signals[signal] : 1);
     const result = writeResult({
-      status: succeeded ? "completed" : "failed",
+      status: succeeded ? "completed" : watchdogFired ? "timeout" : "failed",
       exitCode: succeeded ? 0 : mapped === 0 ? 1 : mapped,
       signal: signal ?? null,
       finalMessage,
@@ -438,6 +470,7 @@ function printSummary(result, resultPath) {
   lines.push("");
   lines.push(`relay: ${result.status} (exit ${result.exitCode}${result.signal ? `, killed by ${result.signal}` : ""})  ·  agy ${result.agyVersion ?? "?"}`);
   if (result.signal === "SIGKILL") lines.push("hint: the host killed the process (commonly the OOM killer or a supervisor timeout) — this is not an agy error; check host memory and re-dispatch, or split the task into smaller briefs.");
+  if (result.signal === "SIGTERM" && result.status === "failed") lines.push("hint: something outside the relay terminated agy (a supervisor, the session ending, or a manual kill) — when the relay itself does the killing it reports status \"timeout\" or \"aborted\" instead; inspect the working tree before re-dispatching.");
   if (result.resumed) lines.push("mode: resumed an existing conversation");
   if (result.projectId) lines.push(`project id: ${result.projectId}`);
   if (result.conversationId) lines.push(`conversation id (resume with: --conversation ${result.conversationId}): ${result.conversationId}`);

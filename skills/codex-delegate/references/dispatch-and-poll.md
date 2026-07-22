@@ -49,7 +49,7 @@ touched-files report shows only Codex's edits and nothing of the helper's own.
 `<out-dir>/result.json` is the contract. Fields:
 
 - `schema` — the result-format version (currently `delegate-relay.result.v1`)
-- `status` — `completed` | `failed` | `codex_unavailable`
+- `status` — `completed` | `failed` | `timeout` | `aborted` | `codex_unavailable`
 - `exitCode` — mirrors Codex's exit code; `128` plus the signal number if the child was killed; `127` if `codex` isn't on PATH
 - `signal` — the signal that killed the child, otherwise `null`
 - `codexVersion` — the binary that actually ran
@@ -58,7 +58,7 @@ touched-files report shows only Codex's edits and nothing of the helper's own.
 - `touchedFiles` — `git status --porcelain` lines in the working root: your review starting point. `null` (not `[]`) when git can't report — `git` missing, or a non-repo run under `--skip-git-repo-check`; `[]` means git ran and the tree is clean
 - `briefPath` / `eventsPath` / `finalPath` — the exact brief relay sent, the raw JSONL event stream, and the final-message file
 - `workdir`, `sandbox`, `model`, `resumeLast`, `startedAt`, `finishedAt`
-- `stderrTail` — last ~20 stderr lines; present **only** on a failed run (a non-zero Codex exit), absent on `completed`, `codex_unavailable`, and launch failures
+- `stderrTail` — last ~20 stderr lines; present on every run that did not complete (`failed`, `timeout`, `aborted`), absent on `completed`, `codex_unavailable`, and launch failures
 - `error` — present **only** if Codex failed to launch
 
 The helper also prints a summary to stdout and exits with Codex's exit code, so a wrapping script can
@@ -88,6 +88,12 @@ process has exited and `result.json` is written — not when a status line says 
   Common causes: an auth lapse, an invalid `--model`, or a sandbox that blocked something the task
   needed. Fix the cause and re-dispatch; don't paper over it by doing the work yourself unless that's
   what the user wants.
+- **`status: timeout`:** the `--timeout` watchdog killed the run. The working tree may hold a
+  half-applied change — inspect it before deciding between a longer `--timeout`, a smaller brief,
+  or a resume.
+- **`status: aborted`:** the relay itself was killed (its parent's timeout, a stopped task, a
+  closed terminal) and forwarded the kill to codex. The result is written before the relay exits;
+  inspect the working tree before re-dispatching.
 - **`status: failed` with `signal: "SIGKILL"`:** the host ended the child — commonly the OOM killer
   or a supervisor timeout, not an implementer error. Free up host memory or split the task into
   smaller briefs, then re-dispatch.

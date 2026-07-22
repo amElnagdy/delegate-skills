@@ -42,6 +42,9 @@
  *   --resume-last           Continue the most recent OpenCode session; send only the delta brief.
  *   --session <id>          Continue a specific session id (ses_...); send only the delta brief.
  *   --pure                  Run OpenCode without external plugins (cleaner event stream).
+ *   --timeout <dur>         Relay-side watchdog (default: off). Durations use h/m/s
+ *                           strings like 30m or 2h. On expiry the opencode child is
+ *                           killed and result.json gets status "timeout".
  *   --out-dir <dir>         Where to write run artifacts (default: a fresh dir under
  *                           the system temp dir, so the repo under review stays clean).
  *   -h, --help              Show this help.
@@ -57,7 +60,9 @@
  * If the child dies on a signal, the exit code is 128 plus the signal number and
  * `result.json` records the signal.
  * Once the brief validates, `result.json` is written on every outcome —
- * completed, failed, or opencode_unavailable. An orchestrator that polls for the
+ * completed, failed, timeout (the --timeout watchdog fired), aborted (the relay
+ * itself was killed and forwarded the kill to opencode), or
+ * opencode_unavailable. An orchestrator that polls for the
  * file must therefore also treat a non-zero exit with no file as a usage error.
  */
 
@@ -83,6 +88,7 @@ function parseArgs(argv) {
     resumeLast: false,
     session: null,
     pure: false,
+    timeout: null,
     outDir: null,
   };
   for (let i = 0; i < argv.length; i += 1) {
@@ -110,12 +116,25 @@ function parseArgs(argv) {
       case "--resume-last": opts.resumeLast = true; break;
       case "--session": opts.session = next(); break;
       case "--pure": opts.pure = true; break;
+      case "--timeout": opts.timeout = next(); break;
       case "--out-dir": opts.outDir = resolve(next()); break;
       default:
         fail(`unknown option: ${arg}`);
     }
   }
+  // The watchdog is relay-only (the opencode launch has no timeout flag), so a malformed
+  // --timeout must fail loudly here - a silent no-watchdog fallback would be wrong.
+  if (opts.timeout !== null && parseDuration(opts.timeout) === null) {
+    fail(`--timeout "${opts.timeout}" is not a duration; use h/m/s strings like 30m, 90s, or 1h30m`);
+  }
   return opts;
+}
+
+function parseDuration(duration) {
+  // Whole-string match: "1mtypo" must be rejected, not read as one minute.
+  const match = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/.exec(duration);
+  if (!match || (!match[1] && !match[2] && !match[3])) return null;
+  return (Number(match[1] || 0) * 3600 + Number(match[2] || 0) * 60 + Number(match[3] || 0)) * 1000;
 }
 
 function headerComment() {
@@ -380,9 +399,62 @@ function dispatchToOpenCode(opts, brief, run, writeResult) {
   };
 
   let settled = false;
+  let watchdogFired = false;
+  let watchdogTimer = null;
+  let sigkillTimer = null;
+  const timeoutMs = opts.timeout === null ? null : parseDuration(opts.timeout);
+  if (timeoutMs !== null) {
+    watchdogTimer = setTimeout(() => {
+      watchdogFired = true;
+      child.once("exit", () => {
+        child.stdout.destroy();
+        child.stderr.destroy();
+      });
+      child.kill("SIGTERM");
+      sigkillTimer = setTimeout(() => {
+        if (!settled) child.kill("SIGKILL");
+      }, 10_000);
+    }, timeoutMs);
+  }
+
+  const clearWatchdog = () => {
+    if (watchdogTimer) clearTimeout(watchdogTimer);
+    if (sigkillTimer) clearTimeout(sigkillTimer);
+  };
+
+  // The relay's own death must still produce a result: without this, a kill from the
+  // orchestrator's side (its command timeout, a stopped task, a closed terminal) writes
+  // no result.json and leaves the opencode child running or dying mid-edit with nothing
+  // recording why. SIGTERM/SIGHUP registration is a no-op on Windows; SIGINT works there.
+  for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) {
+    process.on(sig, () => {
+      if (settled) return;
+      settled = true;
+      clearWatchdog();
+      const result = writeResult({
+        status: "aborted",
+        exitCode: 128 + (constants.signals[sig] || 15),
+        signal: sig,
+        sessionId,
+        finalMessage: assembleFinal(),
+        touchedFiles: gitTouchedFiles(opts.cd),
+        cost: sawCost ? Number(totalCost.toFixed(6)) : null,
+        stderrTail: stderrTail.slice(-20),
+        error: `the relay was killed by ${sig}; opencode was terminated with it — inspect the working tree before re-dispatching`,
+      });
+      printSummary(result, run.resultPath);
+      child.kill("SIGTERM");
+      setTimeout(() => {
+        try { child.kill("SIGKILL"); } catch { /* already gone */ }
+        process.exit(result.exitCode);
+      }, 2000);
+    });
+  }
+
   child.on("error", (err) => {
     if (settled) return;
     settled = true;
+    clearWatchdog();
     const result = writeResult({ status: "failed", exitCode: 1, signal: null, sessionId, finalMessage: assembleFinal(), touchedFiles: gitTouchedFiles(opts.cd), cost: sawCost ? totalCost : null, error: String(err && err.message ? err.message : err) });
     printSummary(result, run.resultPath);
     process.exit(1);
@@ -391,16 +463,22 @@ function dispatchToOpenCode(opts, brief, run, writeResult) {
   child.on("close", (code, signal) => {
     if (settled) return;
     settled = true;
+    clearWatchdog();
     const finalMessage = assembleFinal();
+    // A timed-out run is never a success even if opencode handles SIGTERM by exiting 0 -
+    // orchestrators key off status and the relay exit code.
+    const succeeded = code === 0 && !watchdogFired;
+    const mapped = code ?? (constants.signals[signal] ? 128 + constants.signals[signal] : 1);
     const result = writeResult({
-      status: code === 0 ? "completed" : "failed",
-      exitCode: code ?? (constants.signals[signal] ? 128 + constants.signals[signal] : 1),
+      status: succeeded ? "completed" : watchdogFired ? "timeout" : "failed",
+      exitCode: succeeded ? 0 : mapped === 0 ? 1 : mapped,
       signal: signal ?? null,
       sessionId,
       finalMessage,
       touchedFiles: gitTouchedFiles(opts.cd),
       cost: sawCost ? Number(totalCost.toFixed(6)) : null,
-      ...(code === 0 ? {} : { stderrTail: stderrTail.slice(-20) }),
+      ...(succeeded ? {} : { stderrTail: stderrTail.slice(-20) }),
+      ...(watchdogFired ? { error: `opencode did not finish within --timeout ${opts.timeout}; killed by the relay watchdog` } : {}),
     });
     printSummary(result, run.resultPath);
     process.exit(result.exitCode);
@@ -445,6 +523,7 @@ function printSummary(result, resultPath) {
   lines.push("");
   lines.push(`relay: ${result.status} (exit ${result.exitCode}${result.signal ? `, killed by ${result.signal}` : ""})  ·  opencode ${result.opencodeVersion ?? "?"}`);
   if (result.signal === "SIGKILL") lines.push("hint: the host killed the process (commonly the OOM killer or a supervisor timeout) — this is not an opencode error; check host memory and re-dispatch, or split the task into smaller briefs.");
+  if (result.signal === "SIGTERM" && result.status === "failed") lines.push("hint: something outside the relay terminated opencode (a supervisor, the session ending, or a manual kill) — when the relay itself does the killing it reports status \"timeout\" or \"aborted\" instead; inspect the working tree before re-dispatching.");
   if (result.resumeLast || result.agent === "(inherited from resumed session)") lines.push("mode: resumed existing session");
   if (result.sessionId) lines.push(`session id (resume with: --session ${result.sessionId}): ${result.sessionId}`);
   if (typeof result.cost === "number") lines.push(`cost: $${result.cost}`);
