@@ -56,7 +56,17 @@ const until = async (fn, ms) => {
   return fn();
 };
 const alive = (pid) => {
-  try { process.kill(pid, 0); return true; } catch { return false; }
+  try { process.kill(pid, 0); } catch { return false; }
+  // a dead-but-unreaped zombie still accepts signal 0. That happens whenever nothing reaps the
+  // orphan — e.g. a container whose PID 1 is not an init — and would make a properly felled tree
+  // look alive forever. Where /proc exists, read the real state; a zombie is dead.
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const state = /\)\s+(\S)/.exec(stat.slice(stat.lastIndexOf(")")));
+    return state ? state[1] !== "Z" : true;
+  } catch {
+    return true; // no /proc (macOS, Windows): the signal-0 verdict stands
+  }
 };
 
 // ---- every relay must at least parse ----
