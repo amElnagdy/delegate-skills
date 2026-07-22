@@ -88,7 +88,10 @@ A pre-run usage error exits 2 and writes no result. A missing `kimi` exits 127 a
   cause is an unconfigured model alias: `error: failed to run prompt: config.invalid: Model "<x>" is not configured in config.toml…`
 - **`status: "aborted"`:** the relay itself was killed (its parent's timeout, a stopped task, a
   closed terminal) and forwarded the kill to kimi. The result is written before the relay exits;
-  inspect the working tree before re-dispatching.
+  inspect the working tree before re-dispatching. On native Windows a hard kill of the relay is
+  uncatchable (Node supports no `SIGTERM` handler there), so this status may never get written -
+  a relay process that is gone without a `result.json` is an aborted run; inspect the working
+  tree and `events.jsonl` directly.
 - **`status: "failed"` with `signal: "SIGKILL"`:** the host killed the process, commonly through the
   OOM killer or a supervisor timeout. This is not a Kimi error; check host memory and re-dispatch, or
   split the task into smaller briefs.

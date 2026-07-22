@@ -412,6 +412,12 @@ function dispatchToGrok(opts, run, writeResult) {
   // plan mode are advisory), so a --read-only run snapshots the tree up front
   // and flags a violation in the result instead of pretending to enforce.
   const beforeTree = opts.autonomy === "read-only" ? gitTouchedFiles(opts.cd) : null;
+  // every result that reports touchedFiles carries the verdict, aborted runs included -
+  // an aborted --read-only review can still have modified the tree
+  const readOnlyFlag = (touched) =>
+    opts.autonomy === "read-only"
+      ? { readOnlyViolation: beforeTree !== null && touched !== null && JSON.stringify(beforeTree) !== JSON.stringify(touched) }
+      : {};
   const argv = buildArgv(opts, run);
   // shell:true on Windows so the grok.cmd shim resolves (see grokVersion). Safe:
   // the brief is delivered via --prompt-file (never argv), --model/--effort/--session
@@ -495,6 +501,7 @@ function dispatchToGrok(opts, run, writeResult) {
       if (settled) return;
       settled = true;
       clearWatchdog();
+      const touchedAtAbort = gitTouchedFiles(opts.cd);
       const abortedFields = {
         status: "aborted",
         exitCode: 128 + (constants.signals[sig] || 15),
@@ -502,7 +509,8 @@ function dispatchToGrok(opts, run, writeResult) {
         sessionId,
         finalMessage: assembleFinal(),
         usage,
-        touchedFiles: gitTouchedFiles(opts.cd),
+        touchedFiles: touchedAtAbort,
+        ...readOnlyFlag(touchedAtAbort),
         stderrTail: stderrTail.slice(-20),
         error: `the relay was killed by ${sig}; grok was terminated with it — inspect the working tree before re-dispatching`,
       };
@@ -513,7 +521,8 @@ function dispatchToGrok(opts, run, writeResult) {
         try { child.kill("SIGKILL"); } catch { /* already gone */ }
         // the child may flush files during the grace window; refresh the snapshot so the
         // artifact matches the tree the orchestrator will actually find
-        writeResult({ ...abortedFields, touchedFiles: gitTouchedFiles(opts.cd) });
+        const touchedAfterGrace = gitTouchedFiles(opts.cd);
+        writeResult({ ...abortedFields, touchedFiles: touchedAfterGrace, ...readOnlyFlag(touchedAfterGrace) });
         process.exit(result.exitCode);
       }, 2000);
     });
@@ -555,9 +564,7 @@ function dispatchToGrok(opts, run, writeResult) {
       finalMessage,
       usage,
       touchedFiles,
-      ...(opts.autonomy === "read-only"
-        ? { readOnlyViolation: beforeTree !== null && touchedFiles !== null && JSON.stringify(beforeTree) !== JSON.stringify(touchedFiles) }
-        : {}),
+      ...readOnlyFlag(touchedFiles),
       ...(succeeded ? {} : { stderrTail: stderrTail.slice(-20) }),
       ...(watchdogFired ? { error: `grok did not finish within --timeout ${opts.timeout}; killed by the relay watchdog` } : {}),
     });
