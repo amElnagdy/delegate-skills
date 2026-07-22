@@ -442,6 +442,9 @@ function dispatchToAgy(opts, brief, run, writeResult) {
     settled = true;
     clearTimeout(watchdogTimer);
     if (sigkillTimer) clearTimeout(sigkillTimer);
+    // a descendant that ignored SIGTERM must not outlive the timeout report: once the
+    // parent is down, sweep the group (no-op where taskkill already felled the tree)
+    if (watchdogFired) killChild(child, "SIGKILL");
     const finalMessage = stdout.trim();
     if (finalMessage) writeFileSync(run.finalPath, finalMessage, "utf8");
     // A timed-out run is failed even if agy handles SIGTERM by exiting 0 -

@@ -433,6 +433,9 @@ function dispatchToKimi(opts, brief, run, writeResult) {
     settled = true;
     clearTimeout(watchdogTimer);
     if (sigkillTimer) clearTimeout(sigkillTimer);
+    // a descendant that ignored SIGTERM must not outlive the timeout report: once the
+    // parent is down, sweep the group (no-op where taskkill already felled the tree)
+    if (watchdogFired) killChild(child, "SIGKILL");
     // A timed-out run is failed even if kimi handles SIGTERM by exiting 0 -
     // orchestrators key off status and the relay exit code.
     const succeeded = code === 0 && !watchdogFired;

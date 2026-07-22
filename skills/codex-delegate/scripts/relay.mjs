@@ -400,6 +400,9 @@ function dispatchToCodex(opts, brief, run, writeResult) {
     if (settled) return;
     settled = true;
     clearWatchdog();
+    // a descendant that ignored SIGTERM must not outlive the timeout report: once the
+    // parent is down, sweep the group (no-op where taskkill already felled the tree)
+    if (watchdogFired) killChild(child, "SIGKILL");
     if (stdoutBuf.trim()) {
       const tid = recordEventLine(run.eventsPath, stdoutBuf);
       if (tid) threadId = tid;

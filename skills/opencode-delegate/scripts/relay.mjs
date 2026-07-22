@@ -489,6 +489,9 @@ function dispatchToOpenCode(opts, brief, run, writeResult) {
     if (settled) return;
     settled = true;
     clearWatchdog();
+    // a descendant that ignored SIGTERM must not outlive the timeout report: once the
+    // parent is down, sweep the group (no-op where taskkill already felled the tree)
+    if (watchdogFired) killChild(child, "SIGKILL");
     const finalMessage = assembleFinal();
     // A timed-out run is never a success even if opencode handles SIGTERM by exiting 0 -
     // orchestrators key off status and the relay exit code.

@@ -16,7 +16,11 @@
  *                 that ships in-box with Windows (no install, no network) and
  *                 puts it on PATH under their names. agy's watchdog is
  *                 --print-timeout plus a fixed 60s grace, so its scenario is
- *                 the slow one (about a minute) on every platform.
+ *                 the slow one (about a minute) on every platform. A POSIX
+ *                 variant repeats each run with a parent that complies with
+ *                 SIGTERM while its grandchild ignores it — the sweep at close
+ *                 must fell the survivor even though the parent's exit
+ *                 cancelled the pending escalation timer.
  *   2. aborted  — killing the relay itself still produces result.json with
  *                 status "aborted", and files the implementer flushes during
  *                 the shutdown grace window appear in the refreshed
@@ -84,11 +88,16 @@ if (args.includes("--version") || args[0] === "version" || args[0] === "changelo
   process.exit(0);
 }
 process.stdin.resume();
-const grand = require("node:child_process").spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+const grandProgram = process.env.SMOKE_GRAND_IGNORES_SIGTERM
+  ? "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"
+  : "setInterval(() => {}, 1000)";
+const grand = require("node:child_process").spawn(process.execPath, ["-e", grandProgram], { stdio: "ignore" });
 fs.writeFileSync(process.env.SMOKE_GRAND_PID_FILE, String(grand.pid));
 fs.writeFileSync(process.env.SMOKE_PID_FILE, String(process.pid)); // written last: its existence means both pid files are readable
 if (process.env.SMOKE_MODE === "abort") {
   process.on("SIGTERM", () => { fs.writeFileSync(process.env.SMOKE_LATE_FILE, "flushed during shutdown"); process.exit(0); });
+} else if (process.env.SMOKE_MODE === "timeout-yield") {
+  process.on("SIGTERM", () => process.exit(0)); // the parent complies while the grandchild ignores
 } else {
   process.on("SIGTERM", () => {}); // ignore, so the relay's SIGKILL escalation is what ends it
 }
@@ -183,33 +192,47 @@ const TIMEOUT_CASES = [
   { skill: "kimi", flags: ["--timeout", "6s"], exitDeadline: 45_000 },
   { skill: "agy", flags: ["--print-timeout", "1s"], exitDeadline: 120_000 },
 ];
-for (const { skill, flags, exitDeadline } of TIMEOUT_CASES) {
-  const outDir = join(scratch, `out-timeout-${skill}`);
-  const pidFile = join(scratch, `pid-timeout-${skill}`);
-  const grandPidFile = join(scratch, `grandpid-timeout-${skill}`);
-  const workDir = freshRepo(`work-timeout-${skill}`);
-  const child = runRelay(skill, workDir, outDir, [...flags, ...EXTRA_ARGS[skill]], { SMOKE_PID_FILE: pidFile, SMOKE_GRAND_PID_FILE: grandPidFile, SMOKE_MODE: "timeout" });
+async function driveTimeout({ skill, flags, exitDeadline }, mode, extraEnv, tag) {
+  const outDir = join(scratch, `out-${tag}-${skill}`);
+  const pidFile = join(scratch, `pid-${tag}-${skill}`);
+  const grandPidFile = join(scratch, `grandpid-${tag}-${skill}`);
+  const workDir = freshRepo(`work-${tag}-${skill}`);
+  const child = runRelay(skill, workDir, outDir, [...flags, ...EXTRA_ARGS[skill]], { SMOKE_PID_FILE: pidFile, SMOKE_GRAND_PID_FILE: grandPidFile, SMOKE_MODE: mode, ...extraEnv });
   let stderr = "";
   child.stderr.on("data", (d) => { stderr += d; });
-  check(`${skill} timeout: the fake implementer came up`, await until(() => existsSync(pidFile), 10_000));
+  check(`${skill} ${tag}: the fake implementer came up`, await until(() => existsSync(pidFile), 10_000));
   const implementerPid = existsSync(pidFile) ? Number(readFileSync(pidFile, "utf8")) : null;
   const grandPid = existsSync(grandPidFile) ? Number(readFileSync(grandPidFile, "utf8")) : null;
   const exited = await new Promise((res) => {
     const t = setTimeout(() => res(false), exitDeadline);
     child.on("close", () => { clearTimeout(t); res(true); });
   });
-  check(`${skill} timeout: the relay exited on its own`, exited);
-  check(`${skill} timeout: result.json exists`, existsSync(join(outDir, "result.json")));
+  check(`${skill} ${tag}: the relay exited on its own`, exited);
+  check(`${skill} ${tag}: result.json exists`, existsSync(join(outDir, "result.json")));
   if (existsSync(join(outDir, "result.json"))) {
     const r = result(outDir);
-    check(`${skill} timeout: status is "timeout" (got ${r.status})`, r.status === "timeout");
-    check(`${skill} timeout: relay exit code is non-zero`, r.exitCode !== 0);
+    check(`${skill} ${tag}: status is "timeout" (got ${r.status})`, r.status === "timeout");
+    check(`${skill} ${tag}: relay exit code is non-zero`, r.exitCode !== 0);
   }
-  check(`${skill} timeout: the implementer process is dead`,
+  check(`${skill} ${tag}: the implementer process is dead`,
     implementerPid !== null && await until(() => !alive(implementerPid), 20_000));
-  check(`${skill} timeout: the implementer's own subprocess is dead (whole tree felled)`,
+  check(`${skill} ${tag}: the implementer's own subprocess is dead (whole tree felled)`,
     grandPid !== null && await until(() => !alive(grandPid), 20_000));
   if (failed) console.error(`${skill} relay stderr tail:\n${stderr.split("\n").slice(-6).join("\n")}`);
+}
+
+for (const tc of TIMEOUT_CASES) {
+  await driveTimeout(tc, "timeout", {}, "timeout");
+}
+
+// A compliant parent must not shield a defiant descendant: the parent exits on the group
+// SIGTERM, its grandchild ignores it, and the sweep at close must still fell the grandchild
+// before the relay reports. POSIX only — the Windows kill is a single unconditional
+// taskkill /t /f with no SIGTERM/escalation phase to defeat.
+if (!WIN) {
+  for (const tc of TIMEOUT_CASES) {
+    await driveTimeout(tc, "timeout-yield", { SMOKE_GRAND_IGNORES_SIGTERM: "1" }, "timeout-yield");
+  }
 }
 
 // ---- 2. killing the relay still writes the artifact, with a refreshed snapshot ----
