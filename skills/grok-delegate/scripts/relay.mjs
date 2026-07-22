@@ -163,20 +163,23 @@ function parseDuration(duration) {
   return (Number(match[1] || 0) * 3600 + Number(match[2] || 0) * 60 + Number(match[3] || 0)) * 1000;
 }
 
-function killChild(child) {
-  // On Windows the child is the .cmd shim (the shell:true launch above), so signalling it does
-  // not reach the Grok process it spawned — the run would keep editing after the relay reports
-  // timeout/aborted. Windows has no process-group signals and Node can't kill a process family
-  // without a Job Object, so kill the tree by pid with the OS tool: /t includes descendants,
-  // /f forces it. This is the same idiom tree-kill and npm/pnpm use. POSIX keeps real signals
-  // (the SIGKILL escalation at each call site still applies there).
+function killChild(child, signal = "SIGTERM") {
+  // The kill must reach the whole process family, not just the immediate child — a tool
+  // subprocess left running would keep editing after the relay reports timeout/aborted.
+  // On Windows the child is the .cmd shim (the shell:true launch above), Windows has no
+  // process-group signals, and Node can't kill a process family without a Job Object, so
+  // kill the tree by pid with the OS tool: /t includes descendants, /f forces it — the
+  // same idiom tree-kill and npm/pnpm use.
   if (process.platform === "win32") {
+    if (signal !== "SIGTERM") return; // the first taskkill /f already felled the whole tree
     // stderr is inherited so a real taskkill failure (e.g. access denied) is visible to the operator;
     // its non-zero exit when the tree is already gone is the expected race and carries nothing to do.
     try { execFileSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: ["ignore", "ignore", "inherit"] }); }
     catch { /* already gone — nothing left to kill */ }
   } else {
-    child.kill("SIGTERM");
+    // On POSIX the child leads its own process group (the detached launch), so the negative-pid
+    // signal reaches every descendant; fall back to the lone pid if the group is already gone.
+    try { process.kill(-child.pid, signal); } catch { try { child.kill(signal); } catch { /* already gone */ } }
   }
 }
 
@@ -428,6 +431,7 @@ function dispatchToGrok(opts, run, writeResult) {
     env: { ...process.env },
     stdio: ["ignore", "pipe", "pipe"],
     shell: process.platform === "win32",
+    detached: process.platform !== "win32", // POSIX: lead a new process group so killChild can fell the whole tree
   });
 
   let sessionId = opts.session || null;
@@ -482,7 +486,7 @@ function dispatchToGrok(opts, run, writeResult) {
       });
       killChild(child);
       sigkillTimer = setTimeout(() => {
-        if (!settled) child.kill("SIGKILL");
+        if (!settled) killChild(child, "SIGKILL");
       }, 10_000);
     }, timeoutMs);
   }
@@ -518,7 +522,7 @@ function dispatchToGrok(opts, run, writeResult) {
       printSummary(result, run.resultPath);
       killChild(child);
       setTimeout(() => {
-        try { child.kill("SIGKILL"); } catch { /* already gone */ }
+        killChild(child, "SIGKILL");
         // the child may flush files during the grace window; refresh the snapshot so the
         // artifact matches the tree the orchestrator will actually find
         const touchedAfterGrace = gitTouchedFiles(opts.cd);

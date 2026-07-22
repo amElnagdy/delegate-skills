@@ -154,6 +154,24 @@ function readBrief(opts) {
   return stdin;
 }
 
+function killChild(child, signal = "SIGTERM") {
+  // The kill must reach the whole process family, not just the CLI — a tool subprocess left
+  // running would keep editing after the relay reports timeout/aborted. On Windows Node can't
+  // kill a process family without a Job Object, so kill the tree by pid with the OS tool
+  // (/t includes descendants, /f forces it — the tree-kill/npm idiom).
+  if (process.platform === "win32") {
+    if (signal !== "SIGTERM") return; // the first taskkill /f already felled the whole tree
+    // stderr is inherited so a real taskkill failure (e.g. access denied) is visible to the operator;
+    // its non-zero exit when the tree is already gone is the expected race and carries nothing to do.
+    try { execFileSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: ["ignore", "ignore", "inherit"] }); }
+    catch { /* already gone — nothing left to kill */ }
+  } else {
+    // On POSIX the child leads its own process group (the detached launch), so the negative-pid
+    // signal reaches every descendant; fall back to the lone pid if the group is already gone.
+    try { process.kill(-child.pid, signal); } catch { try { child.kill(signal); } catch { /* already gone */ } }
+  }
+}
+
 function kimiVersion() {
   try {
     const out = execFileSync("kimi", ["--version"], { encoding: "utf8" }).trim();
@@ -300,6 +318,7 @@ function dispatchToKimi(opts, brief, run, writeResult) {
   const child = spawn("kimi", buildArgv(opts, brief), {
     cwd: opts.cd,
     stdio: ["ignore", "pipe", "pipe"],
+    detached: process.platform !== "win32", // POSIX: lead a new process group so killChild can fell the whole tree
   });
 
   let sessionId = null;
@@ -351,9 +370,9 @@ function dispatchToKimi(opts, brief, run, writeResult) {
       child.stdout.destroy();
       child.stderr.destroy();
     });
-    child.kill("SIGTERM");
+    killChild(child);
     sigkillTimer = setTimeout(() => {
-      if (!settled) child.kill("SIGKILL");
+      if (!settled) killChild(child, "SIGKILL");
     }, 10_000);
   }, timeoutMs);
 
@@ -379,9 +398,9 @@ function dispatchToKimi(opts, brief, run, writeResult) {
       };
       const result = writeResult(abortedFields);
       printSummary(result, run.resultPath);
-      child.kill("SIGTERM");
+      killChild(child);
       setTimeout(() => {
-        try { child.kill("SIGKILL"); } catch { /* already gone */ }
+        killChild(child, "SIGKILL");
         // the child may flush files during the grace window; refresh the snapshot so the
         // artifact matches the tree the orchestrator will actually find
         writeResult({ ...abortedFields, touchedFiles: gitTouchedFiles(opts.cd) });

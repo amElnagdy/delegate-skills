@@ -25,7 +25,11 @@
  *                 driven there (the skill docs carry the same caveat).
  *
  * The fake CLI answers each relay's version preflight (--version, `version`,
- * `changelog`) and otherwise runs until killed. Node built-ins only.
+ * `changelog`) and otherwise runs until killed. It also spawns a subprocess of
+ * its own, and both scenarios assert that this grandchild dies with it — the
+ * relays' kill must fell the whole process family (a process-group signal on
+ * POSIX, taskkill /t on Windows), not just the pid they launched.
+ * Node built-ins only.
  */
 import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, chmodSync, mkdirSync } from "node:fs";
@@ -70,7 +74,9 @@ if (args.includes("--version") || args[0] === "version" || args[0] === "changelo
   process.exit(0);
 }
 process.stdin.resume();
-fs.writeFileSync(process.env.SMOKE_PID_FILE, String(process.pid));
+const grand = require("node:child_process").spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+fs.writeFileSync(process.env.SMOKE_GRAND_PID_FILE, String(grand.pid));
+fs.writeFileSync(process.env.SMOKE_PID_FILE, String(process.pid)); // written last: its existence means both pid files are readable
 if (process.env.SMOKE_MODE === "abort") {
   process.on("SIGTERM", () => { fs.writeFileSync(process.env.SMOKE_LATE_FILE, "flushed during shutdown"); process.exit(0); });
 } else {
@@ -119,12 +125,14 @@ const TIMEOUT_SKILLS = WIN ? ["codex", "opencode", "grok"] : ["codex", "opencode
 for (const skill of TIMEOUT_SKILLS) {
   const outDir = join(scratch, `out-timeout-${skill}`);
   const pidFile = join(scratch, `pid-timeout-${skill}`);
+  const grandPidFile = join(scratch, `grandpid-timeout-${skill}`);
   const workDir = freshRepo(`work-timeout-${skill}`);
-  const child = runRelay(skill, workDir, outDir, ["--timeout", "6s", ...EXTRA_ARGS[skill]], { SMOKE_PID_FILE: pidFile, SMOKE_MODE: "timeout" });
+  const child = runRelay(skill, workDir, outDir, ["--timeout", "6s", ...EXTRA_ARGS[skill]], { SMOKE_PID_FILE: pidFile, SMOKE_GRAND_PID_FILE: grandPidFile, SMOKE_MODE: "timeout" });
   let stderr = "";
   child.stderr.on("data", (d) => { stderr += d; });
   check(`${skill} timeout: the fake implementer came up`, await until(() => existsSync(pidFile), 10_000));
   const implementerPid = existsSync(pidFile) ? Number(readFileSync(pidFile, "utf8")) : null;
+  const grandPid = existsSync(grandPidFile) ? Number(readFileSync(grandPidFile, "utf8")) : null;
   const exited = await new Promise((res) => {
     const t = setTimeout(() => res(false), 45_000);
     child.on("close", () => { clearTimeout(t); res(true); });
@@ -136,8 +144,10 @@ for (const skill of TIMEOUT_SKILLS) {
     check(`${skill} timeout: status is "timeout" (got ${r.status})`, r.status === "timeout");
     check(`${skill} timeout: relay exit code is non-zero`, r.exitCode !== 0);
   }
-  check(`${skill} timeout: the implementer process is dead (tree included)`,
+  check(`${skill} timeout: the implementer process is dead`,
     implementerPid !== null && await until(() => !alive(implementerPid), 20_000));
+  check(`${skill} timeout: the implementer's own subprocess is dead (whole tree felled)`,
+    grandPid !== null && await until(() => !alive(grandPid), 20_000));
   if (failed) console.error(`${skill} relay stderr tail:\n${stderr.split("\n").slice(-6).join("\n")}`);
 }
 
@@ -148,12 +158,14 @@ if (WIN) {
   for (const skill of SKILLS) {
     const outDir = join(scratch, `out-abort-${skill}`);
     const pidFile = join(scratch, `pid-abort-${skill}`);
+    const grandPidFile = join(scratch, `grandpid-abort-${skill}`);
     const workDir = freshRepo(`work-abort-${skill}`);
     const lateFile = join(workDir, "late-file.txt");
-    const child = runRelay(skill, workDir, outDir, EXTRA_ARGS[skill], { SMOKE_PID_FILE: pidFile, SMOKE_MODE: "abort", SMOKE_LATE_FILE: lateFile });
+    const child = runRelay(skill, workDir, outDir, EXTRA_ARGS[skill], { SMOKE_PID_FILE: pidFile, SMOKE_GRAND_PID_FILE: grandPidFile, SMOKE_MODE: "abort", SMOKE_LATE_FILE: lateFile });
     let stderr = "";
     child.stderr.on("data", (d) => { stderr += d; });
     check(`${skill} aborted: the fake implementer came up`, await until(() => existsSync(pidFile), 10_000));
+    const grandPid = existsSync(grandPidFile) ? Number(readFileSync(grandPidFile, "utf8")) : null;
     child.kill("SIGTERM");
     const exited = await new Promise((res) => {
       const t = setTimeout(() => res(false), 20_000);
@@ -167,6 +179,8 @@ if (WIN) {
       check(`${skill} aborted: the file flushed during shutdown is in touchedFiles`,
         Array.isArray(r.touchedFiles) && r.touchedFiles.some((f) => f.includes("late-file.txt")));
     }
+    check(`${skill} aborted: the implementer's own subprocess is dead (whole tree felled)`,
+      grandPid !== null && await until(() => !alive(grandPid), 20_000));
     if (failed) console.error(`${skill} relay stderr tail:\n${stderr.split("\n").slice(-6).join("\n")}`);
   }
 }
