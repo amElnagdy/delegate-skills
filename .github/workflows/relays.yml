@@ -1,0 +1,22 @@
+name: relays
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: node test/relay-smoke.mjs
+      - name: validate the skills package
+        if: runner.os == 'Linux'
+        run: npx -y skills add . --list

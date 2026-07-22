@@ -358,7 +358,7 @@ function dispatchToAgy(opts, brief, run, writeResult) {
       if (sigkillTimer) clearTimeout(sigkillTimer);
       const finalMessage = stdout.trim();
       if (finalMessage) writeFileSync(run.finalPath, finalMessage, "utf8");
-      const result = writeResult({
+      const abortedFields = {
         status: "aborted",
         exitCode: 128 + (constants.signals[sig] || 15),
         signal: sig,
@@ -366,11 +366,15 @@ function dispatchToAgy(opts, brief, run, writeResult) {
         touchedFiles: gitTouchedFiles(opts.cd),
         stderrTail: stderrTail.slice(-20),
         error: `the relay was killed by ${sig}; agy was terminated with it — inspect the working tree before re-dispatching`,
-      });
+      };
+      const result = writeResult(abortedFields);
       printSummary(result, run.resultPath);
       child.kill("SIGTERM");
       setTimeout(() => {
         try { child.kill("SIGKILL"); } catch { /* already gone */ }
+        // the child may flush files during the grace window; refresh the snapshot so the
+        // artifact matches the tree the orchestrator will actually find
+        writeResult({ ...abortedFields, touchedFiles: gitTouchedFiles(opts.cd) });
         process.exit(result.exitCode);
       }, 2000);
     });
