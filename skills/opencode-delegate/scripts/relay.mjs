@@ -522,7 +522,7 @@ function printSummary(result, resultPath) {
   const lines = [];
   lines.push("");
   lines.push(`relay: ${result.status} (exit ${result.exitCode}${result.signal ? `, killed by ${result.signal}` : ""})  ·  opencode ${result.opencodeVersion ?? "?"}`);
-  if (result.signal === "SIGKILL") lines.push("hint: the host killed the process (commonly the OOM killer or a supervisor timeout) — this is not an opencode error; check host memory and re-dispatch, or split the task into smaller briefs.");
+  if (result.signal === "SIGKILL" && result.status === "failed") lines.push("hint: the host killed the process (commonly the OOM killer or a supervisor timeout) — this is not an opencode error; check host memory and re-dispatch, or split the task into smaller briefs.");
   if (result.signal === "SIGTERM" && result.status === "failed") lines.push("hint: something outside the relay terminated opencode (a supervisor, the session ending, or a manual kill) — when the relay itself does the killing it reports status \"timeout\" or \"aborted\" instead; inspect the working tree before re-dispatching.");
   if (result.resumeLast || result.agent === "(inherited from resumed session)") lines.push("mode: resumed existing session");
   if (result.sessionId) lines.push(`session id (resume with: --session ${result.sessionId}): ${result.sessionId}`);

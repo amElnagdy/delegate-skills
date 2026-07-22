@@ -57,7 +57,7 @@ touched-files report shows only Grok's edits and nothing of the helper's own.
 - `schema` — the result-format version (currently `delegate-relay.result.v1`)
 - `tool` — `"grok"`
 - `status` — `completed` | `failed` | `timeout` | `aborted` | `grok_unavailable`
-- `exitCode` — mirrors Grok's exit code; `128` plus the signal number if the child was killed; `127` if `grok` isn't on PATH
+- `exitCode` — mirrors Grok's exit code; `128` plus the signal number if the child was killed; `127` if `grok` isn't on PATH; on a `timeout` the relay forces a non-zero code even when the child exited `0` after the watchdog's SIGTERM
 - `signal` — the signal that killed the child, otherwise `null`
 - `grokVersion` — the binary that actually ran
 - `sessionId` — feed this to a later `--session <id>` (or use `--resume-last`)
@@ -71,7 +71,7 @@ touched-files report shows only Grok's edits and nothing of the helper's own.
   tripwire: it catches new dirt, but an edit inside an already-dirty file can evade it — the diff
   review, not this flag, is the guarantee
 - `stderrTail` — last ~20 stderr lines; present on every run that did not complete (`failed`, `timeout`, `aborted`), absent on `completed`, `grok_unavailable`, and launch failures
-- `error` — present **only** if Grok failed to launch
+- `error` — present on a launch failure, and on `timeout` and `aborted` runs
 
 The helper also prints a summary to stdout and exits with Grok's exit code, so a wrapping script can
 branch on success/failure directly.

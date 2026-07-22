@@ -50,7 +50,7 @@ touched-files report shows only Codex's edits and nothing of the helper's own.
 
 - `schema` — the result-format version (currently `delegate-relay.result.v1`)
 - `status` — `completed` | `failed` | `timeout` | `aborted` | `codex_unavailable`
-- `exitCode` — mirrors Codex's exit code; `128` plus the signal number if the child was killed; `127` if `codex` isn't on PATH
+- `exitCode` — mirrors Codex's exit code; `128` plus the signal number if the child was killed; `127` if `codex` isn't on PATH; on a `timeout` the relay forces a non-zero code even when the child exited `0` after the watchdog's SIGTERM
 - `signal` — the signal that killed the child, otherwise `null`
 - `codexVersion` — the binary that actually ran
 - `threadId` — feed this to a later `codex exec resume <id>` (or use `--resume-last`)
@@ -59,7 +59,7 @@ touched-files report shows only Codex's edits and nothing of the helper's own.
 - `briefPath` / `eventsPath` / `finalPath` — the exact brief relay sent, the raw JSONL event stream, and the final-message file
 - `workdir`, `sandbox`, `model`, `resumeLast`, `startedAt`, `finishedAt`
 - `stderrTail` — last ~20 stderr lines; present on every run that did not complete (`failed`, `timeout`, `aborted`), absent on `completed`, `codex_unavailable`, and launch failures
-- `error` — present **only** if Codex failed to launch
+- `error` — present on a launch failure, and on `timeout` and `aborted` runs
 
 The helper also prints a summary to stdout and exits with Codex's exit code, so a wrapping script can
 branch on success/failure directly.

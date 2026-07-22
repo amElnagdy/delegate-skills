@@ -51,7 +51,7 @@ touched-files report shows only OpenCode's edits and nothing of the helper's own
 - `schema` — the result-format version (currently `delegate-relay.result.v1`)
 - `tool` — `opencode`
 - `status` — `completed` | `failed` | `timeout` | `aborted` | `opencode_unavailable`
-- `exitCode` — mirrors OpenCode's exit code; `128` plus the signal number if the child was killed; `127` if `opencode` isn't on PATH
+- `exitCode` — mirrors OpenCode's exit code; `128` plus the signal number if the child was killed; `127` if `opencode` isn't on PATH; on a `timeout` the relay forces a non-zero code even when the child exited `0` after the watchdog's SIGTERM
 - `signal` — the signal that killed the child, otherwise `null`
 - `opencodeVersion` — the binary that actually ran
 - `agent` — the agent used (`build`, `plan`, …), or a note that it was inherited from a resumed session
@@ -67,7 +67,7 @@ touched-files report shows only OpenCode's edits and nothing of the helper's own
 - `workdir`, `model`, `auto`, `resumeLast`, `startedAt`, `finishedAt`
 - `stderrTail` — last ~20 stderr lines; present on every run that did not complete (`failed`, `timeout`, `aborted`), absent on `completed`,
   `opencode_unavailable`, and launch failures
-- `error` — present **only** if OpenCode failed to launch
+- `error` — present on a launch failure, and on `timeout` and `aborted` runs
 
 The helper also prints a summary to stdout and exits with OpenCode's exit code, so a wrapping script can
 branch on success/failure directly.

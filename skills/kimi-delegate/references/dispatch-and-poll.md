@@ -67,8 +67,8 @@ inside the worktree can make the artifacts appear there:
   Kimi makes inside `--add-dir` workspaces do not show up at all - inspect those trees yourself.
   Dispatch from a clean tree when you want the list to read as "what Kimi changed". `null` means git
   could not report; `[]` means git ran and the tree is clean.
-- `stderrTail` - the last 20 non-empty stderr lines on any run that did not complete (`failed`, `timeout`, `aborted`).
-- `error` - present for launch failures or when the relay watchdog fires.
+- `stderrTail` - the last 20 non-empty stderr lines on any run that did not complete (`failed`, `timeout`, `aborted`), except a launch failure, which reports `failed` with no `stderrTail`.
+- `error` - present for launch failures, when the relay watchdog fires (`timeout`), and on an `aborted` run.
 
 Kimi's stream carries no token usage, so `result.json` has no `usage` field.
 

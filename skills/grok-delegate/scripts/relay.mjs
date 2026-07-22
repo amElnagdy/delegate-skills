@@ -566,7 +566,7 @@ function printSummary(result, resultPath) {
   const lines = [];
   lines.push("");
   lines.push(`relay: ${result.status} (exit ${result.exitCode}${result.signal ? `, killed by ${result.signal}` : ""})  ·  grok ${result.grokVersion ?? "?"}`);
-  if (result.signal === "SIGKILL") lines.push("hint: the host killed the process (commonly the OOM killer or a supervisor timeout) — this is not a grok error; check host memory and re-dispatch, or split the task into smaller briefs.");
+  if (result.signal === "SIGKILL" && result.status === "failed") lines.push("hint: the host killed the process (commonly the OOM killer or a supervisor timeout) — this is not a grok error; check host memory and re-dispatch, or split the task into smaller briefs.");
   if (result.signal === "SIGTERM" && result.status === "failed") lines.push("hint: something outside the relay terminated grok (a supervisor, the session ending, or a manual kill) — when the relay itself does the killing it reports status \"timeout\" or \"aborted\" instead; inspect the working tree before re-dispatching.");
   if (result.readOnlyViolation) lines.push("warning: this --read-only run modified the working tree — grok's read-only is best-effort; review the diff before trusting the run.");
   lines.push(`autonomy: ${result.autonomy}`);
