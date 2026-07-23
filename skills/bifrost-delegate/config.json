@@ -1,0 +1,19 @@
+{
+  "apiKey": "your-bifrost-key",
+  "baseUrl": "http://localhost:8080",
+  "models": {
+    "plan": "",
+    "advise": "",
+    "review": ""
+  },
+  "request": {
+    "timeoutSeconds": 180,
+    "maxTokens": 6000,
+    "temperature": 0.1,
+    "cache": {
+      "enabled": false,
+      "key": "bifrost-delegate",
+      "ttl": 300
+    }
+  }
+}
