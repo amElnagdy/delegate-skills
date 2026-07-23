@@ -84,6 +84,17 @@ workaround for a missing feature; it's the deliberate boundary. Committing shoul
 party that verified the work. Write a clear message describing what landed. If your project attributes
 co-authorship, that's the place for it.
 
+From dispatch until that commit, the uncommitted working tree is the authoritative copy of the
+implementer's work — the only one you can commit from, and often the only copy at all. Never run `git checkout`, `reset`, `clean`, or a branch switch in the
+workspace between those two points — however messy an interrupted run looks, inspect it first:
+`git status`, `git diff`, `git diff --cached` for anything the implementer staged (plain
+`git diff` is blind to the index), and open any untracked files (`??` in `git status`) directly —
+they are the implementer's new files, and no diff shows their contents. The tree is evidence,
+not clutter. After that inspection the
+verdict can legitimately be to discard — work built on a premise you have since corrected, for
+example — and then `git checkout`/`clean` is the right tool. The ban is on reflexive cleanup
+before anyone has looked.
+
 ## Reworking: send the delta, not the whole task
 
 If the review turns up problems, don't restate the entire brief. Continue the same Grok session with

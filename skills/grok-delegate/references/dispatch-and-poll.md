@@ -117,6 +117,15 @@ process has exited and `result.json` is written — not when a status line says 
   shape didn't match the extractor. Treat as a failed run; the events log usually shows where it
   stopped — and is the source of truth for tightening the parser.
 
+## Recovering lost work
+
+`events.jsonl` in the run directory records every event the implementer streamed. If finished
+work is lost — the run killed late, or the working tree damaged afterward — read the event log
+before re-dispatching: it identifies which files and tool commands were involved, which scopes
+what needs redoing. Whether it also carries the edit contents depends on what the CLI streams,
+so treat any reconstruction as unverified until it matches a working-tree diff — when the tree
+still holds the work, preserve the tree rather than replaying the log.
+
 ## What the helper is doing (and the alternatives)
 
 Under the hood the helper runs roughly:
