@@ -9,7 +9,8 @@
         "opencode-delegate",
         "agy-delegate",
         "grok-delegate",
-        "kimi-delegate"
+        "kimi-delegate",
+        "vibe-delegate"
       ]
     }
   ]
