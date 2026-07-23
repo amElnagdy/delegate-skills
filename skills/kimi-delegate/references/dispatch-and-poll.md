@@ -55,7 +55,7 @@ inside the worktree can make the artifacts appear there:
 
 `result.json` fields:
 
-- `schema`, `tool` (`"kimi"`), `status` (`completed` | `failed` | `kimi_unavailable`), `exitCode`, and
+- `schema`, `tool` (`"kimi"`), `status` (`completed` | `failed` | `timeout` | `aborted` | `kimi_unavailable`), `exitCode`, and
   `signal` (`null` unless the child died on a signal).
 - `workdir`, `model` (the model alias or `null`), `resumed`, `kimiVersion`, `sessionId`, `startedAt`,
   and `finishedAt`.
@@ -67,8 +67,8 @@ inside the worktree can make the artifacts appear there:
   Kimi makes inside `--add-dir` workspaces do not show up at all - inspect those trees yourself.
   Dispatch from a clean tree when you want the list to read as "what Kimi changed". `null` means git
   could not report; `[]` means git ran and the tree is clean.
-- `stderrTail` - the last 20 non-empty stderr lines on failure.
-- `error` - present for launch failures or when the relay watchdog fires.
+- `stderrTail` - the last 20 non-empty stderr lines on any run that did not complete (`failed`, `timeout`, `aborted`), except a launch failure, which reports `failed` with no `stderrTail`.
+- `error` - present for launch failures, when the relay watchdog fires (`timeout`), and on an `aborted` run.
 
 Kimi's stream carries no token usage, so `result.json` has no `usage` field.
 
@@ -86,10 +86,16 @@ A pre-run usage error exits 2 and writes no result. A missing `kimi` exits 127 a
   `kimi login`, and re-dispatch.
 - **`status: "failed"`:** read `stderrTail`, `stderrPath`, and the tail of `events.jsonl`. A common
   cause is an unconfigured model alias: `error: failed to run prompt: config.invalid: Model "<x>" is not configured in config.toml…`
+- **`status: "aborted"`:** the relay itself was killed (its parent's timeout, a stopped task, a
+  closed terminal) and forwarded the kill to kimi. The result is written before the relay exits;
+  inspect the working tree before re-dispatching. On native Windows a hard kill of the relay is
+  uncatchable (Node supports no `SIGTERM` handler there), so this status may never get written -
+  a relay process that is gone without a `result.json` is an aborted run; inspect the working
+  tree and `events.jsonl` directly.
 - **`status: "failed"` with `signal: "SIGKILL"`:** the host killed the process, commonly through the
   OOM killer or a supervisor timeout. This is not a Kimi error; check host memory and re-dispatch, or
   split the task into smaller briefs.
-- **Watchdog failure:** `error` reads
+- **`status: "timeout"`:** the `--timeout` watchdog killed the run; `error` reads
   `kimi did not finish within --timeout <dur>; killed by the relay watchdog`. Increase `--timeout` or
   split the task. The relay sends SIGTERM, waits 10 seconds, then sends SIGKILL if needed.
 - **Empty `finalMessage`:** inspect `touchedFiles` and the diff. Add a

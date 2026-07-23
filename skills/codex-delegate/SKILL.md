@@ -65,6 +65,7 @@ orchestrators use that same directory — if unsure where it landed, run
 node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 # read-only (review/diagnosis, no edits):   add --read-only
 # continue the previous Codex session:      add --resume-last  (send only the delta brief)
+# hard time limit (watchdog):               add --timeout 2h  (default: off; implementation runs routinely need 1-2h)
 # see all options:                          node .../relay.mjs --help
 ```
 

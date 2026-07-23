@@ -59,7 +59,9 @@
  * otherwise the exit code mirrors Kimi's own (0 success, non-zero failure). If
  * the child dies on a signal, the exit code is 128 plus the signal number and
  * `result.json` records the signal. Once the brief validates, `result.json` is
- * written on every outcome - completed, failed, or kimi_unavailable.
+ * written on every outcome - completed, failed, timeout (the --timeout watchdog
+ * fired), aborted (the relay itself was killed and forwarded the kill to kimi),
+ * or kimi_unavailable.
  */
 
 import { spawn, execFileSync } from "node:child_process";
@@ -150,6 +152,24 @@ function readBrief(opts) {
     stdin = "";
   }
   return stdin;
+}
+
+function killChild(child, signal = "SIGTERM") {
+  // The kill must reach the whole process family, not just the CLI — a tool subprocess left
+  // running would keep editing after the relay reports timeout/aborted. On Windows Node can't
+  // kill a process family without a Job Object, so kill the tree by pid with the OS tool
+  // (/t includes descendants, /f forces it — the tree-kill/npm idiom).
+  if (process.platform === "win32") {
+    if (signal !== "SIGTERM") return; // the first taskkill /f already felled the whole tree
+    // stderr is inherited so a real taskkill failure (e.g. access denied) is visible to the operator;
+    // its non-zero exit when the tree is already gone is the expected race and carries nothing to do.
+    try { execFileSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: ["ignore", "ignore", "inherit"] }); }
+    catch { /* already gone — nothing left to kill */ }
+  } else {
+    // On POSIX the child leads its own process group (the detached launch), so the negative-pid
+    // signal reaches every descendant; fall back to the lone pid if the group is already gone.
+    try { process.kill(-child.pid, signal); } catch { try { child.kill(signal); } catch { /* already gone */ } }
+  }
 }
 
 function kimiVersion() {
@@ -298,6 +318,7 @@ function dispatchToKimi(opts, brief, run, writeResult) {
   const child = spawn("kimi", buildArgv(opts, brief), {
     cwd: opts.cd,
     stdio: ["ignore", "pipe", "pipe"],
+    detached: process.platform !== "win32", // POSIX: lead a new process group so killChild can fell the whole tree
   });
 
   let sessionId = null;
@@ -349,11 +370,44 @@ function dispatchToKimi(opts, brief, run, writeResult) {
       child.stdout.destroy();
       child.stderr.destroy();
     });
-    child.kill("SIGTERM");
+    killChild(child);
     sigkillTimer = setTimeout(() => {
-      if (!settled) child.kill("SIGKILL");
+      if (!settled) killChild(child, "SIGKILL");
     }, 10_000);
   }, timeoutMs);
+
+  // The relay's own death must still produce a result: without this, a kill from the
+  // orchestrator's side (its command timeout, a stopped task, a closed terminal) writes
+  // no result.json and leaves the kimi child running or dying mid-edit with nothing
+  // recording why. SIGTERM/SIGHUP registration is a no-op on Windows; SIGINT works there.
+  for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) {
+    process.on(sig, () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(watchdogTimer);
+      if (sigkillTimer) clearTimeout(sigkillTimer);
+      const abortedFields = {
+        status: "aborted",
+        exitCode: 128 + (constants.signals[sig] || 15),
+        signal: sig,
+        sessionId,
+        finalMessage: assembleFinal(),
+        touchedFiles: gitTouchedFiles(opts.cd),
+        stderrTail: stderrTail.slice(-20),
+        error: `the relay was killed by ${sig}; kimi was terminated with it — inspect the working tree before re-dispatching`,
+      };
+      const result = writeResult(abortedFields);
+      printSummary(result, run.resultPath);
+      killChild(child);
+      setTimeout(() => {
+        killChild(child, "SIGKILL");
+        // the child may flush files during the grace window; refresh the snapshot so the
+        // artifact matches the tree the orchestrator will actually find
+        writeResult({ ...abortedFields, touchedFiles: gitTouchedFiles(opts.cd) });
+        process.exit(result.exitCode);
+      }, 2000);
+    });
+  }
 
   child.on("error", (err) => {
     if (settled) return;
@@ -379,13 +433,16 @@ function dispatchToKimi(opts, brief, run, writeResult) {
     settled = true;
     clearTimeout(watchdogTimer);
     if (sigkillTimer) clearTimeout(sigkillTimer);
+    // a descendant that ignored SIGTERM must not outlive the timeout report: once the
+    // parent is down, sweep the group (no-op where taskkill already felled the tree)
+    if (watchdogFired) killChild(child, "SIGKILL");
     // A timed-out run is failed even if kimi handles SIGTERM by exiting 0 -
     // orchestrators key off status and the relay exit code.
     const succeeded = code === 0 && !watchdogFired;
     const mapped = code ?? (constants.signals[signal] ? 128 + constants.signals[signal] : 1);
     const exitCode = succeeded ? 0 : mapped === 0 ? 1 : mapped;
     const result = writeResult({
-      status: succeeded ? "completed" : "failed",
+      status: succeeded ? "completed" : watchdogFired ? "timeout" : "failed",
       exitCode,
       signal: signal ?? null,
       sessionId,
@@ -427,7 +484,8 @@ function printSummary(result, resultPath) {
   const lines = [];
   lines.push("");
   lines.push(`relay: ${result.status} (exit ${result.exitCode}${result.signal ? `, killed by ${result.signal}` : ""})  ·  kimi ${result.kimiVersion ?? "?"}`);
-  if (result.signal === "SIGKILL") lines.push("hint: the host killed the process (commonly the OOM killer or a supervisor timeout) — this is not a kimi error; check host memory and re-dispatch, or split the task into smaller briefs.");
+  if (result.signal === "SIGKILL" && result.status === "failed") lines.push("hint: the host killed the process (commonly the OOM killer or a supervisor timeout) — this is not a kimi error; check host memory and re-dispatch, or split the task into smaller briefs.");
+  if (result.signal === "SIGTERM" && result.status === "failed") lines.push("hint: something outside the relay terminated kimi (a supervisor, the session ending, or a manual kill) — when the relay itself does the killing it reports status \"timeout\" or \"aborted\" instead; inspect the working tree before re-dispatching.");
   if (result.resumed) lines.push("mode: resumed an existing session");
   if (result.sessionId) lines.push(`session id (resume with: --session ${result.sessionId}): ${result.sessionId}`);
   const touched = result.touchedFiles;

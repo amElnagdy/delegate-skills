@@ -49,8 +49,8 @@ touched-files report shows only Antigravity's edits and nothing of the helper's 
 
 - `schema` - the result-format version (currently `delegate-relay.result.v1`)
 - `tool` - `agy`
-- `status` - `completed` | `failed` | `agy_unavailable`
-- `exitCode` - mirrors Antigravity's exit code; `128` plus the signal number if the child was killed; `127` if `agy` is not on PATH
+- `status` - `completed` | `failed` | `timeout` | `aborted` | `agy_unavailable`
+- `exitCode` - mirrors Antigravity's exit code; `128` plus the signal number if the child was killed; `127` if `agy` is not on PATH; on a `timeout` the relay forces a non-zero code even when the child exited `0` after the watchdog's SIGTERM
 - `signal` - the signal that killed the child, otherwise `null`
 - `agyVersion` - inferred from `agy changelog` when available
 - `projectId` / `conversationId` - parsed from the Antigravity log when present
@@ -62,8 +62,8 @@ touched-files report shows only Antigravity's edits and nothing of the helper's 
 - `workdir`, `model`, `project` (the `--project` you passed, vs `projectId` parsed from the log),
   `sandbox`, `dangerouslySkipPermissions`, `resumed` (true for a `--resume-last` or `--conversation`
   run), `startedAt`, `finishedAt`
-- `stderrTail` - last ~20 stderr lines; present only on a failed run
-- `error` - present only if Antigravity failed to launch
+- `stderrTail` - last ~20 stderr lines; present on every run that did not complete (`failed`, `timeout`, `aborted`), except a launch failure, which reports `failed` with no `stderrTail`
+- `error` - present on a launch failure, and on `timeout` and `aborted` runs
 
 The helper also prints a summary to stdout and exits with Antigravity's exit code, so a wrapping script
 can branch on success/failure directly.
@@ -86,6 +86,15 @@ process has exited and `result.json` is written.
 
 - **`status: agy_unavailable` (exit 127):** `agy` is not on PATH. Install the Antigravity CLI and run
   its first-launch setup, then re-dispatch.
+- **`status: timeout`:** the `--print-timeout` watchdog killed the run. The working tree may hold a
+  half-applied change — inspect it before deciding between a longer `--print-timeout`, a smaller
+  brief, or a resume.
+- **`status: aborted`:** the relay itself was killed (its parent's timeout, a stopped task, a
+  closed terminal) and forwarded the kill to agy. The result is written before the relay exits;
+  inspect the working tree before re-dispatching. On native Windows a hard kill of the relay is
+  uncatchable (Node supports no `SIGTERM` handler there), so this status may never get written -
+  a relay process that is gone without a `result.json` is an aborted run; inspect the working
+  tree and `events.jsonl` directly.
 - **`status: failed` with `signal: "SIGKILL"`:** the host ended the child - commonly the OOM killer
   or a supervisor timeout, not an implementer error. Free up host memory or split the task into
   smaller briefs, then re-dispatch.

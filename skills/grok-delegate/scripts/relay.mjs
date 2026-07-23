@@ -51,6 +51,9 @@
  *                           send only the delta brief.
  *   --session <id>          Continue a specific session id; send only the delta brief.
  *                           Mutually exclusive with --resume-last.
+ *   --timeout <dur>         Relay-side watchdog (default: off). Durations use h/m/s
+ *                           strings like 30m or 2h. On expiry the grok child is killed
+ *                           and result.json gets status "timeout".
  *   --out-dir <dir>         Where to write run artifacts (default: a fresh dir under
  *                           the system temp dir, so the repo under review stays clean).
  *   -h, --help              Show this help.
@@ -67,7 +70,9 @@
  * the child dies on a signal, the exit code is 128 plus the signal number and
  * `result.json` records the signal.
  * Once the brief validates, `result.json` is written on every outcome —
- * completed, failed, or grok_unavailable. An orchestrator that polls for the
+ * completed, failed, timeout (the --timeout watchdog fired), aborted (the relay
+ * itself was killed and forwarded the kill to grok), or grok_unavailable. An
+ * orchestrator that polls for the
  * file must therefore also treat a non-zero exit with no file as a usage error.
  */
 
@@ -94,6 +99,7 @@ function parseArgs(argv) {
     autonomy: "workspace-write",
     resumeLast: false,
     session: null,
+    timeout: null,
     outDir: null,
   };
   for (let i = 0; i < argv.length; i += 1) {
@@ -119,10 +125,16 @@ function parseArgs(argv) {
       case "--full-access": opts.autonomy = "full-access"; break;
       case "--resume-last": opts.resumeLast = true; break;
       case "--session": opts.session = next(); break;
+      case "--timeout": opts.timeout = next(); break;
       case "--out-dir": opts.outDir = resolve(next()); break;
       default:
         fail(`unknown option: ${arg}`);
     }
+  }
+  // The watchdog is relay-only (the grok launch has no timeout flag), so a malformed
+  // --timeout must fail loudly here - a silent no-watchdog fallback would be wrong.
+  if (opts.timeout !== null && parseDuration(opts.timeout) === null) {
+    fail(`--timeout "${opts.timeout}" is not a duration; use h/m/s strings like 30m, 90s, or 1h30m`);
   }
   if (!AUTONOMY_MODES.has(opts.autonomy)) {
     fail(`invalid autonomy "${opts.autonomy}"`);
@@ -142,6 +154,33 @@ function parseArgs(argv) {
     fail("--max-turns must be a positive integer");
   }
   return opts;
+}
+
+function parseDuration(duration) {
+  // Whole-string match: "1mtypo" must be rejected, not read as one minute.
+  const match = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/.exec(duration);
+  if (!match || (!match[1] && !match[2] && !match[3])) return null;
+  return (Number(match[1] || 0) * 3600 + Number(match[2] || 0) * 60 + Number(match[3] || 0)) * 1000;
+}
+
+function killChild(child, signal = "SIGTERM") {
+  // The kill must reach the whole process family, not just the immediate child — a tool
+  // subprocess left running would keep editing after the relay reports timeout/aborted.
+  // On Windows the child is the .cmd shim (the shell:true launch above), Windows has no
+  // process-group signals, and Node can't kill a process family without a Job Object, so
+  // kill the tree by pid with the OS tool: /t includes descendants, /f forces it — the
+  // same idiom tree-kill and npm/pnpm use.
+  if (process.platform === "win32") {
+    if (signal !== "SIGTERM") return; // the first taskkill /f already felled the whole tree
+    // stderr is inherited so a real taskkill failure (e.g. access denied) is visible to the operator;
+    // its non-zero exit when the tree is already gone is the expected race and carries nothing to do.
+    try { execFileSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: ["ignore", "ignore", "inherit"] }); }
+    catch { /* already gone — nothing left to kill */ }
+  } else {
+    // On POSIX the child leads its own process group (the detached launch), so the negative-pid
+    // signal reaches every descendant; fall back to the lone pid if the group is already gone.
+    try { process.kill(-child.pid, signal); } catch { try { child.kill(signal); } catch { /* already gone */ } }
+  }
 }
 
 function headerComment() {
@@ -376,6 +415,12 @@ function dispatchToGrok(opts, run, writeResult) {
   // plan mode are advisory), so a --read-only run snapshots the tree up front
   // and flags a violation in the result instead of pretending to enforce.
   const beforeTree = opts.autonomy === "read-only" ? gitTouchedFiles(opts.cd) : null;
+  // every result that reports touchedFiles carries the verdict, aborted runs included -
+  // an aborted --read-only review can still have modified the tree
+  const readOnlyFlag = (touched) =>
+    opts.autonomy === "read-only"
+      ? { readOnlyViolation: beforeTree !== null && touched !== null && JSON.stringify(beforeTree) !== JSON.stringify(touched) }
+      : {};
   const argv = buildArgv(opts, run);
   // shell:true on Windows so the grok.cmd shim resolves (see grokVersion). Safe:
   // the brief is delivered via --prompt-file (never argv), --model/--effort/--session
@@ -386,6 +431,7 @@ function dispatchToGrok(opts, run, writeResult) {
     env: { ...process.env },
     stdio: ["ignore", "pipe", "pipe"],
     shell: process.platform === "win32",
+    detached: process.platform !== "win32", // POSIX: lead a new process group so killChild can fell the whole tree
   });
 
   let sessionId = opts.session || null;
@@ -427,9 +473,69 @@ function dispatchToGrok(opts, run, writeResult) {
   };
 
   let settled = false;
+  let watchdogFired = false;
+  let watchdogTimer = null;
+  let sigkillTimer = null;
+  const timeoutMs = opts.timeout === null ? null : parseDuration(opts.timeout);
+  if (timeoutMs !== null) {
+    watchdogTimer = setTimeout(() => {
+      watchdogFired = true;
+      child.once("exit", () => {
+        child.stdout.destroy();
+        child.stderr.destroy();
+      });
+      killChild(child);
+      sigkillTimer = setTimeout(() => {
+        if (!settled) killChild(child, "SIGKILL");
+      }, 10_000);
+    }, timeoutMs);
+  }
+
+  const clearWatchdog = () => {
+    if (watchdogTimer) clearTimeout(watchdogTimer);
+    if (sigkillTimer) clearTimeout(sigkillTimer);
+  };
+
+  // The relay's own death must still produce a result: without this, a kill from the
+  // orchestrator's side (its command timeout, a stopped task, a closed terminal) writes
+  // no result.json and leaves the grok child running or dying mid-edit with nothing
+  // recording why. SIGTERM/SIGHUP registration is a no-op on Windows; SIGINT works there.
+  for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) {
+    process.on(sig, () => {
+      if (settled) return;
+      settled = true;
+      clearWatchdog();
+      const touchedAtAbort = gitTouchedFiles(opts.cd);
+      const abortedFields = {
+        status: "aborted",
+        exitCode: 128 + (constants.signals[sig] || 15),
+        signal: sig,
+        sessionId,
+        finalMessage: assembleFinal(),
+        usage,
+        touchedFiles: touchedAtAbort,
+        ...readOnlyFlag(touchedAtAbort),
+        stderrTail: stderrTail.slice(-20),
+        error: `the relay was killed by ${sig}; grok was terminated with it — inspect the working tree before re-dispatching`,
+      };
+      const result = writeResult(abortedFields);
+      printSummary(result, run.resultPath);
+      killChild(child);
+      setTimeout(() => {
+        killChild(child, "SIGKILL");
+        // the child may flush files during the grace window; refresh the snapshot so the
+        // artifact matches the tree the orchestrator will actually find
+        const touchedAfterGrace = gitTouchedFiles(opts.cd);
+        writeResult({ ...abortedFields, touchedFiles: touchedAfterGrace, ...readOnlyFlag(touchedAfterGrace) });
+        process.exit(result.exitCode);
+      }, 2000);
+    });
+  }
+
   child.on("error", (err) => {
     if (settled) return;
     settled = true;
+    clearWatchdog();
     const result = writeResult({
       status: "failed",
       exitCode: 1,
@@ -447,20 +553,27 @@ function dispatchToGrok(opts, run, writeResult) {
   child.on("close", (code, signal) => {
     if (settled) return;
     settled = true;
+    clearWatchdog();
+    // a descendant that ignored SIGTERM must not outlive the timeout report: once the
+    // parent is down, sweep the group (no-op where taskkill already felled the tree)
+    if (watchdogFired) killChild(child, "SIGKILL");
     const finalMessage = assembleFinal();
     const touchedFiles = gitTouchedFiles(opts.cd);
+    // A timed-out run is never a success even if grok handles SIGTERM by exiting 0 -
+    // orchestrators key off status and the relay exit code.
+    const succeeded = code === 0 && !watchdogFired;
+    const mapped = code ?? (constants.signals[signal] ? 128 + constants.signals[signal] : 1);
     const result = writeResult({
-      status: code === 0 ? "completed" : "failed",
-      exitCode: code ?? (constants.signals[signal] ? 128 + constants.signals[signal] : 1),
+      status: succeeded ? "completed" : watchdogFired ? "timeout" : "failed",
+      exitCode: succeeded ? 0 : mapped === 0 ? 1 : mapped,
       signal: signal ?? null,
       sessionId,
       finalMessage,
       usage,
       touchedFiles,
-      ...(opts.autonomy === "read-only"
-        ? { readOnlyViolation: beforeTree !== null && touchedFiles !== null && JSON.stringify(beforeTree) !== JSON.stringify(touchedFiles) }
-        : {}),
-      ...(code === 0 ? {} : { stderrTail: stderrTail.slice(-20) }),
+      ...readOnlyFlag(touchedFiles),
+      ...(succeeded ? {} : { stderrTail: stderrTail.slice(-20) }),
+      ...(watchdogFired ? { error: `grok did not finish within --timeout ${opts.timeout}; killed by the relay watchdog` } : {}),
     });
     printSummary(result, run.resultPath);
     process.exit(result.exitCode);
@@ -488,7 +601,8 @@ function printSummary(result, resultPath) {
   const lines = [];
   lines.push("");
   lines.push(`relay: ${result.status} (exit ${result.exitCode}${result.signal ? `, killed by ${result.signal}` : ""})  ·  grok ${result.grokVersion ?? "?"}`);
-  if (result.signal === "SIGKILL") lines.push("hint: the host killed the process (commonly the OOM killer or a supervisor timeout) — this is not a grok error; check host memory and re-dispatch, or split the task into smaller briefs.");
+  if (result.signal === "SIGKILL" && result.status === "failed") lines.push("hint: the host killed the process (commonly the OOM killer or a supervisor timeout) — this is not a grok error; check host memory and re-dispatch, or split the task into smaller briefs.");
+  if (result.signal === "SIGTERM" && result.status === "failed") lines.push("hint: something outside the relay terminated grok (a supervisor, the session ending, or a manual kill) — when the relay itself does the killing it reports status \"timeout\" or \"aborted\" instead; inspect the working tree before re-dispatching.");
   if (result.readOnlyViolation) lines.push("warning: this --read-only run modified the working tree — grok's read-only is best-effort; review the diff before trusting the run.");
   lines.push(`autonomy: ${result.autonomy}`);
   if (result.resumeLast) lines.push("mode: resumed most recent session (--continue)");

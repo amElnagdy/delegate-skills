@@ -86,6 +86,7 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --model <provider/model> 
 # --model is required on a fresh run (see "Choose the implementer model" above)
 # read-only (review/diagnosis, no edits):   add --read-only   (uses the plan agent)
 # continue the previous OpenCode session:   add --resume-last  (delta brief only; keeps the model)
+# hard time limit (watchdog):               add --timeout 2h  (default: off; implementation runs routinely need 1-2h)
 # see all options:                          node .../relay.mjs --help
 ```
 
