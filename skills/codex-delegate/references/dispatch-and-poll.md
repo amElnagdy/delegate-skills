@@ -39,6 +39,7 @@ Options:
 | `--sandbox <mode>` | `read-only` \| `workspace-write` \| `danger-full-access` (default: `workspace-write`). |
 | `--read-only` | Shortcut for `--sandbox read-only` — review/diagnosis with no edits. |
 | `--resume-last` | Continue the most recent Codex session; send only the delta brief (see review-and-land). |
+| `--clean-env` | Launch Codex (and the version preflight) with a minimal environment — PATH, HOME, locale, temp, `CODEX_HOME` — instead of the caller's whole shell profile, so unrelated credentials never reach the implementer. Also passes `-c mcp_servers={}` for the run: configured MCP servers burn tokens and can hang at startup under a minimal environment. |
 | `--skip-git-repo-check` | Allow running outside a git repo. |
 | `--timeout <dur>` | Relay-side watchdog (e.g. `30m`, `2h`); on expiry the child is killed and `result.json` gets `status: "timeout"`. Off by default. |
 | `--out-dir <dir>` | Where artifacts go (default: a fresh dir under the system temp dir). |

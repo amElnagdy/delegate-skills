@@ -35,6 +35,12 @@
  *   --read-only             Shortcut for --sandbox read-only (review/diagnosis, no edits).
  *   --resume-last           Continue the most recent Codex session; send only the delta brief.
  *                           (Inherits the original session's sandbox and working root.)
+ *   --clean-env             Launch codex (and the version preflight) with a minimal environment
+ *                           - PATH, HOME, locale, temp, CODEX_HOME - instead of inheriting every
+ *                           variable in the caller's shell. Keeps unrelated credentials out of
+ *                           the implementer process. Also passes -c mcp_servers={} for the run:
+ *                           configured MCP servers are token consumers and can hang at startup
+ *                           under a minimal environment.
  *   --skip-git-repo-check   Allow running outside a git repository.
  *   --timeout <dur>         Relay-side watchdog (default: off). Durations use h/m/s
  *                           strings like 30m or 2h. On expiry the codex child is killed
@@ -83,6 +89,7 @@ function parseArgs(argv) {
     sandbox: "workspace-write",
     resumeLast: false,
     skipGitRepoCheck: false,
+    cleanEnv: false,
     timeout: null,
     outDir: null,
   };
@@ -108,6 +115,7 @@ function parseArgs(argv) {
       case "--read-only": opts.sandbox = "read-only"; break;
       case "--resume-last": opts.resumeLast = true; break;
       case "--skip-git-repo-check": opts.skipGitRepoCheck = true; break;
+      case "--clean-env": opts.cleanEnv = true; break;
       case "--timeout": opts.timeout = next(); break;
       case "--out-dir": opts.outDir = resolve(next()); break;
       default:
@@ -133,6 +141,20 @@ function parseDuration(duration) {
   const match = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/.exec(duration);
   if (!match || (!match[1] && !match[2] && !match[3])) return null;
   return (Number(match[1] || 0) * 3600 + Number(match[2] || 0) * 60 + Number(match[3] || 0)) * 1000;
+}
+
+function minimalEnv() {
+  // --clean-env: enough for codex to run and read its own auth, nothing else. An orchestrator's
+  // shell profile routinely holds cloud and provider credentials that the delegated task has no
+  // use for; this keeps them out of the child process.
+  const keep = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "LC_CTYPE", "TERM",
+    "TMPDIR", "CODEX_HOME", "NO_COLOR", "SystemRoot", "SystemDrive", "USERPROFILE", "APPDATA",
+    "LOCALAPPDATA", "TEMP", "TMP", "PATHEXT", "COMSPEC"];
+  const env = {};
+  for (const key of keep) {
+    if (process.env[key] !== undefined) env[key] = process.env[key];
+  }
+  return env;
 }
 
 function killChild(child, signal = "SIGTERM") {
@@ -181,13 +203,15 @@ function readBrief(opts) {
   return stdin;
 }
 
-function codexVersion() {
+function codexVersion(cleanEnv) {
   try {
     // On Windows, npm installs `codex` as a .cmd shim; Node's CreateProcess only
     // auto-appends .exe, never .cmd, so launching it needs shell:true there or it
     // ENOENTs on a working install. POSIX is unaffected. (git installs a real
     // git.exe and must NOT get this flag — see gitTouchedFiles.)
-    return execFileSync("codex", ["--version"], { encoding: "utf8", shell: process.platform === "win32" }).trim();
+    // The preflight launches the same binary, so --clean-env has to cover it too - otherwise
+    // the full environment reaches codex before dispatch even runs.
+    return execFileSync("codex", ["--version"], { encoding: "utf8", shell: process.platform === "win32", env: cleanEnv ? minimalEnv() : process.env }).trim();
   } catch {
     return null;
   }
@@ -228,6 +252,9 @@ function buildArgv(opts, finalPath) {
   // `-c` is accepted by `exec resume` (unlike `-s`/`-C`), so the effort override
   // applies to fresh and resumed runs alike.
   if (opts.effort !== null) argv.push("-c", `model_reasoning_effort=${opts.effort}`);
+  // --clean-env is hermetic: MCP servers are token consumers and can hang at startup under a
+  // minimal environment, so disable them for the run.
+  if (opts.cleanEnv) argv.push("-c", "mcp_servers={}");
   if (opts.skipGitRepoCheck) argv.push("--skip-git-repo-check");
   argv.push("-"); // read the prompt from stdin
   return argv;
@@ -284,6 +311,7 @@ function makeResultWriter(opts, version, run) {
       model: opts.model,
       effort: opts.effort,
       resumeLast: opts.resumeLast,
+      cleanEnv: opts.cleanEnv,
       codexVersion: version,
       startedAt: run.startedAt,
       finishedAt: new Date().toISOString(),
@@ -310,7 +338,7 @@ function dispatchToCodex(opts, brief, run, writeResult) {
   // the brief is fed via child.stdin below — never argv — and argv holds only
   // sandbox enums, model names, the pattern-checked effort, and file paths.
   // detached on POSIX: the child leads a new process group so killChild can fell the whole tree
-  const child = spawn("codex", argv, { cwd: opts.cd, stdio: ["pipe", "pipe", "pipe"], shell: process.platform === "win32", detached: process.platform !== "win32" });
+  const child = spawn("codex", argv, { cwd: opts.cd, stdio: ["pipe", "pipe", "pipe"], shell: process.platform === "win32", detached: process.platform !== "win32", env: opts.cleanEnv ? minimalEnv() : process.env });
 
   let threadId = null;
   let stdoutBuf = "";
@@ -450,7 +478,7 @@ function main() {
   const brief = readBrief(opts);
   if (!brief.trim()) fail("empty brief (pass --brief <file> or pipe the brief on stdin)");
 
-  const version = codexVersion();
+  const version = codexVersion(opts.cleanEnv);
   const run = prepareRunDir(opts, brief);
   const writeResult = makeResultWriter(opts, version, run);
 

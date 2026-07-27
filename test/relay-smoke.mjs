@@ -95,8 +95,18 @@ if (args.includes("--version") && process.env.SMOKE_MODE === "qoder-version-hang
   console.log("fake-cli 0.0.0-smoke");
   process.exit(0);
 }
+// A relay may deliberately strip the environment (codex --clean-env), which would also strip
+// the SMOKE_* control variables. Fall back to a config file planted next to this fake so the
+// harness can still drive it — and so stripping itself stays observable.
+if (!process.env.SMOKE_MODE) {
+  try {
+    const fallback = JSON.parse(fs.readFileSync(require("path").join(__dirname, "smoke-fallback.json"), "utf8"));
+    for (const key of Object.keys(fallback)) if (!process.env[key]) process.env[key] = fallback[key];
+  } catch { /* no fallback planted */ }
+}
 if (process.env.SMOKE_MODE === "capture") {
   fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify(args));
+  if (process.env.SMOKE_ENV_FILE) fs.writeFileSync(process.env.SMOKE_ENV_FILE, JSON.stringify(process.env));
   process.exit(0);
 }
 if (process.env.SMOKE_MODE === "qoder-success") {
@@ -298,6 +308,37 @@ check("codex effort: an empty value is rejected", emptyEffortRun.status === 2);
 
 // opencode refuses a fresh run without an explicit model
 const EXTRA_ARGS = { claude: [], codex: [], opencode: ["--model", "fake/model"], agy: [], grok: [], kimi: [], qoder: [] };
+
+// ---- codex --clean-env keeps unrelated credentials out of the child ----
+const cleanEnvOutDir = join(scratch, "out-cleanenv-codex");
+const cleanEnvArgsFile = join(scratch, "args-cleanenv-codex");
+const cleanEnvWorkDir = freshRepo("work-cleanenv-codex");
+const cleanEnvEnvFile = join(scratch, "env-cleanenv-codex");
+const fallbackPath = join(shimDir, "smoke-fallback.json");
+writeFileSync(fallbackPath, JSON.stringify({ SMOKE_MODE: "capture", SMOKE_ARGS_FILE: cleanEnvArgsFile, SMOKE_ENV_FILE: cleanEnvEnvFile }));
+const cleanEnvRun = spawnSync(process.execPath,
+  [relayPath("codex"), "--brief", briefPath, "--cd", cleanEnvWorkDir, "--out-dir", cleanEnvOutDir, "--clean-env"],
+  { env: { ...baseEnv, SMOKE_SECRET_TOKEN: "must-not-leak" }, encoding: "utf8" });
+rmSync(fallbackPath, { force: true });
+const cleanEnvCapture = existsSync(cleanEnvEnvFile) ? JSON.parse(readFileSync(cleanEnvEnvFile, "utf8")) : null;
+check("codex clean-env: the run completes", cleanEnvRun.status === 0);
+check("codex clean-env: an unrelated variable does not reach the child",
+  cleanEnvCapture !== null && cleanEnvCapture.SMOKE_SECRET_TOKEN === undefined);
+check("codex clean-env: PATH and HOME still reach the child",
+  cleanEnvCapture !== null && typeof cleanEnvCapture.PATH === "string" && cleanEnvCapture.PATH.length > 0);
+check("codex clean-env: disables MCP servers for the run", (() => {
+  const a = existsSync(cleanEnvArgsFile) ? JSON.parse(readFileSync(cleanEnvArgsFile, "utf8")) : [];
+  return a.some((v, i) => v === "-c" && a[i + 1] === "mcp_servers={}");
+})());
+check("codex clean-env: recorded in result.json",
+  existsSync(join(cleanEnvOutDir, "result.json")) && result(cleanEnvOutDir).cleanEnv === true);
+const inheritEnvFile = join(scratch, "env-inherit-codex");
+spawnSync(process.execPath,
+  [relayPath("codex"), "--brief", briefPath, "--cd", freshRepo("work-inherit-codex"), "--out-dir", join(scratch, "out-inherit-codex")],
+  { env: { ...baseEnv, SMOKE_MODE: "capture", SMOKE_ARGS_FILE: join(scratch, "args-inherit-codex"), SMOKE_ENV_FILE: inheritEnvFile, SMOKE_SECRET_TOKEN: "inherited" }, encoding: "utf8" });
+const inheritCapture = existsSync(inheritEnvFile) ? JSON.parse(readFileSync(inheritEnvFile, "utf8")) : null;
+check("codex clean-env: control - without the flag the variable is inherited",
+  inheritCapture !== null && inheritCapture.SMOKE_SECRET_TOKEN === "inherited");
 
 // ---- Qoder's documented print-mode argv and structured result ----
 {
