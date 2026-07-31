@@ -34,10 +34,12 @@
  * Options:
  *   --brief <file>          Path to the brief. If omitted, read it from stdin.
  *   --cd <dir>              Working root for Cursor (default: current directory).
+ *   --route <name>          Named delegate-config task route.
  *   --model <name>          Cursor model (default: your Cursor default, usually
  *                           auto). List names with `cursor-agent models`.
  *   --read-only             Run in Cursor's plan mode: read-only analysis, no
  *                           edits, no --force.
+ *   --sandbox <mode>        Cursor sandbox: enabled | disabled.
  *   --no-force              Withhold --force on a write-capable run; commands
  *                           that require approval are refused instead of run.
  *   --session <id>          Resume a specific Cursor chat (`--resume <id>`);
@@ -71,8 +73,8 @@
 
 import { spawn, execSync, execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync, renameSync, rmSync, readFileSync, existsSync, appendFileSync } from "node:fs";
-import { join, resolve, basename } from "node:path";
-import { constants, tmpdir } from "node:os";
+import { join, resolve, basename, dirname } from "node:path";
+import { constants, tmpdir, homedir } from "node:os";
 import { StringDecoder } from "node:string_decoder";
 
 const DEFAULT_TIMEOUT = "30m";
@@ -80,6 +82,10 @@ const MAX_TIMER_MS = 2_147_483_647;
 const VERSION_PROBE_TIMEOUT_MS = 10_000;
 const SAFE_MODEL = /^[A-Za-z0-9][A-Za-z0-9._:@/[\],=-]*$/;
 const SAFE_SESSION = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+const SAFE_ROUTE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const SANDBOX_MODES = new Set(["enabled", "disabled"]);
+const CONFIG_FIELDS = new Set(["model", "sandbox", "force", "timeout", "readOnly"]);
+const BOOLEAN_CONFIG_FIELDS = new Set(["force", "readOnly"]);
 
 function fail(message, code = 2) {
   process.stderr.write(`relay: ${message}\n`);
@@ -90,13 +96,15 @@ function parseArgs(argv) {
   const opts = {
     brief: null,
     cd: process.cwd(),
+    route: null,
     model: null,
-    readOnly: false,
-    force: true,
+    readOnly: null,
+    force: null,
+    sandbox: null,
     session: null,
     resumeLast: false,
     addDirs: [],
-    timeout: DEFAULT_TIMEOUT,
+    timeout: null,
     outDir: null,
   };
   for (let i = 0; i < argv.length; i += 1) {
@@ -115,8 +123,10 @@ function parseArgs(argv) {
         break;
       case "--brief": opts.brief = next(); break;
       case "--cd": opts.cd = resolve(next()); break;
+      case "--route": opts.route = next(); break;
       case "--model": opts.model = next(); break;
       case "--read-only": opts.readOnly = true; break;
+      case "--sandbox": opts.sandbox = next(); break;
       case "--no-force": opts.force = false; break;
       case "--session": opts.session = next(); break;
       case "--resume-last": opts.resumeLast = true; break;
@@ -127,10 +137,31 @@ function parseArgs(argv) {
         fail(`unknown option: ${arg}`);
     }
   }
+  const modelFromFlag = opts.model !== null;
+  const delegateConfig = loadDelegateConfig(opts.cd, opts.route);
+  const config = delegateConfig.values;
+  if (opts.model === null && config.model !== undefined) opts.model = config.model;
+  if (opts.timeout === null && config.timeout !== undefined) opts.timeout = config.timeout;
+  if (opts.sandbox === null && config.sandbox !== undefined) opts.sandbox = config.sandbox;
+  if (opts.force === null && config.force !== undefined) opts.force = config.force;
+  if (opts.readOnly === null && config.readOnly !== undefined) opts.readOnly = config.readOnly;
+  if (opts.force === null) opts.force = true;
+  if (opts.readOnly === null) opts.readOnly = false;
+  if (opts.timeout === null) opts.timeout = DEFAULT_TIMEOUT;
+  opts.modelSource = modelFromFlag ? "flag" : delegateConfig.modelSource;
+  if (typeof opts.force !== "boolean") {
+    fail("delegate config cursor-agent.force must be a boolean");
+  }
+  if (typeof opts.readOnly !== "boolean") {
+    fail("delegate config cursor-agent.readOnly must be a boolean");
+  }
+  if (opts.sandbox !== null && !SANDBOX_MODES.has(opts.sandbox)) {
+    fail(`invalid sandbox "${opts.sandbox}" (expected: enabled, disabled)`);
+  }
   if (opts.resumeLast && opts.session) {
     fail("--resume-last and --session are mutually exclusive; pass only one");
   }
-  if (opts.model !== null && !SAFE_MODEL.test(opts.model)) {
+  if (opts.model !== null && (typeof opts.model !== "string" || !SAFE_MODEL.test(opts.model))) {
     fail("--model contains unsupported characters (allowed: letters, digits, . _ : @ / [ ] , = -)");
   }
   if (opts.session !== null && !SAFE_SESSION.test(opts.session)) {
@@ -146,7 +177,7 @@ function parseArgs(argv) {
   }
   // The watchdog is relay-only (cursor-agent has no timeout flag), so a
   // malformed --timeout must fail loudly here — a silent 30m fallback would be wrong.
-  if (parseDuration(opts.timeout) === null) {
+  if (opts.timeout !== null && parseDuration(opts.timeout) === null) {
     fail(`--timeout "${opts.timeout}" is invalid or too long; use a positive h/m/s duration no longer than about 24 days`);
   }
   return opts;
@@ -269,6 +300,7 @@ function buildArgv(opts) {
   const argv = ["--print", "--output-format", "stream-json", "--trust"];
   if (opts.readOnly) argv.push("--mode", "plan");
   else if (opts.force) argv.push("--force");
+  if (opts.sandbox) argv.push("--sandbox", opts.sandbox);
   if (opts.model) argv.push("--model", winq(opts.model));
   if (opts.session) argv.push("--resume", winq(opts.session));
   else if (opts.resumeLast) argv.push("--continue");
@@ -344,8 +376,12 @@ function makeResultWriter(opts, version, run) {
       tool: "cursor-agent",
       workdir: opts.cd,
       model: opts.model,
+      modelSource: opts.modelSource,
+      route: opts.route,
+      timeout: opts.timeout,
       readOnly: opts.readOnly,
       force: opts.force && !opts.readOnly,
+      sandbox: opts.sandbox,
       resumed: Boolean(opts.resumeLast || opts.session),
       cursorAgentVersion: version,
       startedAt: run.startedAt,
@@ -617,6 +653,96 @@ function dispatchToCursor(opts, brief, run, writeResult) {
     printSummary(result, run.resultPath);
     process.exit(result.exitCode);
   });
+}
+
+/** Find the nearest Git repository root, or retain cwd outside a repository. */
+function findProjectRoot(cwd) {
+  let current = resolve(cwd);
+  while (true) {
+    if (existsSync(join(current, ".git"))) return current;
+    const parent = dirname(current);
+    if (parent === current) return resolve(cwd);
+    current = parent;
+  }
+}
+
+function readDelegateConfig(configPath) {
+  if (!existsSync(configPath)) return null;
+  let document;
+  try {
+    document = JSON.parse(readFileSync(configPath, "utf8"));
+  } catch (error) {
+    fail(`invalid delegate config ${configPath}: ${error.message}`);
+  }
+  if (!document || typeof document !== "object" || Array.isArray(document)) {
+    fail(`invalid delegate config ${configPath}: expected a JSON object`);
+  }
+  if (!["delegate-config.v1", "delegate-config.v2"].includes(document.version)) {
+    fail(`invalid delegate config ${configPath}: unsupported version "${document.version}"`);
+  }
+  return document;
+}
+
+function configLayers(document, route, configPath) {
+  const entry = document?.implementers?.["cursor-agent"];
+  if (entry === undefined) return [];
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    fail(`invalid delegate config ${configPath}: implementers.cursor-agent must be an object`);
+  }
+  if (document.version === "delegate-config.v1") return [{ values: entry, label: "defaults" }];
+  for (const field of Object.keys(entry)) {
+    if (!["defaults", "routes"].includes(field)) {
+      fail(`invalid delegate config ${configPath}: unsupported cursor-agent section "${field}"`);
+    }
+  }
+  if (entry.routes !== undefined && (!entry.routes || typeof entry.routes !== "object" || Array.isArray(entry.routes))) {
+    fail(`invalid delegate config ${configPath}: cursor-agent.routes must be an object`);
+  }
+  const layers = [];
+  if (entry.defaults !== undefined) layers.push({ values: entry.defaults, label: "defaults" });
+  if (route && entry.routes?.[route] !== undefined) {
+    layers.push({ values: entry.routes[route], label: `route:${route}` });
+  }
+  return layers;
+}
+
+function loadDelegateConfig(cwd, route) {
+  if (route !== null && !SAFE_ROUTE.test(route)) {
+    fail("--route contains unsupported characters (allowed: letters, digits, . _ -)");
+  }
+  const candidates = [
+    { scope: "global", path: join(homedir(), ".config", "delegate-skills", "config.json") },
+    { scope: "project", path: join(findProjectRoot(cwd), ".delegate", "config.json") },
+  ];
+  const resolved = {};
+  let modelSource = "default";
+  let routeFound = route === null;
+  for (const candidate of candidates) {
+    const document = readDelegateConfig(candidate.path);
+    if (!document) continue;
+    for (const layer of configLayers(document, route, candidate.path)) {
+      if (!layer.values || typeof layer.values !== "object" || Array.isArray(layer.values)) {
+        fail(`invalid delegate config ${candidate.path}: ${layer.label} must be an object`);
+      }
+      if (layer.label.startsWith("route:")) routeFound = true;
+      for (const [field, rawValue] of Object.entries(layer.values)) {
+        if (!CONFIG_FIELDS.has(field)) {
+          fail(`invalid delegate config ${candidate.path}: unsupported cursor-agent field "${field}"`);
+        }
+        const fieldValue = field === "timeout" && Number.isSafeInteger(rawValue) && rawValue > 0
+          ? `${rawValue}s`
+          : rawValue;
+        const expectedType = BOOLEAN_CONFIG_FIELDS.has(field) ? "boolean" : "string";
+        if (typeof fieldValue !== expectedType) {
+          fail(`invalid delegate config ${candidate.path}: cursor-agent field "${field}" must be a ${expectedType}`);
+        }
+        resolved[field] = fieldValue;
+        if (field === "model") modelSource = `${candidate.scope}:${layer.label}`;
+      }
+    }
+  }
+  if (!routeFound) fail(`delegate config route not found: ${route}`);
+  return { values: resolved, modelSource };
 }
 
 async function main() {

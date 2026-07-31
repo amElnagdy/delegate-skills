@@ -27,6 +27,7 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 | --- | --- |
 | `--brief <file>` | Brief path. Omit it to read the brief from stdin. |
 | `--cd <dir>` | Working root and child process cwd (default: current directory). |
+| `--route <name>` | Apply a named `delegate-config.v2` task route. |
 | `--model <alias>` | Kimi model alias for this run (default: Kimi's own `default_model`). |
 | `--session <id>` | Resume a specific Kimi session; send only the delta brief. |
 | `--resume-last` | Resume the most recent Kimi session for this cwd (`kimi --continue`); send only the delta brief. |
@@ -57,7 +58,7 @@ inside the worktree can make the artifacts appear there:
 
 - `schema`, `tool` (`"kimi"`), `status` (`completed` | `failed` | `timeout` | `aborted` | `kimi_unavailable`), `exitCode`, and
   `signal` (`null` unless the child died on a signal).
-- `workdir`, `model` (the model alias or `null`), `resumed`, `kimiVersion`, `sessionId`, `startedAt`,
+- `workdir`, `route`, `timeout`, `model` (the model alias or `null`), `modelSource`, `resumed`, `kimiVersion`, `sessionId`, `startedAt`,
   and `finishedAt`.
 - `briefPath`, `finalPath`, `eventsPath`, and `stderrPath`.
 - `finalMessage` - assistant `content` strings joined with `"\n\n"`; tool calls and tool results are

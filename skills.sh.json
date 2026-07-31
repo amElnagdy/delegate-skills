@@ -2,6 +2,13 @@
   "$schema": "https://skills.sh/schemas/skills.sh.schema.json",
   "groupings": [
     {
+      "title": "Configure delegation",
+      "description": "Set up implementer defaults and task-specific model routes for delegate skills.",
+      "skills": [
+        "delegate-config"
+      ]
+    },
+    {
       "title": "Delegate to CLI agents",
       "description": "Delegate a coding task to a CLI implementer agent, then review the diff and commit it yourself.",
       "skills": [

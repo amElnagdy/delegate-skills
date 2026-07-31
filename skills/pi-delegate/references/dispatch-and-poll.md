@@ -27,6 +27,7 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 | --- | --- |
 | `--brief <file>` | Brief path. Omit it to read the brief from stdin. |
 | `--cd <dir>` | Working root and child process cwd (default: current directory). |
+| `--route <name>` | Apply a named `delegate-config.v2` task route. |
 | `--provider <name>` | pi provider name (default: pi's own default). Token-validated. |
 | `--model <pattern>` | pi model id or pattern (default: pi's own default). Token-validated: letters, digits, `. _ : / -`. |
 | `--session <id>` | Resume a specific pi session; send only the delta brief. |
@@ -59,7 +60,7 @@ Artifacts live outside the repo by default, so they do not appear in `touchedFil
 
 - `schema`, `tool` (`"pi"`), `status` (`completed` | `failed` | `timeout` | `aborted` | `pi_unavailable`), `exitCode`, and
   `signal` (`null` unless the child died on a signal).
-- `workdir`, requested `provider`/`model`, `projectTrusted`, `readOnly`, `resumed`, `piVersion`,
+- `workdir`, `route`, `timeout`, requested `provider`/`model`, `modelSource`, `projectTrusted`, `readOnly`, `resumed`, `piVersion`,
   `sessionId`, `startedAt`, and `finishedAt`.
 - `actualProvider`, `actualModel`, `usage`, and `stopReason` from Pi's final assistant event.
 - `briefPath`, `finalPath`, `eventsPath`, and `stderrPath`.

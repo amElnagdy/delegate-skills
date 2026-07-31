@@ -31,6 +31,7 @@ Options:
 | --- | --- |
 | `--brief <file>` | The brief. Omit it to read the brief from stdin (`node relay.mjs … < brief.txt`). |
 | `--cd <dir>` | Working root for OpenCode (default: current directory). |
+| `--route <name>` | Apply a named `delegate-config.v2` task route. |
 | `--model <name>` | Model as `provider/model`. **Required on a fresh run** — OpenCode has no safe default (a bare `opencode run` errors); a resumed run inherits its session's model. |
 | `--agent <name>` | OpenCode agent (default: `build`, write-capable). |
 | `--read-only` | Shortcut for `--agent plan` — review/diagnosis with no edits. |
@@ -65,7 +66,7 @@ touched-files report shows only OpenCode's edits and nothing of the helper's own
 - `cost` — total run cost in USD, summed from the step events (`null` if none were reported)
 - `briefPath` / `eventsPath` / `finalPath` — the exact brief relay sent, the raw JSON event stream, and
   the final-message file
-- `workdir`, `model`, `auto`, `resumeLast`, `startedAt`, `finishedAt`
+- `workdir`, `route`, `timeout`, `model`, `modelSource`, `auto`, `resumeLast`, `startedAt`, `finishedAt`
 - `stderrTail` — last ~20 stderr lines; present on every run that did not complete (`failed`, `timeout`, `aborted`), absent on `completed`,
   `opencode_unavailable`, and launch failures
 - `error` — present on a launch failure, and on `timeout` and `aborted` runs

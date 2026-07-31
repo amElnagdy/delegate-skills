@@ -35,7 +35,7 @@
  * Node built-ins only.
  */
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync, chmodSync, mkdirSync, copyFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync, chmodSync, mkdirSync, copyFileSync, statSync } from "node:fs";
 import { join, delimiter, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -79,7 +79,12 @@ const alive = (pid) => {
 // the one thing a hard-coded list cannot catch is its own omission.
 {
   const skillsDir = join(here, "..", "skills");
-  const onDisk = readdirSync(skillsDir).filter((d) => d.endsWith("-delegate")).sort();
+  const allOnDisk = readdirSync(skillsDir).sort();
+  const onDisk = allOnDisk.filter((d) => d.endsWith("-delegate"));
+  // Utility skills (like delegate-config) don't end in -delegate.
+  const utilityOnDisk = allOnDisk.filter(
+    (d) => !d.endsWith("-delegate") && statSync(join(skillsDir, d)).isDirectory(),
+  );
   const registered = new Set(
     JSON.parse(readFileSync(join(here, "..", "skills.sh.json"), "utf8"))
       .groupings.flatMap((g) => g.skills),
@@ -99,8 +104,14 @@ const alive = (pid) => {
     );
     check(`${name}: listed in skills.sh.json`, registered.has(dir));
   }
+  // Utility skills: must have SKILL.md and be listed in skills.sh.json, but no relay or references.
+  for (const dir of utilityOnDisk) {
+    check(`${dir}: SKILL.md`, existsSync(join(skillsDir, dir, "SKILL.md")));
+    check(`${dir}: listed in skills.sh.json`, registered.has(dir));
+  }
   check("smoke matrix has no entry without a directory", SKILLS.every((s) => onDisk.includes(`${s}-delegate`)));
-  check("skills.sh.json has no entry without a directory", [...registered].every((s) => onDisk.includes(s)));
+  const allDiskSkills = new Set([...onDisk, ...utilityOnDisk]);
+  check("skills.sh.json has no entry without a directory", [...registered].every((s) => allDiskSkills.has(s)));
 }
 
 // ---- every relay must at least parse ----
@@ -113,7 +124,14 @@ for (const skill of SKILLS) {
 // ---- one fake CLI, planted on PATH under every relay's binary name ----
 const FAKE = `const fs = require("node:fs");
 const args = process.argv.slice(2);
-if ((args.includes("--version") && /-version-hang$/.test(process.env.SMOKE_MODE || ""))
+if (args[0] === "auth" && args[1] === "status") {
+  console.log(JSON.stringify({ loggedIn: true }));
+  process.exit(0);
+} else if (args[0] === "models" || args.includes("--list-models")) {
+  console.log("fake-fast-model");
+  console.log("fake-complex-model - Fake Complex");
+  process.exit(0);
+} else if ((args.includes("--version") && /-version-hang$/.test(process.env.SMOKE_MODE || ""))
     || (args[0] === "changelog" && process.env.SMOKE_MODE === "agy-version-hang")) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
 } else if (args.includes("--version") && /-version-fail$/.test(process.env.SMOKE_MODE || "")) {
@@ -273,6 +291,15 @@ using System.IO;
 using System.Threading;
 class FakeCli {
   static int Main(string[] args) {
+    if (args.Length > 1 && args[0] == "auth" && args[1] == "status") {
+      Console.WriteLine("{\\"loggedIn\\":true}");
+      return 0;
+    }
+    if ((args.Length > 0 && args[0] == "models") || Array.IndexOf(args, "--list-models") >= 0) {
+      Console.WriteLine("fake-fast-model");
+      Console.WriteLine("fake-complex-model - Fake Complex");
+      return 0;
+    }
     if ((Array.IndexOf(args, "--version") >= 0 && (Environment.GetEnvironmentVariable("SMOKE_MODE") == "qoder-version-hang" || Environment.GetEnvironmentVariable("SMOKE_MODE") == "vibe-version-hang"))
         || (args.Length > 0 && args[0] == "changelog" && Environment.GetEnvironmentVariable("SMOKE_MODE") == "agy-version-hang")) {
       Thread.Sleep(Timeout.Infinite);
@@ -351,7 +378,15 @@ if (WIN) {
 }
 const briefPath = join(scratch, "brief.txt");
 writeFileSync(briefPath, "smoke brief: run until killed.");
-const baseEnv = { ...process.env, PATH: shimDir + delimiter + process.env.PATH, SMOKE_NODE: process.execPath };
+const smokeHome = join(scratch, "home");
+mkdirSync(smokeHome);
+const baseEnv = {
+  ...process.env,
+  PATH: shimDir + delimiter + process.env.PATH,
+  HOME: smokeHome,
+  USERPROFILE: smokeHome,
+  SMOKE_NODE: process.execPath,
+};
 const slowWriteHook = join(scratch, "slow-result-write.cjs");
 writeFileSync(slowWriteHook, `const fs = require("node:fs");
 const { syncBuiltinESMExports } = require("node:module");
@@ -385,6 +420,23 @@ const runRelay = (skill, workDir, outDir, extraArgs, extraEnv) =>
   });
 
 const result = (outDir) => JSON.parse(readFileSync(join(outDir, "result.json"), "utf8"));
+
+// ---- delegate-config discovery parses auth and bounded model reports ----
+{
+  const discovery = spawnSync(process.execPath,
+    [join(here, "..", "skills", "delegate-config", "scripts", "discover.mjs")],
+    { env: baseEnv, encoding: "utf8", timeout: 30_000 });
+  const report = discovery.status === 0 ? JSON.parse(discovery.stdout) : { discovered: [] };
+  const claude = report.discovered.find((implementer) => implementer.name === "claude");
+  const opencode = report.discovered.find((implementer) => implementer.name === "opencode");
+  const cursor = report.discovered.find((implementer) => implementer.name === "cursor-agent");
+  check("delegate-config discovery: Claude JSON auth is parsed",
+    claude?.authenticated === true);
+  check("delegate-config discovery: OpenCode models are reported",
+    opencode?.models?.status === "reported" && opencode.models.values.includes("fake-fast-model"));
+  check("delegate-config discovery: Cursor labels are normalized to model ids",
+    cursor?.models?.status === "reported" && cursor.models.values.includes("fake-complex-model"));
+}
 
 
 // ---- codex effort is validated, forwarded, and recorded ----
@@ -431,6 +483,238 @@ const emptyEffortRun = spawnSync(process.execPath,
   [relayPath("codex"), "--brief", briefPath, "--effort", ""],
   { env: baseEnv, encoding: "utf8" });
 check("codex effort: an empty value is rejected", emptyEffortRun.status === 2);
+
+// ---- delegate config routes resolve before validation and preserve explicit flags ----
+const CONFIG_KEYS = {
+  agy: "agy",
+  claude: "claude",
+  codex: "codex",
+  cursor: "cursor-agent",
+  grok: "grok",
+  kimi: "kimi",
+  opencode: "opencode",
+  pi: "pi",
+  qoder: "qodercli",
+  vibe: "vibe",
+};
+
+const writeProjectConfig = (workDir, implementer, entry) => {
+  const configDir = join(workDir, ".delegate");
+  mkdirSync(configDir, { recursive: true });
+  writeFileSync(join(configDir, "config.json"), `${JSON.stringify({
+    version: "delegate-config.v2",
+    implementers: { [implementer]: entry },
+  }, null, 2)}\n`);
+};
+
+for (const skill of SKILLS) {
+  const workDir = freshRepo(`work-config-${skill}`);
+  const nestedDir = join(workDir, "nested");
+  mkdirSync(nestedDir);
+  const outDir = join(scratch, `out-config-${skill}`);
+  const argsFile = join(scratch, `args-config-${skill}`);
+  const routeValues = skill === "vibe"
+    ? { timeout: 5, readOnly: true }
+    : { model: "config-fast-model", timeout: 5 };
+  writeProjectConfig(workDir, CONFIG_KEYS[skill], {
+    defaults: { timeout: "30m" },
+    routes: { fast: routeValues },
+  });
+  const configuredRun = spawnSync(process.execPath, [
+    relayPath(skill),
+    "--brief", briefPath,
+    "--cd", nestedDir,
+    "--out-dir", outDir,
+    "--route", "fast",
+  ], {
+    env: { ...baseEnv, SMOKE_MODE: "capture", SMOKE_ARGS_FILE: argsFile },
+    encoding: "utf8",
+  });
+  const configuredResult = existsSync(join(outDir, "result.json")) ? result(outDir) : {};
+  // The capture fake emits no result event. Claude correctly treats that as a
+  // failed implementer run, while the other relays accept its zero exit. The
+  // route metadata is the cross-relay assertion here.
+  check(`${skill} config: route resolves from the repository root`,
+    configuredResult.route === "fast");
+  if (skill !== "vibe") {
+    check(`${skill} config: route selects the model and records its source`,
+      configuredResult.model === "config-fast-model" &&
+      configuredResult.modelSource === "project:route:fast");
+  }
+}
+
+for (const skill of SKILLS) {
+  const workDir = freshRepo(`work-config-type-${skill}`);
+  writeProjectConfig(workDir, CONFIG_KEYS[skill], {
+    routes: {
+      invalid: skill === "vibe" ? { readOnly: "yes" } : { model: 42 },
+    },
+  });
+  const invalidTypeRun = spawnSync(process.execPath, [
+    relayPath(skill),
+    "--brief", briefPath,
+    "--cd", workDir,
+    "--route", "invalid",
+  ], { env: baseEnv, encoding: "utf8" });
+  check(`${skill} config: invalid field types fail before dispatch`, invalidTypeRun.status === 2);
+}
+
+{
+  const workDir = freshRepo("work-config-explicit-codex");
+  const outDir = join(scratch, "out-config-explicit-codex");
+  const argsFile = join(scratch, "args-config-explicit-codex");
+  writeProjectConfig(workDir, "codex", {
+    defaults: { sandbox: "danger-full-access", model: "config-default-model" },
+    routes: { complex: { model: "config-route-model", timeout: 1 } },
+  });
+  const explicitRun = spawnSync(process.execPath, [
+    relayPath("codex"),
+    "--brief", briefPath,
+    "--cd", workDir,
+    "--out-dir", outDir,
+    "--route", "complex",
+    "--model", "flag-model",
+    "--sandbox", "workspace-write",
+    "--timeout", "5s",
+  ], {
+    env: { ...baseEnv, SMOKE_MODE: "capture", SMOKE_ARGS_FILE: argsFile },
+    encoding: "utf8",
+  });
+  const explicitArgs = existsSync(argsFile) ? JSON.parse(readFileSync(argsFile, "utf8")) : [];
+  const explicitResult = existsSync(join(outDir, "result.json")) ? result(outDir) : {};
+  check("codex config: explicit model and sandbox override project config",
+    explicitRun.status === 0 &&
+    explicitArgs[explicitArgs.indexOf("-m") + 1] === "flag-model" &&
+    explicitArgs[explicitArgs.indexOf("-s") + 1] === "workspace-write");
+  check("codex config: explicit model source is recorded",
+    explicitResult.modelSource === "flag");
+}
+
+{
+  const workDir = freshRepo("work-config-precedence-codex");
+  const outDir = join(scratch, "out-config-precedence-codex");
+  const argsFile = join(scratch, "args-config-precedence-codex");
+  const isolatedHome = join(scratch, "home-config-precedence");
+  const globalConfigDir = join(isolatedHome, ".config", "delegate-skills");
+  mkdirSync(globalConfigDir, { recursive: true });
+  writeFileSync(join(globalConfigDir, "config.json"), `${JSON.stringify({
+    version: "delegate-config.v2",
+    implementers: {
+      codex: {
+        defaults: { model: "global-default", sandbox: "read-only", timeout: "30m" },
+        routes: { complex: { model: "global-route", effort: "low" } },
+      },
+    },
+  }, null, 2)}\n`);
+  writeProjectConfig(workDir, "codex", {
+    defaults: { model: "project-default", timeout: "20m" },
+    routes: { complex: { model: "project-route", effort: "high" } },
+  });
+  const precedenceRun = spawnSync(process.execPath, [
+    relayPath("codex"),
+    "--brief", briefPath,
+    "--cd", workDir,
+    "--out-dir", outDir,
+    "--route", "complex",
+  ], {
+    env: {
+      ...baseEnv,
+      HOME: isolatedHome,
+      USERPROFILE: isolatedHome,
+      SMOKE_MODE: "capture",
+      SMOKE_ARGS_FILE: argsFile,
+    },
+    encoding: "utf8",
+  });
+  const precedenceResult = existsSync(join(outDir, "result.json")) ? result(outDir) : {};
+  check("codex config: project and route layers resolve per field",
+    precedenceRun.status === 0 &&
+    precedenceResult.model === "project-route" &&
+    precedenceResult.modelSource === "project:route:complex" &&
+    precedenceResult.effort === "high" &&
+    precedenceResult.timeout === "20m" &&
+    precedenceResult.sandbox === "read-only");
+}
+
+{
+  const workDir = freshRepo("work-config-v1-codex");
+  const outDir = join(scratch, "out-config-v1-codex");
+  const argsFile = join(scratch, "args-config-v1-codex");
+  const configDir = join(workDir, ".delegate");
+  mkdirSync(configDir);
+  writeFileSync(join(configDir, "config.json"), `${JSON.stringify({
+    version: "delegate-config.v1",
+    implementers: {
+      codex: { model: "legacy-model", sandbox: "read-only", effort: "low", timeout: 5 },
+    },
+  }, null, 2)}\n`);
+  const legacyRun = spawnSync(process.execPath, [
+    relayPath("codex"),
+    "--brief", briefPath,
+    "--cd", workDir,
+    "--out-dir", outDir,
+  ], {
+    env: { ...baseEnv, SMOKE_MODE: "capture", SMOKE_ARGS_FILE: argsFile },
+    encoding: "utf8",
+  });
+  const legacyResult = existsSync(join(outDir, "result.json")) ? result(outDir) : {};
+  check("codex config: version 1 defaults and integer timeout remain compatible",
+    legacyRun.status === 0 &&
+    legacyResult.model === "legacy-model" &&
+    legacyResult.modelSource === "project:defaults" &&
+    legacyResult.sandbox === "read-only" &&
+    legacyResult.timeout === "5s");
+}
+
+{
+  const workDir = freshRepo("work-config-v1-qoder");
+  const outDir = join(scratch, "out-config-v1-qoder");
+  const argsFile = join(scratch, "args-config-v1-qoder");
+  const configDir = join(workDir, ".delegate");
+  mkdirSync(configDir);
+  writeFileSync(join(configDir, "config.json"), `${JSON.stringify({
+    version: "delegate-config.v1",
+    implementers: {
+      qodercli: { model: "legacy-model", sandbox: "plan", timeout: 5 },
+    },
+  }, null, 2)}\n`);
+  const legacyRun = spawnSync(process.execPath, [
+    relayPath("qoder"),
+    "--brief", briefPath,
+    "--cd", workDir,
+    "--out-dir", outDir,
+  ], {
+    env: { ...baseEnv, SMOKE_MODE: "capture", SMOKE_ARGS_FILE: argsFile },
+    encoding: "utf8",
+  });
+  const legacyResult = existsSync(join(outDir, "result.json")) ? result(outDir) : {};
+  check("qoder config: version 1 sandbox alias remains compatible",
+    legacyRun.status === 0 &&
+    legacyResult.permissionMode === "plan" &&
+    legacyResult.timeout === "5s");
+}
+
+{
+  const workDir = freshRepo("work-config-invalid-codex");
+  writeProjectConfig(workDir, "codex", {
+    routes: { unsafe: { model: "bad & whoami" } },
+  });
+  const invalidConfigRun = spawnSync(process.execPath, [
+    relayPath("codex"),
+    "--brief", briefPath,
+    "--cd", workDir,
+    "--route", "unsafe",
+  ], { env: baseEnv, encoding: "utf8" });
+  check("codex config: unsafe model is rejected before dispatch", invalidConfigRun.status === 2);
+
+  const missingRouteRun = spawnSync(process.execPath, [
+    relayPath("codex"),
+    "--brief", briefPath,
+    "--cd", workDir,
+    "--route", "missing",
+  ], { env: baseEnv, encoding: "utf8" });
+  check("codex config: an unknown route fails instead of falling back", missingRouteRun.status === 2);
+}
 
 // opencode refuses a fresh run without an explicit model
 const EXTRA_ARGS = { claude: [], codex: [], opencode: ["--model", "fake/model"], agy: [], grok: [], kimi: [], qoder: [], vibe: [], cursor: [], pi: [] };

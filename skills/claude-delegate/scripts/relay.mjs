@@ -51,6 +51,7 @@
  * Options:
  *   --brief <file>                    Brief path. Omit to read the brief from stdin.
  *   --cd <dir>                        Child cwd (default: current directory).
+ *   --route <name>                    Named delegate-config task route.
  *   --out-dir <dir>                   Artifact directory (default: system temp).
  *   --timeout <dur>                   Relay watchdog; off by default. Use h/m/s,
  *                                     such as 30m, 90s, or 1h30m.
@@ -101,8 +102,8 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { basename, delimiter, join, resolve } from "node:path";
-import { constants as osConstants, tmpdir } from "node:os";
+import { basename, delimiter, dirname, join, resolve } from "node:path";
+import { constants as osConstants, tmpdir, homedir } from "node:os";
 import { StringDecoder } from "node:string_decoder";
 
 const SCHEMA = "delegate-relay.result.v1";
@@ -111,6 +112,99 @@ const MAX_TIMER_MS = 2_147_483_647;
 const EFFORT_LEVELS = new Set(["low", "medium", "high", "xhigh", "max", "ultracode"]);
 const SAFE_MODEL = /^[A-Za-z0-9][A-Za-z0-9._:@\/\[\]-]*$/;
 const SAFE_SESSION = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+const SAFE_ROUTE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const CONFIG_FIELDS = new Set(["model", "effort", "timeout", "readOnly"]);
+const BOOLEAN_CONFIG_FIELDS = new Set(["readOnly"]);
+
+/** Find the nearest Git repository root, or retain cwd outside a repository. */
+function findProjectRoot(cwd) {
+  let current = resolve(cwd);
+  while (true) {
+    if (existsSync(join(current, ".git"))) return current;
+    const parent = dirname(current);
+    if (parent === current) return resolve(cwd);
+    current = parent;
+  }
+}
+
+function readDelegateConfig(configPath) {
+  if (!existsSync(configPath)) return null;
+  let document;
+  try {
+    document = JSON.parse(readFileSync(configPath, "utf8"));
+  } catch (error) {
+    fail(`invalid delegate config ${configPath}: ${error.message}`);
+  }
+  if (!document || typeof document !== "object" || Array.isArray(document)) {
+    fail(`invalid delegate config ${configPath}: expected a JSON object`);
+  }
+  if (!["delegate-config.v1", "delegate-config.v2"].includes(document.version)) {
+    fail(`invalid delegate config ${configPath}: unsupported version "${document.version}"`);
+  }
+  return document;
+}
+
+function configLayers(document, route, configPath) {
+  const entry = document?.implementers?.claude;
+  if (entry === undefined) return [];
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    fail(`invalid delegate config ${configPath}: implementers.claude must be an object`);
+  }
+  if (document.version === "delegate-config.v1") return [{ values: entry, label: "defaults" }];
+  for (const field of Object.keys(entry)) {
+    if (!["defaults", "routes"].includes(field)) {
+      fail(`invalid delegate config ${configPath}: unsupported claude section "${field}"`);
+    }
+  }
+  if (entry.routes !== undefined && (!entry.routes || typeof entry.routes !== "object" || Array.isArray(entry.routes))) {
+    fail(`invalid delegate config ${configPath}: claude.routes must be an object`);
+  }
+  const layers = [];
+  if (entry.defaults !== undefined) layers.push({ values: entry.defaults, label: "defaults" });
+  if (route && entry.routes?.[route] !== undefined) {
+    layers.push({ values: entry.routes[route], label: `route:${route}` });
+  }
+  return layers;
+}
+
+function loadDelegateConfig(cwd, route) {
+  if (route !== null && !SAFE_ROUTE.test(route)) {
+    fail("--route contains unsupported characters (allowed: letters, digits, . _ -)");
+  }
+  const candidates = [
+    { scope: "global", path: join(homedir(), ".config", "delegate-skills", "config.json") },
+    { scope: "project", path: join(findProjectRoot(cwd), ".delegate", "config.json") },
+  ];
+  const resolved = {};
+  let modelSource = "default";
+  let routeFound = route === null;
+  for (const candidate of candidates) {
+    const document = readDelegateConfig(candidate.path);
+    if (!document) continue;
+    for (const layer of configLayers(document, route, candidate.path)) {
+      if (!layer.values || typeof layer.values !== "object" || Array.isArray(layer.values)) {
+        fail(`invalid delegate config ${candidate.path}: ${layer.label} must be an object`);
+      }
+      if (layer.label.startsWith("route:")) routeFound = true;
+      for (const [field, rawValue] of Object.entries(layer.values)) {
+        if (!CONFIG_FIELDS.has(field)) {
+          fail(`invalid delegate config ${candidate.path}: unsupported claude field "${field}"`);
+        }
+        const fieldValue = field === "timeout" && Number.isSafeInteger(rawValue) && rawValue > 0
+          ? `${rawValue}s`
+          : rawValue;
+        const expectedType = BOOLEAN_CONFIG_FIELDS.has(field) ? "boolean" : "string";
+        if (typeof fieldValue !== expectedType) {
+          fail(`invalid delegate config ${candidate.path}: claude field "${field}" must be a ${expectedType}`);
+        }
+        resolved[field] = fieldValue;
+        if (field === "model") modelSource = `${candidate.scope}:${layer.label}`;
+      }
+    }
+  }
+  if (!routeFound) fail(`delegate config route not found: ${route}`);
+  return { values: resolved, modelSource };
+}
 
 function fail(message, code = 2) {
   process.stderr.write(`relay: ${message}\n`);
@@ -137,6 +231,7 @@ function parseArgs(argv) {
   const opts = {
     brief: null,
     cd: process.cwd(),
+    route: null,
     outDir: null,
     timeout: null,
     model: null,
@@ -145,7 +240,7 @@ function parseArgs(argv) {
     maxBudgetUsd: null,
     resumeLast: false,
     session: null,
-    readOnly: false,
+    readOnly: null,
     dangerouslySkipPermissions: false,
   };
 
@@ -166,6 +261,7 @@ function parseArgs(argv) {
         break;
       case "--brief": opts.brief = next(); break;
       case "--cd": opts.cd = resolve(next()); break;
+      case "--route": opts.route = next(); break;
       case "--out-dir": opts.outDir = resolve(next()); break;
       case "--timeout": opts.timeout = next(); break;
       case "--model": opts.model = next(); break;
@@ -181,6 +277,18 @@ function parseArgs(argv) {
     }
   }
 
+  const modelFromFlag = opts.model !== null;
+  const delegateConfig = loadDelegateConfig(opts.cd, opts.route);
+  const config = delegateConfig.values;
+  if (opts.model === null && config.model !== undefined) opts.model = config.model;
+  if (opts.effort === null && config.effort !== undefined) opts.effort = config.effort;
+  if (opts.timeout === null && config.timeout !== undefined) opts.timeout = config.timeout;
+  if (opts.readOnly === null && config.readOnly !== undefined) opts.readOnly = config.readOnly;
+  if (opts.readOnly === null) opts.readOnly = false;
+  opts.modelSource = modelFromFlag ? "flag" : delegateConfig.modelSource;
+  if (typeof opts.readOnly !== "boolean") {
+    fail("delegate config claude.readOnly must be a boolean");
+  }
   if (opts.resumeLast && opts.session) {
     fail("--resume-last and --session are mutually exclusive; pass only one");
   }
@@ -190,13 +298,13 @@ function parseArgs(argv) {
   if (opts.timeout !== null && parseDuration(opts.timeout) === null) {
     fail(`--timeout "${opts.timeout}" is invalid or too long; use a positive h/m/s duration no longer than about 24 days`);
   }
-  if (opts.model !== null && !SAFE_MODEL.test(opts.model)) {
+  if (opts.model !== null && (typeof opts.model !== "string" || !SAFE_MODEL.test(opts.model))) {
     fail("--model contains unsupported characters (allowed: letters, digits, . _ : @ / [ ] -)");
   }
   if (opts.session !== null && !SAFE_SESSION.test(opts.session)) {
     fail("--session contains unsupported characters (allowed: letters, digits, . _ : -)");
   }
-  if (opts.effort !== null && !EFFORT_LEVELS.has(opts.effort)) {
+  if (opts.effort !== null && (typeof opts.effort !== "string" || !EFFORT_LEVELS.has(opts.effort))) {
     fail(`invalid --effort "${opts.effort}" (expected: ${[...EFFORT_LEVELS].join(", ")})`);
   }
   if (opts.maxTurns !== null) {
@@ -611,13 +719,15 @@ function writeJsonAtomic(path, value) {
   renameSync(temporary, path);
 }
 
-function makeResultWriter(opts, version, run, state, beforeTree) {
+function makeResultWriter(opts, modelSource, version, run, state, beforeTree) {
   return (extra) => {
     const result = {
       schema: SCHEMA,
       tool: "claude",
       workdir: opts.cd,
       model: opts.model,
+      modelSource,
+      route: opts.route,
       effort: opts.effort,
       maxTurns: opts.maxTurns === null ? null : Number(opts.maxTurns),
       maxBudgetUsd: opts.maxBudgetUsd === null ? null : Number(opts.maxBudgetUsd),
@@ -934,7 +1044,7 @@ function main() {
     usage: null,
     totalCostUsd: null,
   };
-  const writeResult = makeResultWriter(opts, version, run, state, beforeTree);
+  const writeResult = makeResultWriter(opts, opts.modelSource, version, run, state, beforeTree);
 
   if (!launcher || version === null) {
     reportUnavailable(writeResult, opts, run);

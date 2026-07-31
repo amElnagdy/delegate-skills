@@ -27,8 +27,10 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 | --- | --- |
 | `--brief <file>` | Brief path. Omit it to read the brief from stdin. |
 | `--cd <dir>` | Working root and child process cwd (default: current directory). |
+| `--route <name>` | Apply a named `delegate-config.v2` task route. |
 | `--model <name>` | Cursor model for this run (default: your Cursor default, usually `auto`). Names come from `cursor-agent models`. |
 | `--read-only` | Run in Cursor's plan mode: read-only analysis, no edits, no `--force`. |
+| `--sandbox <mode>` | Pass Cursor `--sandbox enabled` or `--sandbox disabled`. |
 | `--no-force` | Keep the run write-capable but withhold `--force`; commands requiring approval are refused. |
 | `--session <id>` | Resume a specific Cursor chat (`--resume <id>`); send only the delta brief. |
 | `--resume-last` | Resume the most recent Cursor chat (`--continue`); send only the delta brief. |
@@ -60,7 +62,7 @@ inside the worktree can make the artifacts appear there:
 
 - `schema`, `tool` (`"cursor-agent"`), `status` (`completed` | `failed` | `timeout` | `aborted` |
   `cursor_agent_unavailable`), `exitCode`, and `signal` (`null` unless the child died on a signal).
-- `workdir`, `model` (the requested name or `null`), `resolvedModel` (the model Cursor actually
+- `workdir`, `route`, `timeout`, `model` (the requested name or `null`), `modelSource`, `resolvedModel` (the model Cursor actually
   served, from its init event), `permissionMode` (the mode Cursor reported applying), `readOnly`,
   `force`, `resumed`, `cursorAgentVersion`, `sessionId`, `startedAt`, and `finishedAt`.
 - `briefPath`, `finalPath`, `eventsPath`, and `stderrPath`.

@@ -45,6 +45,44 @@ Each skill name links to its `SKILL.md`, which owns that implementer's prerequis
 caveats. Building one for another CLI? [Claim it first](../../issues?q=is%3Aissue+label%3Aimplementer),
 then see [CONTRIBUTING.md](CONTRIBUTING.md).
 
+### Utilities
+
+| Skill | Purpose |
+| --- | --- |
+| [`delegate-config`](skills/delegate-config/SKILL.md) | Discover implementer CLIs and reported models, then propose defaults and task-specific routes for approval. |
+
+### Delegate config file
+
+Every relay reads optional config files that provide implementer defaults and named task routes such
+as `frontend`, `backend`, `fast`, `medium`, and `complex`. Run `delegate-config` to inspect installed
+CLIs and reported models, review the orchestrator's proposed configuration, and approve or adjust it
+before anything is written.
+
+```json
+{
+  "version": "delegate-config.v2",
+  "implementers": {
+    "codex": {
+      "defaults": {
+        "sandbox": "workspace-write",
+        "timeout": "30m"
+      },
+      "routes": {
+        "fast": { "model": "provider/fast-model", "effort": "low" },
+        "frontend": { "model": "provider/frontend-model", "effort": "medium" },
+        "backend": { "model": "provider/backend-model", "effort": "medium" },
+        "complex": { "model": "provider/complex-model", "effort": "high" }
+      }
+    }
+  }
+}
+```
+
+Select a route with `--route frontend`. Per field, explicit relay flags win, followed by the project
+route, project defaults, global route, global defaults, and finally the implementer's own default.
+Project config is read from `.delegate/config.json` at the Git repository root; global config remains
+at `~/.config/delegate-skills/config.json`. Version 1 single-default config files remain supported.
+
 ## Install
 
 Browse first:
@@ -139,11 +177,15 @@ Full checklist: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 This package is intentionally inspectable:
 
-- All skill content is Markdown, plus exactly **one** executable per skill — each a `scripts/relay.mjs`.
+- All skill content is Markdown, plus exactly **one** executable per skill — a `scripts/relay.mjs`
+  for delegation skills or `scripts/discover.mjs` for `delegate-config`.
 - Each `relay.mjs` makes no network calls, reads or writes no credentials, sends no telemetry, and has
   no dependencies (Node built-ins only). It launches its implementer CLI and `git`, plus the platform
   process launcher/termination utility where a Windows shim or process-tree kill requires one. The
   implementer CLI authenticates exactly as you do at the terminal. Read the script before you run it.
+- `discover.mjs` makes no direct network calls and does not read credentials. It runs bounded
+  version, authentication-status, and model-list commands; an implementer CLI may contact its own
+  service while answering those commands.
 - None of the relays ever commit — committing is always the orchestrator's job, after review.
 
 **Verification status** — claims here are backed by runs, not assumptions.
@@ -188,19 +230,22 @@ but unproven.
 
 ## Repository shape
 
-Every skill has the same shape — a lean `SKILL.md`, four references that load only when needed, and
-one inspectable script:
+Every delegation skill has the same shape — a lean `SKILL.md`, four references that load only when
+needed, and one inspectable script:
 
 ```text
 skills/
-└── <name>-delegate/
+├── <name>-delegate/
+│   ├── SKILL.md
+│   ├── scripts/relay.mjs
+│   └── references/
+│       ├── writing-the-brief.md
+│       ├── dispatch-and-poll.md
+│       ├── review-and-land.md
+│       └── multi-task-queues.md
+└── delegate-config/          ← utility skill (no relay, no references)
     ├── SKILL.md
-    ├── scripts/relay.mjs
-    └── references/
-        ├── writing-the-brief.md
-        ├── dispatch-and-poll.md
-        ├── review-and-land.md
-        └── multi-task-queues.md
+    └── scripts/discover.mjs
 ```
 
 Adding an implementer is a new directory plus two lines here: a table row, and a verification line once

@@ -42,6 +42,7 @@
  * Options:
  *   --brief <file>          Path to the brief. If omitted, the brief is read from stdin.
  *   --cd <dir>              Working root for Grok (default: current directory).
+ *   --route <name>          Named delegate-config task route.
  *   --model <name>          Grok model (default: Grok's own configured default).
  *   --effort <level>        Reasoning effort for this run (passed as `--effort`).
  *   --max-turns <n>         Maximum number of agent turns for this run.
@@ -78,25 +79,119 @@
 
 import { spawn, execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync, renameSync, readFileSync, existsSync, appendFileSync } from "node:fs";
-import { join, resolve, basename } from "node:path";
-import { constants, tmpdir } from "node:os";
+import { join, resolve, basename, dirname } from "node:path";
+import { constants, tmpdir, homedir } from "node:os";
 import { StringDecoder } from "node:string_decoder";
 
 const AUTONOMY_MODES = new Set(["workspace-write", "read-only", "full-access"]);
+const SAFE_ROUTE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const CONFIG_FIELDS = new Set(["model", "sandbox", "effort", "timeout", "readOnly"]);
+const BOOLEAN_CONFIG_FIELDS = new Set(["readOnly"]);
 
 function fail(message, code = 2) {
   process.stderr.write(`relay: ${message}\n`);
   process.exit(code);
 }
 
+/** Find the nearest Git repository root, or retain cwd outside a repository. */
+function findProjectRoot(cwd) {
+  let current = resolve(cwd);
+  while (true) {
+    if (existsSync(join(current, ".git"))) return current;
+    const parent = dirname(current);
+    if (parent === current) return resolve(cwd);
+    current = parent;
+  }
+}
+
+function readDelegateConfig(configPath) {
+  if (!existsSync(configPath)) return null;
+  let document;
+  try {
+    document = JSON.parse(readFileSync(configPath, "utf8"));
+  } catch (error) {
+    fail(`invalid delegate config ${configPath}: ${error.message}`);
+  }
+  if (!document || typeof document !== "object" || Array.isArray(document)) {
+    fail(`invalid delegate config ${configPath}: expected a JSON object`);
+  }
+  if (!["delegate-config.v1", "delegate-config.v2"].includes(document.version)) {
+    fail(`invalid delegate config ${configPath}: unsupported version "${document.version}"`);
+  }
+  return document;
+}
+
+function configLayers(document, route, configPath) {
+  const entry = document?.implementers?.grok;
+  if (entry === undefined) return [];
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    fail(`invalid delegate config ${configPath}: implementers.grok must be an object`);
+  }
+  if (document.version === "delegate-config.v1") return [{ values: entry, label: "defaults" }];
+  for (const field of Object.keys(entry)) {
+    if (!["defaults", "routes"].includes(field)) {
+      fail(`invalid delegate config ${configPath}: unsupported grok section "${field}"`);
+    }
+  }
+  if (entry.routes !== undefined && (!entry.routes || typeof entry.routes !== "object" || Array.isArray(entry.routes))) {
+    fail(`invalid delegate config ${configPath}: grok.routes must be an object`);
+  }
+  const layers = [];
+  if (entry.defaults !== undefined) layers.push({ values: entry.defaults, label: "defaults" });
+  if (route && entry.routes?.[route] !== undefined) {
+    layers.push({ values: entry.routes[route], label: `route:${route}` });
+  }
+  return layers;
+}
+
+function loadDelegateConfig(cwd, route) {
+  if (route !== null && !SAFE_ROUTE.test(route)) {
+    fail("--route contains unsupported characters (allowed: letters, digits, . _ -)");
+  }
+  const candidates = [
+    { scope: "global", path: join(homedir(), ".config", "delegate-skills", "config.json") },
+    { scope: "project", path: join(findProjectRoot(cwd), ".delegate", "config.json") },
+  ];
+  const resolved = {};
+  let modelSource = "default";
+  let routeFound = route === null;
+  for (const candidate of candidates) {
+    const document = readDelegateConfig(candidate.path);
+    if (!document) continue;
+    for (const layer of configLayers(document, route, candidate.path)) {
+      if (!layer.values || typeof layer.values !== "object" || Array.isArray(layer.values)) {
+        fail(`invalid delegate config ${candidate.path}: ${layer.label} must be an object`);
+      }
+      if (layer.label.startsWith("route:")) routeFound = true;
+      for (const [field, rawValue] of Object.entries(layer.values)) {
+        if (!CONFIG_FIELDS.has(field)) {
+          fail(`invalid delegate config ${candidate.path}: unsupported grok field "${field}"`);
+        }
+        const fieldValue = field === "timeout" && Number.isSafeInteger(rawValue) && rawValue > 0
+          ? `${rawValue}s`
+          : rawValue;
+        const expectedType = BOOLEAN_CONFIG_FIELDS.has(field) ? "boolean" : "string";
+        if (typeof fieldValue !== expectedType) {
+          fail(`invalid delegate config ${candidate.path}: grok field "${field}" must be a ${expectedType}`);
+        }
+        resolved[field] = fieldValue;
+        if (field === "model") modelSource = `${candidate.scope}:${layer.label}`;
+      }
+    }
+  }
+  if (!routeFound) fail(`delegate config route not found: ${route}`);
+  return { values: resolved, modelSource };
+}
+
 function parseArgs(argv) {
   const opts = {
     brief: null,
     cd: process.cwd(),
+    route: null,
     model: null,
     effort: null,
     maxTurns: null,
-    autonomy: "workspace-write",
+    autonomy: null,
     resumeLast: false,
     session: null,
     timeout: null,
@@ -118,6 +213,7 @@ function parseArgs(argv) {
         break;
       case "--brief": opts.brief = next(); break;
       case "--cd": opts.cd = resolve(next()); break;
+      case "--route": opts.route = next(); break;
       case "--model": opts.model = next(); break;
       case "--effort": opts.effort = next(); break;
       case "--max-turns": opts.maxTurns = next(); break;
@@ -130,6 +226,21 @@ function parseArgs(argv) {
       default:
         fail(`unknown option: ${arg}`);
     }
+  }
+  const modelFromFlag = opts.model !== null;
+  const delegateConfig = loadDelegateConfig(opts.cd, opts.route);
+  const config = delegateConfig.values;
+  if (opts.model === null && config.model !== undefined) opts.model = config.model;
+  if (opts.effort === null && config.effort !== undefined) opts.effort = config.effort;
+  if (opts.timeout === null && config.timeout !== undefined) opts.timeout = config.timeout;
+  if (opts.autonomy === null) {
+    if (config.readOnly === true) opts.autonomy = "read-only";
+    else if (config.sandbox !== undefined) opts.autonomy = config.sandbox;
+    else opts.autonomy = "workspace-write";
+  }
+  opts.modelSource = modelFromFlag ? "flag" : delegateConfig.modelSource;
+  if (config.readOnly !== undefined && typeof config.readOnly !== "boolean") {
+    fail("delegate config grok.readOnly must be a boolean");
   }
   // The watchdog is relay-only (the grok launch has no timeout flag), so a malformed
   // --timeout must fail loudly here - a silent no-watchdog fallback would be wrong.
@@ -145,7 +256,7 @@ function parseArgs(argv) {
   // These values reach a shell on win32 (shell:true for the .cmd shim), so restrict them to safe tokens.
   const safeToken = /^[A-Za-z0-9][A-Za-z0-9._:\/-]*$/;
   for (const flag of ["model", "effort", "session"]) {
-    if (opts[flag] !== null && !safeToken.test(opts[flag])) {
+    if (opts[flag] !== null && (typeof opts[flag] !== "string" || !safeToken.test(opts[flag]))) {
       fail(`--${flag} value contains unsupported characters (allowed: letters, digits, . _ : / -)`);
     }
   }
@@ -377,7 +488,7 @@ function prepareRunDir(opts, brief) {
   return run;
 }
 
-function makeResultWriter(opts, version, run) {
+function makeResultWriter(opts, modelSource, version, run) {
   // Returns writeResult(extra): merges the per-outcome fields onto the run's
   // standing metadata, persists result.json, and returns the object it just
   // wrote so the caller can hand it straight to printSummary.
@@ -388,6 +499,9 @@ function makeResultWriter(opts, version, run) {
       workdir: opts.cd,
       autonomy: opts.autonomy,
       model: opts.model,
+      modelSource,
+      route: opts.route,
+      timeout: opts.timeout,
       effort: opts.effort,
       resumeLast: opts.resumeLast,
       grokVersion: version,
@@ -591,7 +705,7 @@ function main() {
 
   const version = grokVersion();
   const run = prepareRunDir(opts, brief);
-  const writeResult = makeResultWriter(opts, version, run);
+  const writeResult = makeResultWriter(opts, opts.modelSource, version, run);
 
   if (!version) {
     reportUnavailable(writeResult, run.resultPath);

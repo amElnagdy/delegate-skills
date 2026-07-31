@@ -25,6 +25,7 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 | --- | --- |
 | `--brief <file>` | Brief path; omit to read stdin. |
 | `--cd <dir>` | Primary working root and child cwd; defaults to current directory. |
+| `--route <name>` | Apply a named `delegate-config.v2` task route. |
 | `--model <name>` | Exact live model value from `qodercli --list-models`; omit for Qoder's default. |
 | `--context-window <n>` | Positive integer requested for models that support explicit sizing. |
 | `--resume <id>` | Resume one Qoder session with a delta brief. |
@@ -72,7 +73,7 @@ Important `result.json` fields:
 
 - `tool` (`"qoder"`), `status` (`completed`, `failed`, `timeout`, `aborted`, or
   `qoder_unavailable`), `exitCode`, `signal`.
-- Requested `model`, `contextWindow`, and `permissionMode`; observed `actualModel` and
+- Requested `route`, `timeout`, `model`, `modelSource`, `contextWindow`, and `permissionMode`; observed `actualModel` and
   `actualPermissionMode` from Qoder's init event.
 - `qoderVersion`, `sessionId`, `resumed`, `startedAt`, and `finishedAt`.
 - `usage`, `resultSubtype`, `qoderErrors`, and `permissionDenials` from Qoder's result event.

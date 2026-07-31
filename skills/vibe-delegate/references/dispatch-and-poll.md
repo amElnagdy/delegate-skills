@@ -34,6 +34,7 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 | --- | --- |
 | `--brief <file>` | Brief path. Omit it to read the brief from stdin. |
 | `--cd <dir>` | Working root and child process cwd (default: current directory). |
+| `--route <name>` | Apply a named `delegate-config.v2` task route. |
 | `--max-turns <n>` | Maximum number of Vibe agent turns (`--max-turns`). Useful for cost control. |
 | `--max-price <usd>` | Positive, indicative cost threshold in USD; not a hard budget (`--max-price`). |
 | `--max-tokens <n>` | Positive maximum cumulative session tokens (`--max-tokens`). |
@@ -71,7 +72,7 @@ inside the worktree can make the artifacts appear there:
 
 - `schema`, `tool` (`"vibe"`), `status` (`completed` | `failed` | `timeout` | `aborted` |
   `vibe_unavailable`), `exitCode`, and `signal` (`null` unless the child died on a signal).
-- `workdir`, `agent` (`"accept-edits"`, `"plan"`, or `"auto-approve"`), `maxTurns`, `maxPrice`,
+- `workdir`, `route`, `timeout`, `agent` (`"accept-edits"`, `"plan"`, or `"auto-approve"`), `maxTurns`, `maxPrice`,
   `maxTokens`, `resumed`, `vibeVersion`, `sessionId`, `startedAt`, and `finishedAt`.
 - `briefPath`, `finalPath`, `eventsPath`, and `stderrPath`.
 - `finalMessage` — the last non-empty assistant content string; tool calls and tool results are excluded.

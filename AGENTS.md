@@ -56,13 +56,23 @@ the skill's `relay.mjs`.
   the skill otherwise.
 - **Progressive disclosure:** keep `SKILL.md` lean; push depth into `references/*.md` that load only
   when needed.
-- **Executables:** keep them minimal and inspectable. Today there is one per skill — a
+- **Executables:** keep them minimal and inspectable. Today there is one per delegation skill — a
   `scripts/relay.mjs` under each of `skills/claude-delegate/`, `skills/codex-delegate/`,
   `skills/opencode-delegate/`, `skills/agy-delegate/`, `skills/grok-delegate/`,
   `skills/kimi-delegate/`, `skills/qoder-delegate/`, `skills/vibe-delegate/`, and
   `skills/cursor-delegate/`, and `skills/pi-delegate/` — each Node built-ins only, no dependencies,
-  no network calls of its own, no credentials, no telemetry. New scripts must hold the same line,
-  and the README's trust section must stay accurate.
+  no network calls of its own, no credentials, no telemetry. The utility skill `delegate-config` has
+  a `scripts/discover.mjs` under the same rules. New scripts must hold the same line, and the
+  README's trust section must stay accurate.
+- **Utility skills** (like `delegate-config`) sit under `skills/<name>/` without the `-delegate`
+  suffix. They have a `SKILL.md` and optional `scripts/` but no `relay.mjs`, no `references/`
+  directory, and no `result.json` contract. They are listed in `skills.sh.json` under their own
+  grouping.
+- **Delegate config files:** relays read optional config from `.delegate/config.json` at the Git
+  repository root and `~/.config/delegate-skills/config.json` (user-global). Version 2 supports
+  implementer `defaults` plus named task `routes`; version 1 single-default files remain readable.
+  Explicit CLI flags win per field, followed by project route, project defaults, global route, and
+  global defaults. The `delegate-config` skill proposes changes and writes only after user approval.
 
 ## Before publishing a change
 

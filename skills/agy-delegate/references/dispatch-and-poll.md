@@ -29,6 +29,7 @@ Options:
 | --- | --- |
 | `--brief <file>` | The brief. Omit it to read the brief from stdin before passing it to `agy --print`. |
 | `--cd <dir>` | Working root for Antigravity (default: current directory). |
+| `--route <name>` | Apply a named `delegate-config.v2` task route. |
 | `--model <name>` | Antigravity model label. Optional; a fresh run can use Antigravity's configured default. |
 | `--project <id>` | Use an existing Antigravity project. |
 | `--new-project` | Force a fresh Antigravity project. This is the default for fresh dispatches. |
@@ -60,7 +61,7 @@ touched-files report shows only Antigravity's edits and nothing of the helper's 
   `null` (not `[]`) when git cannot report; `[]` means git ran and the tree is clean
 - `briefPath` / `finalPath` / `logPath` / `stderrPath` - the exact brief, final message, Antigravity
   log, and stderr capture
-- `workdir`, `model`, `project` (the `--project` you passed, vs `projectId` parsed from the log),
+- `workdir`, `route`, `timeout`, `model`, `modelSource`, `project` (the `--project` you passed, vs `projectId` parsed from the log),
   `sandbox`, `dangerouslySkipPermissions`, `resumed` (true for a `--resume-last` or `--conversation`
   run), `startedAt`, `finishedAt`
 - `stderrTail` - last ~20 stderr lines; present on every run that did not complete (`failed`, `timeout`, `aborted`), except a launch failure, which reports `failed` with no `stderrTail`

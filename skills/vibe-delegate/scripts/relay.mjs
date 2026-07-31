@@ -37,6 +37,7 @@
  * Options:
  *   --brief <file>           Path to the brief. If omitted, read it from stdin.
  *   --cd <dir>               Working root for Vibe (default: current directory).
+ *   --route <name>           Named delegate-config task route.
  *   --max-turns <n>          Maximum number of Vibe agent turns (--max-turns).
  *   --max-price <usd>        Indicative cost threshold in USD (--max-price);
  *                            not a hard budget.
@@ -81,11 +82,14 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { join, resolve, basename } from "node:path";
-import { constants, tmpdir } from "node:os";
+import { join, resolve, basename, dirname } from "node:path";
+import { constants, tmpdir, homedir } from "node:os";
 import { StringDecoder } from "node:string_decoder";
 
 const DEFAULT_TIMEOUT = "30m";
+const SAFE_ROUTE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const CONFIG_FIELDS = new Set(["timeout", "readOnly"]);
+const BOOLEAN_CONFIG_FIELDS = new Set(["readOnly"]);
 const MAX_TIMER_MS = 2_147_483_647;
 const MAX_BRIEF_BYTES = (process.platform === "win32" ? 12 : 120) * 1024;
 const PROBE_TIMEOUT_MS = 10_000;
@@ -99,6 +103,7 @@ function parseArgs(argv) {
   const opts = {
     brief: null,
     cd: process.cwd(),
+    route: null,
     maxTurns: null,
     maxPrice: null,
     maxTokens: null,
@@ -108,7 +113,7 @@ function parseArgs(argv) {
     fullAccess: false,
     enabledTools: [],
     disabledTools: [],
-    timeout: DEFAULT_TIMEOUT,
+    timeout: null,
     outDir: null,
   };
   for (let i = 0; i < argv.length; i += 1) {
@@ -127,6 +132,7 @@ function parseArgs(argv) {
         break;
       case "--brief": opts.brief = next(); break;
       case "--cd": opts.cd = resolve(next()); break;
+      case "--route": opts.route = next(); break;
       case "--max-turns": {
         const v = next();
         const n = Number(v);
@@ -166,6 +172,14 @@ function parseArgs(argv) {
         fail(`unknown option: ${arg}`);
     }
   }
+  const delegateConfig = loadDelegateConfig(opts.cd, opts.route);
+  const config = delegateConfig.values;
+  if (opts.timeout === null && config.timeout !== undefined) opts.timeout = config.timeout;
+  if (!opts.planOnly && !opts.fullAccess && config.readOnly === true) opts.planOnly = true;
+  if (opts.timeout === null) opts.timeout = DEFAULT_TIMEOUT;
+  if (config.readOnly !== undefined && typeof config.readOnly !== "boolean") {
+    fail("delegate config vibe.readOnly must be a boolean");
+  }
   if (opts.resumeLast && opts.session) {
     fail("--resume-last and --session are mutually exclusive; pass only one");
   }
@@ -177,7 +191,7 @@ function parseArgs(argv) {
   if (opts.disabledTools.some((tool) => !tool.trim())) fail("--disabled-tools must not be empty");
   // The watchdog is relay-only (vibe has no timeout flag), so a malformed
   // --timeout must fail loudly here — a silent 30m fallback would be wrong.
-  if (parseDuration(opts.timeout) === null) {
+  if (opts.timeout !== null && parseDuration(opts.timeout) === null) {
     fail(`--timeout "${opts.timeout}" is invalid or too long; use a positive h/m/s duration no longer than about 24 days`);
   }
   try {
@@ -381,6 +395,8 @@ function makeResultWriter(opts, version, run) {
       schema: "delegate-relay.result.v1",
       tool: "vibe",
       workdir: opts.cd,
+      route: opts.route,
+      timeout: opts.timeout,
       agent: agentName(opts),
       maxTurns: opts.maxTurns,
       maxPrice: opts.maxPrice,
@@ -601,6 +617,94 @@ function dispatchToVibe(opts, brief, run, writeResult, onReady) {
     printSummary(result, run.resultPath);
     process.exit(result.exitCode);
   });
+}
+
+/** Find the nearest Git repository root, or retain cwd outside a repository. */
+function findProjectRoot(cwd) {
+  let current = resolve(cwd);
+  while (true) {
+    if (existsSync(join(current, ".git"))) return current;
+    const parent = dirname(current);
+    if (parent === current) return resolve(cwd);
+    current = parent;
+  }
+}
+
+function readDelegateConfig(configPath) {
+  if (!existsSync(configPath)) return null;
+  let document;
+  try {
+    document = JSON.parse(readFileSync(configPath, "utf8"));
+  } catch (error) {
+    fail(`invalid delegate config ${configPath}: ${error.message}`);
+  }
+  if (!document || typeof document !== "object" || Array.isArray(document)) {
+    fail(`invalid delegate config ${configPath}: expected a JSON object`);
+  }
+  if (!["delegate-config.v1", "delegate-config.v2"].includes(document.version)) {
+    fail(`invalid delegate config ${configPath}: unsupported version "${document.version}"`);
+  }
+  return document;
+}
+
+function configLayers(document, route, configPath) {
+  const entry = document?.implementers?.vibe;
+  if (entry === undefined) return [];
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    fail(`invalid delegate config ${configPath}: implementers.vibe must be an object`);
+  }
+  if (document.version === "delegate-config.v1") return [{ values: entry, label: "defaults" }];
+  for (const field of Object.keys(entry)) {
+    if (!["defaults", "routes"].includes(field)) {
+      fail(`invalid delegate config ${configPath}: unsupported vibe section "${field}"`);
+    }
+  }
+  if (entry.routes !== undefined && (!entry.routes || typeof entry.routes !== "object" || Array.isArray(entry.routes))) {
+    fail(`invalid delegate config ${configPath}: vibe.routes must be an object`);
+  }
+  const layers = [];
+  if (entry.defaults !== undefined) layers.push({ values: entry.defaults, label: "defaults" });
+  if (route && entry.routes?.[route] !== undefined) {
+    layers.push({ values: entry.routes[route], label: `route:${route}` });
+  }
+  return layers;
+}
+
+function loadDelegateConfig(cwd, route) {
+  if (route !== null && !SAFE_ROUTE.test(route)) {
+    fail("--route contains unsupported characters (allowed: letters, digits, . _ -)");
+  }
+  const candidates = [
+    join(homedir(), ".config", "delegate-skills", "config.json"),
+    join(findProjectRoot(cwd), ".delegate", "config.json"),
+  ];
+  const resolved = {};
+  let routeFound = route === null;
+  for (const configPath of candidates) {
+    const document = readDelegateConfig(configPath);
+    if (!document) continue;
+    for (const layer of configLayers(document, route, configPath)) {
+      if (!layer.values || typeof layer.values !== "object" || Array.isArray(layer.values)) {
+        fail(`invalid delegate config ${configPath}: ${layer.label} must be an object`);
+      }
+      if (layer.label.startsWith("route:")) routeFound = true;
+      for (const [field, rawValue] of Object.entries(layer.values)) {
+        if (!CONFIG_FIELDS.has(field)) {
+          fail(`invalid delegate config ${configPath}: unsupported vibe field "${field}"`);
+        }
+        const fieldValue = field === "timeout" && Number.isSafeInteger(rawValue) && rawValue > 0
+          ? `${rawValue}s`
+          : rawValue;
+        const expectedType = BOOLEAN_CONFIG_FIELDS.has(field) ? "boolean" : "string";
+        if (typeof fieldValue !== expectedType) {
+          fail(`invalid delegate config ${configPath}: vibe field "${field}" must be a ${expectedType}`);
+        }
+        resolved[field] = fieldValue;
+      }
+    }
+  }
+  if (!routeFound) fail(`delegate config route not found: ${route}`);
+  return { values: resolved };
 }
 
 async function main() {

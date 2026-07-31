@@ -19,6 +19,7 @@
  * Options:
  *   --brief <file>          Brief path. If omitted, read stdin.
  *   --cd <dir>              Qoder working root (default: current directory).
+ *   --route <name>          Named delegate-config task route.
  *   --model <name>          Model from `qodercli --list-models`.
  *   --context-window <n>    Positive integer; supported models only.
  *   --resume <id>           Resume one Qoder session; send a delta brief.
@@ -49,8 +50,8 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { constants, tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { constants, tmpdir, homedir } from "node:os";
+import { basename, dirname, join, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 
 const DEFAULT_TIMEOUT = "30m";
@@ -64,6 +65,9 @@ const PERMISSION_MODES = new Set([
   "auto",
   "plan",
 ]);
+const SAFE_ROUTE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const CONFIG_FIELDS = new Set(["model", "timeout", "readOnly", "permissionMode"]);
+const BOOLEAN_CONFIG_FIELDS = new Set(["readOnly"]);
 
 function fail(message, code = 2) {
   process.stderr.write(`relay: ${message}\n`);
@@ -80,13 +84,14 @@ function parseArgs(argv) {
   const opts = {
     brief: null,
     cd: process.cwd(),
+    route: null,
     model: null,
     contextWindow: null,
     resume: null,
     resumeLast: false,
     addDirs: [],
-    permissionMode: "auto",
-    timeout: DEFAULT_TIMEOUT,
+    permissionMode: null,
+    timeout: null,
     outDir: null,
   };
 
@@ -106,6 +111,7 @@ function parseArgs(argv) {
         break;
       case "--brief": opts.brief = next(); break;
       case "--cd": opts.cd = resolve(next()); break;
+      case "--route": opts.route = next(); break;
       case "--model": opts.model = next(); break;
       case "--context-window": opts.contextWindow = next(); break;
       case "--resume": opts.resume = next(); break;
@@ -122,17 +128,35 @@ function parseArgs(argv) {
     fail("--resume-last and --resume are mutually exclusive; pass only one");
   }
   if (opts.resume !== null && !opts.resume.trim()) fail("--resume must not be empty");
-  if (opts.model !== null && !opts.model.trim()) fail("--model must not be empty");
+  if (opts.model !== null && (typeof opts.model !== "string" || !opts.model.trim())) {
+    fail("--model must be a non-empty string");
+  }
+  const modelFromFlag = opts.model !== null;
+  const delegateConfig = loadDelegateConfig(opts.cd, opts.route);
+  const config = delegateConfig.values;
+  if (opts.model === null && config.model !== undefined) opts.model = config.model;
+  if (opts.timeout === null && config.timeout !== undefined) opts.timeout = config.timeout;
+  if (opts.permissionMode === null) {
+    if (config.readOnly === true) opts.permissionMode = "plan";
+    else if (config.permissionMode !== undefined) opts.permissionMode = config.permissionMode;
+    else if (config.sandbox !== undefined) opts.permissionMode = config.sandbox;
+    else opts.permissionMode = "auto";
+  }
+  if (opts.timeout === null) opts.timeout = DEFAULT_TIMEOUT;
+  opts.modelSource = modelFromFlag ? "flag" : delegateConfig.modelSource;
+  if (config.readOnly !== undefined && typeof config.readOnly !== "boolean") {
+    fail("delegate config qodercli.readOnly must be a boolean");
+  }
   if (opts.contextWindow !== null && !/^[1-9]\d*$/.test(opts.contextWindow)) {
     fail("--context-window must be a positive integer");
   }
-  if (!PERMISSION_MODES.has(opts.permissionMode)) {
+  if (opts.permissionMode !== null && !PERMISSION_MODES.has(opts.permissionMode)) {
     fail(`unsupported --permission-mode: ${opts.permissionMode}`);
   }
-  if (parseDuration(opts.timeout) === null) {
+  if (opts.timeout !== null && parseDuration(opts.timeout) === null) {
     fail(`--timeout "${opts.timeout}" is not a duration; use h/m/s strings like 30m, 90s, or 1h30m`);
   }
-  if (parseDuration(opts.timeout) === 0) fail("--timeout must be greater than zero");
+  if (opts.timeout !== null && parseDuration(opts.timeout) === 0) fail("--timeout must be greater than zero");
   if (!existsSync(opts.cd) || !statSync(opts.cd).isDirectory()) {
     fail(`working directory not found: ${opts.cd}`);
   }
@@ -301,6 +325,9 @@ function makeResultWriter(opts, version, run) {
       tool: "qoder",
       workdir: opts.cd,
       model: opts.model,
+      modelSource: opts.modelSource,
+      route: opts.route,
+      timeout: opts.timeout,
       contextWindow: opts.contextWindow,
       permissionMode: opts.permissionMode,
       resumed: Boolean(opts.resumeLast || opts.resume),
@@ -577,6 +604,103 @@ function printSummary(result, resultPath) {
   lines.push(`result: ${resultPath}`);
   lines.push("relay does not commit. Review the diff, rerun the project gates yourself, then commit from the orchestrator.");
   process.stdout.write(`${lines.join("\n")}\n`);
+}
+
+/** Find the nearest Git repository root, or retain cwd outside a repository. */
+function findProjectRoot(cwd) {
+  let current = resolve(cwd);
+  while (true) {
+    if (existsSync(join(current, ".git"))) return current;
+    const parent = dirname(current);
+    if (parent === current) return resolve(cwd);
+    current = parent;
+  }
+}
+
+function readDelegateConfig(configPath) {
+  if (!existsSync(configPath)) return null;
+  let document;
+  try {
+    document = JSON.parse(readFileSync(configPath, "utf8"));
+  } catch (error) {
+    fail(`invalid delegate config ${configPath}: ${error.message}`);
+  }
+  if (!document || typeof document !== "object" || Array.isArray(document)) {
+    fail(`invalid delegate config ${configPath}: expected a JSON object`);
+  }
+  if (!["delegate-config.v1", "delegate-config.v2"].includes(document.version)) {
+    fail(`invalid delegate config ${configPath}: unsupported version "${document.version}"`);
+  }
+  return document;
+}
+
+function configLayers(document, route, configPath) {
+  const entry = document?.implementers?.qodercli;
+  if (entry === undefined) return [];
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    fail(`invalid delegate config ${configPath}: implementers.qodercli must be an object`);
+  }
+  if (document.version === "delegate-config.v1") {
+    const values = { ...entry };
+    if (values.sandbox !== undefined && values.permissionMode === undefined) {
+      values.permissionMode = values.sandbox;
+    }
+    delete values.sandbox;
+    return [{ values, label: "defaults" }];
+  }
+  for (const field of Object.keys(entry)) {
+    if (!["defaults", "routes"].includes(field)) {
+      fail(`invalid delegate config ${configPath}: unsupported qodercli section "${field}"`);
+    }
+  }
+  if (entry.routes !== undefined && (!entry.routes || typeof entry.routes !== "object" || Array.isArray(entry.routes))) {
+    fail(`invalid delegate config ${configPath}: qodercli.routes must be an object`);
+  }
+  const layers = [];
+  if (entry.defaults !== undefined) layers.push({ values: entry.defaults, label: "defaults" });
+  if (route && entry.routes?.[route] !== undefined) {
+    layers.push({ values: entry.routes[route], label: `route:${route}` });
+  }
+  return layers;
+}
+
+function loadDelegateConfig(cwd, route) {
+  if (route !== null && !SAFE_ROUTE.test(route)) {
+    fail("--route contains unsupported characters (allowed: letters, digits, . _ -)");
+  }
+  const candidates = [
+    { scope: "global", path: join(homedir(), ".config", "delegate-skills", "config.json") },
+    { scope: "project", path: join(findProjectRoot(cwd), ".delegate", "config.json") },
+  ];
+  const resolved = {};
+  let modelSource = "default";
+  let routeFound = route === null;
+  for (const candidate of candidates) {
+    const document = readDelegateConfig(candidate.path);
+    if (!document) continue;
+    for (const layer of configLayers(document, route, candidate.path)) {
+      if (!layer.values || typeof layer.values !== "object" || Array.isArray(layer.values)) {
+        fail(`invalid delegate config ${candidate.path}: ${layer.label} must be an object`);
+      }
+      if (layer.label.startsWith("route:")) routeFound = true;
+      for (const [field, rawValue] of Object.entries(layer.values)) {
+        if (!CONFIG_FIELDS.has(field)) {
+          fail(`invalid delegate config ${candidate.path}: unsupported qodercli field "${field}"`);
+        }
+        const fieldValue = field === "timeout" && Number.isSafeInteger(rawValue) && rawValue > 0
+          ? `${rawValue}s`
+          : rawValue;
+        const expectedType = BOOLEAN_CONFIG_FIELDS.has(field) ? "boolean" : "string";
+        if (typeof fieldValue !== expectedType) {
+          fail(`invalid delegate config ${candidate.path}: qodercli field "${field}" must be a ${expectedType}`);
+        }
+        resolved[field] = fieldValue;
+        if (field === "model") modelSource = `${candidate.scope}:${layer.label}`;
+      }
+    }
+  }
+  if (!routeFound) fail(`delegate config route not found: ${route}`);
+  return { values: resolved, modelSource };
 }
 
 function main() {

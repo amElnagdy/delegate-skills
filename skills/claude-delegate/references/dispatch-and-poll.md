@@ -29,6 +29,7 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 | --- | --- |
 | `--brief <file>` | Brief path. Omit it to read stdin. The exact text is then sent to Claude on stdin, never argv. |
 | `--cd <dir>` | Child process cwd and target working root (default: current directory). |
+| `--route <name>` | Apply a named `delegate-config.v2` task route. |
 | `--out-dir <dir>` | Artifact directory (default: a fresh directory under the system temp directory). |
 | `--timeout <dur>` | Relay watchdog, such as `30m`, `90s`, or `2h` (default: off). |
 | `--model <name>` | Claude model alias or full name (default: Claude's configured choice). The relay does not pin a model version. |
@@ -162,7 +163,7 @@ Core fields:
   while `[]` means git reported a clean tree. This is the whole final tree, not attribution.
 - `readOnlyViolation` — present only on `--read-only`, with the three-state meaning above.
 
-Run metadata includes `workdir`, `model`, `effort`, `maxTurns`, `maxBudgetUsd`, `timeout`, `readOnly`,
+Run metadata includes `workdir`, `route`, `model`, `modelSource`, `effort`, `maxTurns`, `maxBudgetUsd`, `timeout`, `readOnly`,
 `resumed`, `resumeLast`, `toolSurface`, `shellSandbox`, `dangerouslySkipPermissions`, timestamps, and
 all artifact paths. Failed, timed-out, and aborted runs include `stderrTail` when available;
 launch/watchdog/signal failures include `error`.

@@ -34,6 +34,7 @@ Options:
 | --- | --- |
 | `--brief <file>` | The brief. Omit it to read the brief from stdin (`node relay.mjs … < brief.txt`). |
 | `--cd <dir>` | Working root for Grok (default: current directory); passed as `--cwd`. |
+| `--route <name>` | Apply a named `delegate-config.v2` task route. |
 | `--model <name>` | Grok model (default: Grok's own configured default). |
 | `--effort <level>` | Reasoning effort for this run (`--effort`). |
 | `--max-turns <n>` | Maximum number of agent turns for this run (`--max-turns`). |
@@ -66,7 +67,7 @@ touched-files report shows only Grok's edits and nothing of the helper's own.
 - `usage` — token counts from the run's end event (`input_tokens` / `output_tokens` / `total_tokens`); `null` if none were reported
 - `touchedFiles` — `git status --porcelain` lines in the working root: your review starting point. `null` (not `[]`) when git can't report; `[]` means git ran and the tree is clean
 - `briefPath` / `eventsPath` / `finalPath` — the exact brief relay sent, the raw streaming-json event stream, and the final-message file
-- `workdir`, `autonomy`, `model`, `effort`, `resumeLast`, `startedAt`, `finishedAt`
+- `workdir`, `route`, `timeout`, `autonomy`, `model`, `modelSource`, `effort`, `resumeLast`, `startedAt`, `finishedAt`
 - `readOnlyViolation` — present on `--read-only` runs only: `true` when the working tree changed
   between dispatch and completion, i.e. the best-effort read-only was not honored. A porcelain-level
   tripwire: it catches new dirt, but an edit inside an already-dirty file can evade it — the diff

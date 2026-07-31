@@ -32,6 +32,7 @@
  * Options:
  *   --brief <file>          Path to the brief. If omitted, the brief is read from stdin.
  *   --cd <dir>              Working root for OpenCode (default: current directory).
+ *   --route <name>          Named delegate-config task route.
  *   --model <name>          Model as provider/model. REQUIRED for a fresh run — OpenCode has no
  *                           safe default; a resumed run inherits its session's model.
  *   --agent <name>          OpenCode agent (default: build). Use plan for read-only review.
@@ -68,21 +69,117 @@
 
 import { spawn, execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync, renameSync, readFileSync, existsSync, appendFileSync } from "node:fs";
-import { join, resolve, basename } from "node:path";
-import { constants, tmpdir } from "node:os";
+import { join, resolve, basename, dirname } from "node:path";
+import { constants, tmpdir, homedir } from "node:os";
 import { StringDecoder } from "node:string_decoder";
+
+const SAFE_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
+const SAFE_ROUTE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const CONFIG_FIELDS = new Set(["model", "timeout", "readOnly"]);
+const BOOLEAN_CONFIG_FIELDS = new Set(["readOnly"]);
 
 function fail(message, code = 2) {
   process.stderr.write(`relay: ${message}\n`);
   process.exit(code);
 }
 
+/** Find the nearest Git repository root, or retain cwd outside a repository. */
+function findProjectRoot(cwd) {
+  let current = resolve(cwd);
+  while (true) {
+    if (existsSync(join(current, ".git"))) return current;
+    const parent = dirname(current);
+    if (parent === current) return resolve(cwd);
+    current = parent;
+  }
+}
+
+function readDelegateConfig(configPath) {
+  if (!existsSync(configPath)) return null;
+  let document;
+  try {
+    document = JSON.parse(readFileSync(configPath, "utf8"));
+  } catch (error) {
+    fail(`invalid delegate config ${configPath}: ${error.message}`);
+  }
+  if (!document || typeof document !== "object" || Array.isArray(document)) {
+    fail(`invalid delegate config ${configPath}: expected a JSON object`);
+  }
+  if (!["delegate-config.v1", "delegate-config.v2"].includes(document.version)) {
+    fail(`invalid delegate config ${configPath}: unsupported version "${document.version}"`);
+  }
+  return document;
+}
+
+function configLayers(document, route, configPath) {
+  const entry = document?.implementers?.opencode;
+  if (entry === undefined) return [];
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    fail(`invalid delegate config ${configPath}: implementers.opencode must be an object`);
+  }
+  if (document.version === "delegate-config.v1") return [{ values: entry, label: "defaults" }];
+  for (const field of Object.keys(entry)) {
+    if (!["defaults", "routes"].includes(field)) {
+      fail(`invalid delegate config ${configPath}: unsupported opencode section "${field}"`);
+    }
+  }
+  if (entry.routes !== undefined && (!entry.routes || typeof entry.routes !== "object" || Array.isArray(entry.routes))) {
+    fail(`invalid delegate config ${configPath}: opencode.routes must be an object`);
+  }
+  const layers = [];
+  if (entry.defaults !== undefined) layers.push({ values: entry.defaults, label: "defaults" });
+  if (route && entry.routes?.[route] !== undefined) {
+    layers.push({ values: entry.routes[route], label: `route:${route}` });
+  }
+  return layers;
+}
+
+function loadDelegateConfig(cwd, route) {
+  if (route !== null && !SAFE_ROUTE.test(route)) {
+    fail("--route contains unsupported characters (allowed: letters, digits, . _ -)");
+  }
+  const candidates = [
+    { scope: "global", path: join(homedir(), ".config", "delegate-skills", "config.json") },
+    { scope: "project", path: join(findProjectRoot(cwd), ".delegate", "config.json") },
+  ];
+  const resolved = {};
+  let modelSource = "default";
+  let routeFound = route === null;
+  for (const candidate of candidates) {
+    const document = readDelegateConfig(candidate.path);
+    if (!document) continue;
+    for (const layer of configLayers(document, route, candidate.path)) {
+      if (!layer.values || typeof layer.values !== "object" || Array.isArray(layer.values)) {
+        fail(`invalid delegate config ${candidate.path}: ${layer.label} must be an object`);
+      }
+      if (layer.label.startsWith("route:")) routeFound = true;
+      for (const [field, rawValue] of Object.entries(layer.values)) {
+        if (!CONFIG_FIELDS.has(field)) {
+          fail(`invalid delegate config ${candidate.path}: unsupported opencode field "${field}"`);
+        }
+        const fieldValue = field === "timeout" && Number.isSafeInteger(rawValue) && rawValue > 0
+          ? `${rawValue}s`
+          : rawValue;
+        const expectedType = BOOLEAN_CONFIG_FIELDS.has(field) ? "boolean" : "string";
+        if (typeof fieldValue !== expectedType) {
+          fail(`invalid delegate config ${candidate.path}: opencode field "${field}" must be a ${expectedType}`);
+        }
+        resolved[field] = fieldValue;
+        if (field === "model") modelSource = `${candidate.scope}:${layer.label}`;
+      }
+    }
+  }
+  if (!routeFound) fail(`delegate config route not found: ${route}`);
+  return { values: resolved, modelSource };
+}
+
 function parseArgs(argv) {
   const opts = {
     brief: null,
     cd: process.cwd(),
+    route: null,
     model: null,
-    agent: "build",
+    agent: null,
     variant: null,
     auto: true,
     resumeLast: false,
@@ -107,6 +204,7 @@ function parseArgs(argv) {
         break;
       case "--brief": opts.brief = next(); break;
       case "--cd": opts.cd = resolve(next()); break;
+      case "--route": opts.route = next(); break;
       case "--model": opts.model = next(); break;
       case "--agent": opts.agent = next(); break;
       case "--read-only": opts.agent = "plan"; break;
@@ -121,6 +219,20 @@ function parseArgs(argv) {
       default:
         fail(`unknown option: ${arg}`);
     }
+  }
+  const modelFromFlag = opts.model !== null;
+  const delegateConfig = loadDelegateConfig(opts.cd, opts.route);
+  const config = delegateConfig.values;
+  if (opts.model === null && config.model !== undefined) opts.model = config.model;
+  if (opts.timeout === null && config.timeout !== undefined) opts.timeout = config.timeout;
+  if (opts.agent === null && config.readOnly === true) opts.agent = "plan";
+  if (opts.agent === null) opts.agent = "build";
+  opts.modelSource = modelFromFlag ? "flag" : delegateConfig.modelSource;
+  if (config.readOnly !== undefined && typeof config.readOnly !== "boolean") {
+    fail("delegate config opencode.readOnly must be a boolean");
+  }
+  if (opts.model !== null && (typeof opts.model !== "string" || !SAFE_TOKEN.test(opts.model))) {
+    fail("invalid model (expected a shell-safe token using letters, digits, . _ : / -)");
   }
   // The watchdog is relay-only (the opencode launch has no timeout flag), so a malformed
   // --timeout must fail loudly here - a silent no-watchdog fallback would be wrong.
@@ -314,7 +426,7 @@ function prepareRunDir(opts, brief) {
   return run;
 }
 
-function makeResultWriter(opts, version, run) {
+function makeResultWriter(opts, modelSource, version, run) {
   // Returns writeResult(extra): merges the per-outcome fields onto the run's
   // standing metadata, persists result.json, and returns the object it just
   // wrote so the caller can hand it straight to printSummary.
@@ -326,6 +438,9 @@ function makeResultWriter(opts, version, run) {
       workdir: opts.cd,
       agent: resuming ? "(inherited from resumed session)" : opts.agent,
       model: opts.model,
+      modelSource,
+      route: opts.route,
+      timeout: opts.timeout,
       auto: opts.auto,
       resumeLast: opts.resumeLast,
       opencodeVersion: version,
@@ -532,6 +647,7 @@ function main() {
   if (opts.session && opts.resumeLast) {
     fail("--session and --resume-last are mutually exclusive; pass only one");
   }
+
   // OpenCode has no safe default model (a bare `opencode run` errors), so a fresh run must name one.
   // A resumed run inherits its session's model, so --model is optional there.
   if (!opts.model && !opts.resumeLast && !opts.session) {
@@ -540,7 +656,7 @@ function main() {
 
   const version = opencodeVersion();
   const run = prepareRunDir(opts, brief);
-  const writeResult = makeResultWriter(opts, version, run);
+  const writeResult = makeResultWriter(opts, opts.modelSource, version, run);
 
   if (!version) {
     reportUnavailable(writeResult, run.resultPath);
