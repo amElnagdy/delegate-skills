@@ -32,8 +32,12 @@
  *
  * `--read-only` uses plan mode and exposes only Read, Glob, and Grep: no edit,
  * write, shell, MCP, skill, command, or Agent tool. The relay also compares git
- * porcelain before and after and emits `readOnlyViolation`. This is a tripwire,
- * not an OS boundary: changes within an already-dirty file can evade it.
+ * porcelain before and after, and also fingerprints the contents of the paths
+ * that were already dirty, and emits `readOnlyViolation`. This is a tripwire,
+ * not an OS boundary: it reports writes, it does not prevent them. It is
+ * three-valued - `null` means coverage was incomplete (git unavailable, a
+ * submodule, an unreadable path), never "nothing happened". Git-ignored paths
+ * are outside it.
  *
  * Every profile disables configured MCP discovery and Claude.ai connectors,
  * denies all MCP tools, and disables skills and commands for the child while
@@ -90,6 +94,7 @@
  */
 
 import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   accessSync,
   appendFileSync,
@@ -100,6 +105,11 @@ import {
   renameSync,
   statSync,
   writeFileSync,
+  lstatSync,
+  readlinkSync,
+  openSync,
+  readSync,
+  closeSync,
 } from "node:fs";
 import { basename, delimiter, join, resolve } from "node:path";
 import { constants as osConstants, tmpdir } from "node:os";
@@ -575,6 +585,156 @@ function handleEvent(event, state, run) {
   writeFileSync(run.finalPath, state.finalMessage, "utf8");
 }
 
+// Porcelain status alone cannot see every write. A path that is " M file" before a run and
+// " M file" after it produces an identical line, so comparing status lines proves nothing about
+// its contents — which is why the read-only tripwire below fingerprints the already-dirty paths
+// as well. Two sentinels stand for "could not fingerprint"; they are never treated as unchanged.
+const FINGERPRINT_UNREADABLE = "<unreadable>";
+const FINGERPRINT_DIRECTORY = "<directory>";
+
+function gitRepoRoot(cwd) {
+  // Porcelain paths are relative to the repository ROOT, not to the directory git ran in
+  // (--porcelain forces status.relativePaths off). Joining them against a --cd that is a
+  // subdirectory would look for <repo>/src/src/file and find nothing at either end.
+  try {
+    return execFileSync("git", ["rev-parse", "--show-toplevel"], {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function dirtyPaths(cwd) {
+  // -z so a path containing a space, a quote, or a newline stays one field rather than being
+  // quoted and escaped; -uall so an untracked directory is expanded into its files, because a
+  // collapsed "?? dir/" line never changes when a file inside it does.
+  try {
+    const output = execFileSync("git", ["status", "--porcelain", "-z", "-uall"], {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    const fields = output.split("\0").filter((field) => field.length > 0);
+    const paths = [];
+    for (let i = 0; i < fields.length; i += 1) {
+      const entry = fields[i];
+      paths.push(entry.slice(3));
+      // R and C can sit in EITHER status column, and under -z such an entry is followed by its
+      // origin path as its own unprefixed field. Consume that field in both cases. A rename
+      // origin belongs in the dirty set (the file moved away from it); a copy origin does not,
+      // since a copy source can be a perfectly clean file.
+      const renamed = entry[0] === "R" || entry[1] === "R";
+      const copied = entry[0] === "C" || entry[1] === "C";
+      if (renamed || copied) {
+        i += 1;
+        const origin = fields[i];
+        if (origin !== undefined && renamed) paths.push(origin);
+      }
+    }
+    return paths;
+  } catch {
+    return null;
+  }
+}
+
+function pathFingerprint(absolutePath) {
+  // Identity, not just bytes: a retargeted symlink, a flipped mode bit, or a file replaced by a
+  // directory are all writes, and none of them change file contents.
+  let stats;
+  try {
+    stats = lstatSync(absolutePath);
+  } catch (error) {
+    // Absence is a state, not a failure - it differs from every real fingerprint, so a deletion
+    // or a re-creation still registers. Any other errno means we genuinely cannot tell.
+    return error && error.code === "ENOENT" ? "absent" : FINGERPRINT_UNREADABLE;
+  }
+  if (stats.isSymbolicLink()) {
+    try {
+      return `symlink:${readlinkSync(absolutePath)}`;
+    } catch {
+      return FINGERPRINT_UNREADABLE;
+    }
+  }
+  // A directory in the dirty set is a submodule, whose contents belong to another repository.
+  // Reported as unknown coverage rather than silently passed off as unchanged.
+  if (stats.isDirectory()) return FINGERPRINT_DIRECTORY;
+  if (!stats.isFile()) return FINGERPRINT_UNREADABLE;
+  let fd;
+  try {
+    // Streamed rather than read whole: an unignored multi-gigabyte artifact must not be pulled
+    // into memory just to answer whether it changed.
+    const hash = createHash("sha256");
+    fd = openSync(absolutePath, "r");
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    for (;;) {
+      const read = readSync(fd, buffer, 0, buffer.length, null);
+      if (read <= 0) break;
+      hash.update(buffer.subarray(0, read));
+    }
+    return `file:${(stats.mode & 0o7777).toString(8)}:${hash.digest("hex")}`;
+  } catch {
+    return FINGERPRINT_UNREADABLE;
+  } finally {
+    if (fd !== undefined) {
+      try { closeSync(fd); } catch { /* already closed */ }
+    }
+  }
+}
+
+function fingerprintPaths(root, paths) {
+  // `complete` goes false the moment one path cannot be fingerprinted, so the caller reports
+  // "unknown" instead of an unearned clean bill of health.
+  const prints = new Map();
+  let complete = true;
+  for (const path of paths) {
+    const print = pathFingerprint(join(root, path));
+    if (print === FINGERPRINT_UNREADABLE || print === FINGERPRINT_DIRECTORY) complete = false;
+    prints.set(path, print);
+  }
+  return { prints, complete };
+}
+
+function fingerprintDirtyPaths(cwd) {
+  // Only the already-dirty set is covered. A path that is clean at dispatch and gets written
+  // surfaces as a brand-new porcelain line anyway, and fingerprinting a whole repository per run
+  // would cost far more than the case it covers.
+  const root = gitRepoRoot(cwd);
+  if (root === null) return null;
+  const paths = dirtyPaths(cwd);
+  if (paths === null) return null;
+  return { root, ...fingerprintPaths(root, paths) };
+}
+
+function changedDirtyPaths(before) {
+  // Re-fingerprint exactly the baseline paths, not whatever happens to be dirty now: a path the
+  // run newly dirtied is already reported by the porcelain comparison, and letting an unreadable
+  // one of those blind this signal would be a regression, not caution.
+  if (!before || !before.complete) return null;
+  const now = fingerprintPaths(before.root, [...before.prints.keys()]);
+  if (!now.complete) return null;
+  const changed = [];
+  for (const [path, print] of before.prints) {
+    if (now.prints.get(path) !== print) changed.push(path);
+  }
+  return changed.sort();
+}
+
+function readOnlyVerdict(beforeTree, afterTree, beforeFingerprints) {
+  // Three-valued on purpose. Proof of a write settles it even when the other signal is unknown;
+  // only when nothing is proven AND coverage is incomplete is the answer genuinely unknown.
+  // Collapsing that last case to false is the false assurance a tripwire must never give.
+  const changed = changedDirtyPaths(beforeFingerprints);
+  const porcelainMoved =
+    beforeTree !== null && afterTree !== null && JSON.stringify(beforeTree) !== JSON.stringify(afterTree);
+  if (porcelainMoved || (changed !== null && changed.length > 0)) return true;
+  if (beforeTree === null || afterTree === null || changed === null) return null;
+  return false;
+}
+
 function gitTouchedFiles(cwd) {
   try {
     const output = execFileSync("git", ["status", "--porcelain"], {
@@ -611,7 +771,7 @@ function writeJsonAtomic(path, value) {
   renameSync(temporary, path);
 }
 
-function makeResultWriter(opts, version, run, state, beforeTree) {
+function makeResultWriter(opts, version, run, state, beforeTree, beforeFingerprints) {
   return (extra) => {
     const result = {
       schema: SCHEMA,
@@ -649,10 +809,7 @@ function makeResultWriter(opts, version, run, state, beforeTree) {
       ...extra,
     };
     if (opts.readOnly) {
-      result.readOnlyViolation =
-        beforeTree === null || result.touchedFiles === null
-          ? null
-          : !samePorcelain(beforeTree, result.touchedFiles);
+      result.readOnlyViolation = readOnlyVerdict(beforeTree, result.touchedFiles, beforeFingerprints);
     }
     writeJsonAtomic(run.resultPath, result);
     return result;
@@ -922,6 +1079,9 @@ function main() {
   // Capture after relay artifacts exist so an --out-dir inside the worktree does
   // not make the relay itself look like a read-only violation.
   const beforeTree = opts.readOnly ? gitTouchedFiles(opts.cd) : null;
+  // Contents of the paths that are ALREADY dirty. Their porcelain lines will not move if the
+  // run edits them, so the line comparison above cannot see those writes on its own.
+  const beforeFingerprints = opts.readOnly ? fingerprintDirtyPaths(opts.cd) : null;
   const version = launcher ? preflightVersion(launcher, env, opts.cd) : null;
   const state = {
     sessionId: opts.session,
@@ -934,7 +1094,7 @@ function main() {
     usage: null,
     totalCostUsd: null,
   };
-  const writeResult = makeResultWriter(opts, version, run, state, beforeTree);
+  const writeResult = makeResultWriter(opts, version, run, state, beforeTree, beforeFingerprints);
 
   if (!launcher || version === null) {
     reportUnavailable(writeResult, opts, run);

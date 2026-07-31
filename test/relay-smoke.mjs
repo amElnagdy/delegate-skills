@@ -199,7 +199,7 @@ if (["pi-success", "pi-error"].includes(process.env.SMOKE_MODE)) {
     console.log(JSON.stringify({ type: "agent_end", messages: [] }));
     process.exit(0);
   });
-} else if (["cursor-success", "claude-success", "claude-read-only-write", "claude-read-only-clean", "claude-chunked"].includes(process.env.SMOKE_MODE)) {
+} else if (["cursor-success", "claude-success", "claude-read-only-write", "claude-read-only-clean", "claude-read-only-append", "claude-chunked"].includes(process.env.SMOKE_MODE)) {
   let brief = "";
   process.stdin.setEncoding("utf8");
   process.stdin.on("data", (chunk) => { brief += chunk; });
@@ -226,6 +226,11 @@ if (["pi-success", "pi-error"].includes(process.env.SMOKE_MODE)) {
     }
     if (mode === "claude-read-only-write") {
       fs.writeFileSync("read-only-violation.txt", "written by fake claude\\n");
+    }
+    if (mode === "claude-read-only-append") {
+      // Append to a path that is ALREADY untracked before the run. Its porcelain line is
+      // "?? already-dirty.txt" before and after, so comparing status lines sees nothing.
+      fs.appendFileSync("already-dirty.txt", "appended by fake claude\\n");
     }
     if (process.env.SMOKE_CAPTURE_FILE) {
       fs.writeFileSync(process.env.SMOKE_CAPTURE_FILE, JSON.stringify({
@@ -1320,9 +1325,13 @@ for (const bad of ["NONSENSE", "0s", "", "10", "10s-junk", "1.5s", "1h30", "596h
 for (const scenario of [
   { name: "violation", mode: "claude-read-only-write", expectedViolation: true },
   { name: "clean", mode: "claude-read-only-clean", expectedViolation: false },
+  // A write whose porcelain line does not move. Status comparison alone reports false here.
+  { name: "already-dirty", mode: "claude-read-only-append", expectedViolation: true, dirtyFirst: true },
 ]) {
   const outDir = join(scratch, `out read-only ${scenario.name} claude`);
   const workDir = freshRepo(`work read-only ${scenario.name} claude`);
+  // Leave a path dirty BEFORE dispatch so the fake can edit it without moving its status line.
+  if (scenario.dirtyFirst) writeFileSync(join(workDir, "already-dirty.txt"), "pre-existing\n");
   const captureFile = join(scratch, `capture-read-only-${scenario.name}-claude.json`);
   const child = runRelay("claude", workDir, outDir, ["--read-only"], {
     SMOKE_CAPTURE_FILE: captureFile,
