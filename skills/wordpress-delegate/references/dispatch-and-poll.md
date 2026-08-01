@@ -86,18 +86,23 @@ Adding a lane is one row. Nothing else in the file knows the lane names:
 
 ```js
 {
-  name: "block-editor",
+  name: "multisite",
   implementer: "codex",
   readOnly: false,
-  why: "Block registration and the editor/save contract fail silently when the markup drifts.",
-  signals: [/\bblock\.json\b/, /\bregisterBlockType\b/, /\bblock (variation|pattern)s?\b/],
+  why: "Network-wide state and per-site state are different problems, and mixing them corrupts both.",
+  signals: [/\bmultisite\b/, /\bnetwork admin\b/, /\bswitch_to_blog\b/, /\bsite meta\b/],
 },
 ```
 
 Place it by precedence, not alphabetically — earlier rows win ties. Re-targeting a lane is a one-word
 change to its `implementer`. Teaching the preamble a new area is one row in `DOMAINS`, with its own
-`notes`. After either, run `node test/relay-smoke.mjs` and add a row to the routing table in
-`test/relay-smoke.mjs`'s `ROUTING_CASES` so the new lane is pinned.
+`notes`. After either, run `node test/relay-smoke.mjs` and add a row to `ROUTING_CASES` in
+`test/relay-smoke.mjs` so the new lane is pinned.
+
+Signals are matched **case-insensitively** against the brief as written, so write each row in the
+casing its ecosystem uses — `Gutenberg`, `registerBlockType`, `$wpdb` — and don't hand-lower it.
+`matchedSignals` echoes back what the brief actually said, which is what makes a wrong routing
+decision diagnosable.
 
 Two rules keep the table honest:
 

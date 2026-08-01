@@ -293,13 +293,34 @@ const LANES = [
     readOnly: false,
     why: "Elementor's control/render/editor contract is unforgiving; a wrong control schema fails silently in the editor.",
     signals: [
-      /\belementor\b/,
+      /\bElementor\b/,
       /\bdynamic tag(s)?\b/,
       /\b(loop|theme) builder\b/,
       /\bcustom (widget|control)s?\b/,
       /\bwidget_(controls|render)\b/,
       /\bregister_controls\b/,
-      /\b\\?Elementor\\/,
+    ],
+  },
+  {
+    name: "block-editor",
+    implementer: "codex",
+    readOnly: false,
+    why: "The block registration and edit/save contract fails silently when markup drifts — an invalid block is a validation error in the editor, not a test failure.",
+    signals: [
+      /\bGutenberg\b/,
+      /\bblock editor\b/,
+      /\bblock\.json\b/,
+      /\bregisterBlockType\b/,
+      /\bregister_block_type\b/,
+      /\b(dynamic|static|custom|inner) blocks?\b/,
+      /\bInnerBlocks\b/,
+      /\bblock (attribute|deprecation|variation|pattern|style|template|support|binding)s?\b/,
+      /\b@wordpress\/(blocks|block-editor|element|data|components|scripts|i18n)\b/,
+      /\buseBlockProps\b/,
+      /\btheme\.json\b/,
+      /\b(full site editing|FSE|block theme)\b/,
+      /\binteractivity api\b/,
+      /\brender_callback\b/,
     ],
   },
   {
@@ -439,6 +460,14 @@ const DOMAINS = [
     ],
   },
 ];
+
+// Signals are matched case-insensitively, so a row can be written in whatever case reads best —
+// `Gutenberg`, `registerBlockType`, `$wpdb` — without its author having to know that the brief is
+// folded first. Normalizing once at load keeps that out of the matching path, and keeps a stray
+// capital from silently producing a signal that can never fire.
+const caseInsensitive = (signal) => (signal.flags.includes("i") ? signal : new RegExp(signal.source, `${signal.flags}i`));
+for (const lane of [...LANES, DEFAULT_LANE]) lane.signals = lane.signals.map(caseInsensitive);
+for (const domain of DOMAINS) domain.signals = domain.signals.map(caseInsensitive);
 
 /* ------------------------------------------------------------------ *
  * The preamble — the standing instruction every WordPress brief carries,
@@ -635,7 +664,9 @@ function detectDomains(text) {
 }
 
 function classify(brief, opts) {
-  const text = brief.toLowerCase();
+  // Matched against the brief as written: the signals themselves are case-insensitive, and keeping
+  // the original casing means matchedSignals echoes back what the brief actually said.
+  const text = brief;
   const domains = detectDomains(text);
 
   if (opts.implementer && !opts.lane) {

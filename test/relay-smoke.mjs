@@ -1426,6 +1426,8 @@ for (const scenario of [
       "plugin-architecture", "codex", false],
     ["build a complex Elementor widget with custom controls and a dynamic tag for the loop builder",
       "elementor-widget", "codex", false],
+    ["add a dynamic block: registerBlockType with a block.json, InnerBlocks, and a render_callback",
+      "block-editor", "codex", false],
     ["performance pass: slow queries on the archive, 4MB of autoloaded options, object cache with redis",
       "performance", "codex", false],
   ];
@@ -1439,6 +1441,15 @@ for (const scenario of [
       decision?.confidence === "high" &&
       Array.isArray(decision?.matchedSignals) && decision.matchedSignals.length >= 2);
   }
+
+  // Signals are matched case-insensitively, so a table row written in the casing its ecosystem uses
+  // still fires. Without this a capital letter produces a signal that can never match, which is
+  // invisible: the lane just quietly scores lower than it should.
+  const cased = routed(["--dry-run"], "Register the GUTENBERG block with registerBlockType and theme.json");
+  check("wordpress routing: signals match regardless of the brief's casing",
+    cased.decision?.lane === "block-editor" &&
+    cased.decision.matchedSignals.some((s) => /GUTENBERG/.test(s)) &&
+    cased.decision.matchedSignals.some((s) => /registerBlockType/.test(s)));
 
   // A read-only lane winning on one weak signal would return findings and an empty diff to someone
   // who asked for a fix, and read as the implementer doing nothing. One mention of "nonce" in a

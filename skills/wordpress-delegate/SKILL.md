@@ -139,6 +139,7 @@ performance is routed as security.
 | `refactor-sweep` | `opencode` | Sustained context across many files beats depth on any one. |
 | `plugin-architecture` | `codex` | Structural decisions compound. |
 | `elementor-widget` | `codex` | The control/render/editor contract fails silently when wrong. |
+| `block-editor` | `codex` | An invalid block is an editor validation error, not a test failure. |
 | `performance` | `codex` | Measurement-driven and easy to get plausibly wrong. |
 | `implementation` (fallback) | `codex` | No lane signal dominated. |
 
