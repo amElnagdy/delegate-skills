@@ -19,6 +19,27 @@ Four invariants hold for every skill here, and they are the bar for a new one:
 - **Autonomy is stated in the CLI's own terms**, and whatever it cannot enforce is said plainly. A
   CLI with no read-only mode is mergeable; a skill that implies it has one is not.
 
+## Domain skills
+
+Most skills here are **implementer skills** — one per CLI. A **domain skill** is the other kind: it
+picks the implementer from the brief and dispatches through that sibling's `relay.mjs`.
+`wordpress-delegate` is the first.
+
+The four invariants hold for a domain skill too, transitively — a separate CLI still edits a real
+working tree, nothing commits, Node built-ins only, and autonomy is still stated in the chosen CLI's
+own terms. Three extra rules keep it from becoming a second implementation of the loop:
+
+- **It launches no implementer CLI.** It shells out to `node` (for the sibling) and `git`. A domain
+  relay that grew its own version preflight, stream parser, or process-tree kill has forked the loop.
+- **The sibling's result is the authority.** Lift the contract fields, embed the sibling's own result
+  verbatim, and override the verdict only where the domain relay did the killing and the sibling
+  could not know.
+- **Routing is a table, and the table is the extension point.** One row per lane; adding a lane must
+  not require touching anything else in the file.
+
+A domain skill needs the same directory shape, the same four references, the same `result.json`
+contract, and the same smoke registration as any other. Claim it the same way.
+
 ## Merge checklist for a new skill
 
 - [ ] `skills/<name>-delegate/SKILL.md` — a `description` that triggers on delegation to that CLI and

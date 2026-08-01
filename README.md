@@ -45,6 +45,20 @@ Each skill name links to its `SKILL.md`, which owns that implementer's prerequis
 caveats. Building one for another CLI? [Claim it first](../../issues?q=is%3Aissue+label%3Aimplementer),
 then see [CONTRIBUTING.md](CONTRIBUTING.md).
 
+### Domain skills
+
+One skill picks the row for you. It launches no CLI of its own — it classifies the brief, prepends
+the domain's engineering standards, and dispatches through a sibling above, whose relay owns every
+CLI-specific mechanic and writes the result.
+
+| Skill | Domain | Routes to | Override |
+| --- | --- | --- | --- |
+| [`wordpress-delegate`](skills/wordpress-delegate/SKILL.md) | WordPress, WooCommerce, Elementor, ACF, WPForms | `codex`, `grok`, `kimi`, `opencode` — by lane | `--implementer`, `--lane`, `--strict-routing` |
+
+Reach for it when the user wants WordPress work delegated but hasn't named the implementer; reach for
+a row above when they have. `--dry-run` prints the routing decision without dispatching, and
+`--list-routes` prints the lane table.
+
 ## Install
 
 Browse first:
@@ -177,6 +191,16 @@ Per skill — platform, CLI version, and what the run exercised:
 - `codex-delegate`, `opencode-delegate`, `vibe-delegate` — contract-tested only: argument validation,
   bounded version preflight, missing binary, result parsing, and whole-process-tree timeout/abort
   cleanup. No end-to-end run is recorded here.
+- `wordpress-delegate` — native Windows, through `codex-delegate` with `codex` 0.144.1: a write run
+  on a throwaway plugin repo, routed by the table, with the preamble visible in the result
+  (`check_ajax_referer` + `current_user_can`, `wp_unslash`/`absint`, `$wpdb->prepare()`, `esc_html`
+  at output, text domain, and the `wp_ajax_nopriv` registration dropped), the thread id lifted for
+  resume, and no commit made. Contract-tested besides: every shipped lane's routing decision, the
+  read-only demotion rule, `--strict-routing`'s refusal, the read-only and resume flag translation
+  for all ten implementers, a missing sibling relay, and the shared atomic-publish, `--timeout`
+  validation, and whole-process-tree timeout cleanup. Only `codex` has been driven live; the other
+  three lane targets are contract-tested. The aborted path is POSIX-only in the suite and has not
+  been driven for this relay on any platform.
 
 Not yet verified: native Windows launches for `agy`, `claude`, `grok`, `kimi`, `pi`, `qoder`, and
 `vibe` (the `codex`/`opencode`/`grok` `.cmd` shim handling is in place and quoted; Cursor serializes a
@@ -202,6 +226,9 @@ skills/
         ├── review-and-land.md
         └── multi-task-queues.md
 ```
+
+A domain skill has the same shape and the same four invariants; its `relay.mjs` dispatches through a
+sibling's rather than launching a CLI directly, so the sibling's guarantees are the ones in force.
 
 Adding an implementer is a new directory plus two lines here: a table row, and a verification line once
 a run backs it.

@@ -2,11 +2,13 @@
 
 This repo is a [Skills CLI](https://github.com/vercel-labs/skills) package of **delegation skills** —
 skills that let an orchestrating agent drive a separate CLI coding agent as an implementer, then review
-and land the result. Ten skills ship today: `claude-delegate` (Claude Code), `codex-delegate` (OpenAI
-Codex), `opencode-delegate` (OpenCode), `agy-delegate` (Google Antigravity), `grok-delegate` (Grok
-Build), `kimi-delegate` (Kimi Code), `qoder-delegate` (Qoder CLI), `vibe-delegate` (Mistral Vibe),
-`cursor-delegate` (Cursor Agent CLI), and `pi-delegate` (Pi CLI); siblings like `gemini-delegate` can
-be added later without renaming the repo.
+and land the result. Eleven skills ship today. Ten are **implementer skills**, one per CLI:
+`claude-delegate` (Claude Code), `codex-delegate` (OpenAI Codex), `opencode-delegate` (OpenCode),
+`agy-delegate` (Google Antigravity), `grok-delegate` (Grok Build), `kimi-delegate` (Kimi Code),
+`qoder-delegate` (Qoder CLI), `vibe-delegate` (Mistral Vibe), `cursor-delegate` (Cursor Agent CLI),
+and `pi-delegate` (Pi CLI); siblings like `gemini-delegate` can be added later without renaming the
+repo. One is a **domain skill**: `wordpress-delegate` picks the implementer from the brief and
+dispatches through that sibling's relay, launching no CLI of its own.
 
 ## Vocabulary
 
@@ -33,6 +35,9 @@ jargon. Use these terms; don't invent synonyms.
 | `session`, `-c`, `--resume`, `permission mode` (`default`/`accept_edits`/`auto`/`bypass_permissions`/`dont_ask`/`plan`), `print mode`, `stream-json`, `model`, `context window` | Qoder CLI's own terms — use verbatim when discussing Qoder | don't paraphrase them |
 | `--prompt`, `--output` (`streaming`/`json`/`text`), `--agent` (`plan`/`accept-edits`/`auto-approve`), `--max-turns`, `--max-price`, `--max-tokens`, `--trust`, `--resume`, `--continue`, `--enabled-tools`, `--disabled-tools` | Mistral Vibe's own terms — use verbatim when discussing `vibe` | don't invent a Vibe sandbox enum; `--trust` is not a permission mode |
 | `session`, `--continue`, `--session`, `print mode`, `--mode json`, `tools`, `context files`, `project trust` | Pi's own terms — use verbatim when discussing `pi` | don't paraphrase them |
+| **implementer skill** / **domain skill** | the two kinds of skill here — one per CLI, versus one that routes to them | "wrapper", "meta-skill", "meta-delegate" |
+| **lane** (what kind of work), **domain** (what the work is about), **confidence**, **preamble** | `wordpress-delegate`'s own terms — a lane routes, a domain informs the preamble | never use "domain" for a lane, or "category" for either |
+| `hook`, `filter`, `action`, `nonce`, `capability`, `WPCS`, `HPOS`, `text domain`, `child theme`, `WP-CLI` | WordPress's own terms — use verbatim when discussing `wordpress-delegate` | don't paraphrase them, and don't coin WordPress jargon that WordPress doesn't use |
 
 Banned on sight: coined umbrella terms in user-facing surfaces (README headings, `skills.sh.json`
 titles); any reference to the author's local machine or config; model/version pins (`GPT-5.x` →
@@ -59,10 +64,16 @@ the skill's `relay.mjs`.
 - **Executables:** keep them minimal and inspectable. Today there is one per skill — a
   `scripts/relay.mjs` under each of `skills/claude-delegate/`, `skills/codex-delegate/`,
   `skills/opencode-delegate/`, `skills/agy-delegate/`, `skills/grok-delegate/`,
-  `skills/kimi-delegate/`, `skills/qoder-delegate/`, `skills/vibe-delegate/`, and
-  `skills/cursor-delegate/`, and `skills/pi-delegate/` — each Node built-ins only, no dependencies,
-  no network calls of its own, no credentials, no telemetry. New scripts must hold the same line,
-  and the README's trust section must stay accurate.
+  `skills/kimi-delegate/`, `skills/qoder-delegate/`, `skills/vibe-delegate/`,
+  `skills/cursor-delegate/`, `skills/pi-delegate/`, and `skills/wordpress-delegate/` — each Node
+  built-ins only, no dependencies, no network calls of its own, no credentials, no telemetry. New
+  scripts must hold the same line, and the README's trust section must stay accurate.
+- **A domain skill routes; it does not re-implement.** `wordpress-delegate` dispatches through a
+  sibling's `relay.mjs` rather than launching a CLI, so dispatch, polling, sandboxes, sessions, and
+  the process-tree kill stay owned by exactly one file per implementer. A domain relay that grew its
+  own version preflight, its own stream parser, or its own kill logic would be a bug, not a feature.
+  Its routing table is the extension point: one row per lane, and nothing else in the file knows the
+  lane names.
 
 ## Before publishing a change
 

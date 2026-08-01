@@ -16,6 +16,13 @@
         "cursor-delegate",
         "pi-delegate"
       ]
+    },
+    {
+      "title": "Delegate by domain",
+      "description": "Route a domain task to the CLI implementer best suited to it, then review the diff and commit it yourself.",
+      "skills": [
+        "wordpress-delegate"
+      ]
     }
   ]
 }

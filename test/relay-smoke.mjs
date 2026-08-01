@@ -47,8 +47,11 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const SKILLS = ["claude", "codex", "opencode", "agy", "grok", "kimi", "qoder", "vibe", "cursor", "pi"];
-const binaryName = (skill) => skill === "qoder" ? "qodercli" : skill === "cursor" ? "cursor-agent" : skill;
+const SKILLS = ["claude", "codex", "opencode", "agy", "grok", "kimi", "qoder", "vibe", "cursor", "pi", "wordpress"];
+// wordpress-delegate launches no CLI of its own — it dispatches through a sibling relay, so the
+// binary at the end of its chain is whichever implementer it routed to. EXTRA_ARGS pins it to
+// codex for the shared matrix, which is why it answers to codex's fake here.
+const binaryName = (skill) => skill === "qoder" ? "qodercli" : skill === "cursor" ? "cursor-agent" : skill === "wordpress" ? "codex" : skill;
 const relayPath = (skill) => join(here, "..", "skills", `${skill}-delegate`, "scripts", "relay.mjs");
 const WIN = process.platform === "win32";
 let failed = 0;
@@ -458,7 +461,9 @@ const emptyEffortRun = spawnSync(process.execPath,
 check("codex effort: an empty value is rejected", emptyEffortRun.status === 2);
 
 // opencode refuses a fresh run without an explicit model
-const EXTRA_ARGS = { claude: [], codex: [], opencode: ["--model", "fake/model"], agy: [], grok: [], kimi: [], qoder: [], vibe: [], cursor: [], pi: [] };
+// wordpress-delegate routes by brief content; the shared smoke brief carries no WordPress signal,
+// so pin the implementer rather than letting the matrix depend on the router's default.
+const EXTRA_ARGS = { claude: [], codex: [], opencode: ["--model", "fake/model"], agy: [], grok: [], kimi: [], qoder: [], vibe: [], cursor: [], pi: [], wordpress: ["--implementer", "codex"] };
 
 // ---- Cursor's session/model controls and structured result ----
 {
@@ -1391,6 +1396,216 @@ for (const scenario of [
   if (exitCode !== 0) console.error(`claude chunked relay stderr:\n${stderr}`);
 }
 
+// ---- wordpress routing: the lane table, the flag translation, and the sibling boundary ----
+// This relay's own job is the routing decision, so the decision is what gets asserted. --dry-run
+// makes that testable without launching anything; the dispatch path below then proves the decision
+// survives the hand-off to a sibling.
+{
+  const routed = (args, briefText, extraEnv) => {
+    const file = join(scratch, `wp-brief-${Buffer.from(briefText).toString("hex").slice(0, 24)}.txt`);
+    writeFileSync(file, briefText);
+    const run = spawnSync(process.execPath, [relayPath("wordpress"), "--brief", file, ...args], {
+      env: { ...baseEnv, ...extraEnv }, encoding: "utf8", timeout: 15_000,
+    });
+    let decision = null;
+    try { decision = JSON.parse(run.stdout); } catch { /* left null: the check below reports it */ }
+    return { run, decision };
+  };
+
+  // One row per lane the table ships, phrased the way a WordPress task actually arrives.
+  const ROUTING_CASES = [
+    ["security audit of the checkout AJAX handlers: no nonce check, and I suspect SQL injection",
+      "security-audit", "grok", true],
+    ["research which payment gateway to use for subscriptions; compare the options with pros and cons",
+      "research", "grok", true],
+    ["write the documentation: update readme.txt, add a changelog entry and PHPDoc docblocks",
+      "documentation", "kimi", false],
+    ["large refactor: rename the legacy prefix across all files and migrate all helpers into a class",
+      "refactor-sweep", "opencode", false],
+    ["build a new custom plugin with PSR-4 autoloading, a service container, and an activation hook",
+      "plugin-architecture", "codex", false],
+    ["build a complex Elementor widget with custom controls and a dynamic tag for the loop builder",
+      "elementor-widget", "codex", false],
+    ["performance pass: slow queries on the archive, 4MB of autoloaded options, object cache with redis",
+      "performance", "codex", false],
+  ];
+  for (const [text, lane, implementer, readOnly] of ROUTING_CASES) {
+    const { run, decision } = routed(["--dry-run", "--model", "fake/model"], text);
+    check(`wordpress routing: "${lane}" → ${implementer}`,
+      run.status === 0 &&
+      decision?.lane === lane &&
+      decision?.implementer === implementer &&
+      decision?.readOnly === readOnly &&
+      decision?.confidence === "high" &&
+      Array.isArray(decision?.matchedSignals) && decision.matchedSignals.length >= 2);
+  }
+
+  // A read-only lane winning on one weak signal would return findings and an empty diff to someone
+  // who asked for a fix, and read as the implementer doing nothing. One mention of "nonce" in a
+  // bugfix brief demotes to implementation rather than silently withholding writes.
+  const weakAudit = routed(["--dry-run"], "fix the cart hook: the wc_get_order lookup is missing a nonce check");
+  check("wordpress routing: a read-only lane on one signal demotes to implementation, keeping writes",
+    weakAudit.run.status === 0 &&
+    weakAudit.decision?.lane === "implementation" &&
+    weakAudit.decision?.readOnly === false &&
+    weakAudit.decision?.confidence === "low" &&
+    weakAudit.decision?.alternates?.[0]?.lane === "security-audit" &&
+    /too weak to withhold writes/.test(weakAudit.decision?.reason ?? ""));
+
+  // Two signals is enough for the same lane to keep its read-only default.
+  const realAudit = routed(["--dry-run"], "security audit of the cart hook: no nonce check anywhere");
+  check("wordpress routing: two signals let the read-only lane stand",
+    realAudit.decision?.lane === "security-audit" && realAudit.decision?.readOnly === true);
+
+  // A brief with no lane signal must not silently pick a lane and pretend to be sure about it.
+  const vague = routed(["--dry-run"], "please make the thing better");
+  check("wordpress routing: an unroutable brief falls back with confidence \"none\" and a question",
+    vague.run.status === 0 &&
+    vague.decision?.lane === "implementation" &&
+    vague.decision?.confidence === "none" &&
+    typeof vague.decision?.clarification === "string" && vague.decision.clarification.length > 0);
+
+  // ... and --strict-routing turns that question into a refusal, before any artifact exists.
+  const strictOutDir = join(scratch, "out-wordpress-strict");
+  const strictBrief = join(scratch, "wp-strict-brief.txt");
+  writeFileSync(strictBrief, "please make the thing better");
+  const strict = spawnSync(process.execPath, [
+    relayPath("wordpress"), "--brief", strictBrief, "--out-dir", strictOutDir, "--strict-routing",
+  ], { env: baseEnv, encoding: "utf8", timeout: 15_000 });
+  check("wordpress routing: --strict-routing refuses with exit 3 and writes no artifacts",
+    strict.status === 3 && !existsSync(strictOutDir) && /strict-routing refused/.test(strict.stderr));
+
+  // An explicit --implementer bypasses the table entirely, and says so rather than inventing a lane.
+  const forced = routed(["--dry-run", "--implementer", "pi"],
+    "security audit of the checkout AJAX handlers: no nonce check, and I suspect SQL injection");
+  check("wordpress routing: --implementer overrides the table and is marked forced",
+    forced.run.status === 0 && forced.decision?.implementer === "pi" && forced.decision?.confidence === "forced");
+
+  // The portable --read-only must be spelled in each CLI's own terms, since three of them spell it
+  // differently and two cannot do it at all. A wrong translation surfaces as an unknown option from
+  // the sibling, which reads like a bug here rather than a property of that CLI.
+  const READ_ONLY_TRANSLATION = [
+    ["codex", ["--read-only"]],
+    ["claude", ["--read-only"]],
+    ["cursor", ["--read-only"]],
+    ["grok", ["--read-only"]],
+    ["opencode", ["--read-only"]],
+    ["pi", ["--read-only"]],
+    ["qoder", ["--permission-mode", "plan"]],
+    ["vibe", ["--plan-only"]],
+  ];
+  for (const [implementer, expected] of READ_ONLY_TRANSLATION) {
+    const { run, decision } = routed(["--dry-run", "--read-only", "--model", "fake/model", "--implementer", implementer],
+      "review the plugin bootstrap");
+    check(`wordpress routing: --read-only becomes "${expected.join(" ")}" for ${implementer}`,
+      run.status === 0 && JSON.stringify(decision?.implementerFlags) === JSON.stringify(expected));
+  }
+  for (const implementer of ["kimi", "agy"]) {
+    const { run } = routed(["--read-only", "--implementer", implementer], "review the plugin bootstrap");
+    check(`wordpress routing: --read-only is refused for ${implementer}, which has no such mode`,
+      run.status === 2 && /has no read-only mode/.test(run.stderr));
+  }
+  // Resume is the same problem: qoder spells it --resume, agy --conversation, everyone else --session.
+  const qoderResume = routed(["--dry-run", "--implementer", "qoder", "--session", "abc123"], "fix the shortcode");
+  const agyResume = routed(["--dry-run", "--implementer", "agy", "--session", "abc123"], "fix the shortcode");
+  check("wordpress routing: --session is spelled in the chosen CLI's own terms",
+    JSON.stringify(qoderResume.decision?.implementerFlags) === JSON.stringify(["--resume", "abc123"]) &&
+    JSON.stringify(agyResume.decision?.implementerFlags) === JSON.stringify(["--conversation", "abc123"]));
+
+  // opencode is the one sibling that rejects a run with no --model. Catch it here, where the message
+  // can name the lane that routed there, rather than letting the sibling exit 2 on its own.
+  const noModel = routed(["--dry-run"],
+    "large refactor: rename the legacy prefix across all files and migrate all helpers into a class");
+  check("wordpress routing: a missing --model for opencode is reported as a blocker, not a crash",
+    noModel.run.status === 0 && /requires an explicit model/.test(noModel.decision?.blocker ?? ""));
+
+  // The preamble is the other half of this skill: every brief carries the WordPress standards, and
+  // the domain notes are selected by what the router detected.
+  const preamble = spawnSync(process.execPath, [relayPath("wordpress"), "--print-preamble"], { encoding: "utf8" });
+  check("wordpress preamble: --print-preamble emits the standards block",
+    preamble.status === 0 &&
+    /wordpress_engineering_standards/.test(preamble.stdout) &&
+    /nonce AND a capability/.test(preamble.stdout) &&
+    /\$wpdb->prepare\(\)/.test(preamble.stdout) &&
+    /Do NOT run git add or git commit/.test(preamble.stdout));
+
+  // End to end through a real sibling: the decision must survive the hand-off, the composed brief
+  // must carry the preamble and the domain notes, and the sibling's result must be lifted intact.
+  {
+    const outDir = join(scratch, "out-wordpress-dispatch");
+    const workDir = freshRepo("work-wordpress-dispatch");
+    const wpBrief = join(scratch, "wp-dispatch-brief.txt");
+    writeFileSync(wpBrief, "Fix the WooCommerce checkout: the wc_get_order lookup in the cart hook is missing a nonce check.");
+    const run = spawnSync(process.execPath, [
+      relayPath("wordpress"), "--brief", wpBrief, "--cd", workDir, "--out-dir", outDir, "--implementer", "codex",
+    ], {
+      env: { ...baseEnv, SMOKE_MODE: "capture", SMOKE_ARGS_FILE: join(scratch, "args-wordpress-dispatch") },
+      encoding: "utf8", timeout: 20_000,
+    });
+    const value = existsSync(join(outDir, "result.json")) ? result(outDir) : {};
+    const dispatched = existsSync(join(outDir, "dispatched-brief.txt"))
+      ? readFileSync(join(outDir, "dispatched-brief.txt"), "utf8") : "";
+    check("wordpress dispatch: the run completes through the sibling relay",
+      run.status === 0 && value.status === "completed" && value.implementer === "codex");
+    check("wordpress dispatch: the routing decision is recorded in result.json",
+      value.routing?.implementer === "codex" &&
+      value.routing?.forced === true &&
+      Array.isArray(value.routing?.domains) &&
+      value.routing.domains.includes("woocommerce") &&
+      value.routing.domains.includes("security"));
+    check("wordpress dispatch: the sibling's own result is embedded verbatim, not paraphrased",
+      value.implementerResult?.schema === "delegate-relay.result.v1" &&
+      value.implementerResult?.status === "completed" &&
+      value.implementerResultPath === join(outDir, "implementer", "result.json"));
+    check("wordpress dispatch: the composed brief carries the preamble, the detected domains, and the original text",
+      /wordpress_engineering_standards/.test(dispatched) &&
+      /<domain_notes>/.test(dispatched) &&
+      /HPOS makes post-table assumptions wrong/.test(dispatched) &&
+      /wc_get_order lookup in the cart hook/.test(dispatched));
+    if (run.status !== 0) console.error(`wordpress dispatch stderr:\n${run.stderr}`);
+  }
+
+  // A resumed session already holds the preamble; re-sending it would restate standards the
+  // implementer was given on the first pass.
+  {
+    const outDir = join(scratch, "out-wordpress-resume");
+    const workDir = freshRepo("work-wordpress-resume");
+    const wpBrief = join(scratch, "wp-resume-brief.txt");
+    writeFileSync(wpBrief, "Also escape the order id in the admin column.");
+    spawnSync(process.execPath, [
+      relayPath("wordpress"), "--brief", wpBrief, "--cd", workDir, "--out-dir", outDir,
+      "--implementer", "codex", "--session", "thread-1",
+    ], {
+      env: { ...baseEnv, SMOKE_MODE: "capture", SMOKE_ARGS_FILE: join(scratch, "args-wordpress-resume") },
+      encoding: "utf8", timeout: 20_000,
+    });
+    const dispatched = existsSync(join(outDir, "dispatched-brief.txt"))
+      ? readFileSync(join(outDir, "dispatched-brief.txt"), "utf8") : "";
+    check("wordpress dispatch: a resumed run sends the delta brief without the preamble",
+      dispatched.trim() === "Also escape the order id in the admin column." &&
+      existsSync(join(outDir, "result.json")) && result(outDir).preamble === false);
+  }
+
+  // The sibling boundary is this skill's one hard dependency, so its absence must be a named
+  // outcome with a result file — not an unhandled spawn error.
+  {
+    const outDir = join(scratch, "out-wordpress-missing-sibling");
+    const workDir = freshRepo("work-wordpress-missing-sibling");
+    const wpBrief = join(scratch, "wp-missing-brief.txt");
+    writeFileSync(wpBrief, "fix the shortcode output escaping");
+    const run = spawnSync(process.execPath, [
+      relayPath("wordpress"), "--brief", wpBrief, "--cd", workDir, "--out-dir", outDir,
+      "--implementer", "codex", "--implementer-relay", join(scratch, "no-such-relay.mjs"),
+    ], { env: baseEnv, encoding: "utf8", timeout: 15_000 });
+    const value = existsSync(join(outDir, "result.json")) ? result(outDir) : {};
+    check("wordpress: a missing sibling relay is implementer_unavailable at exit 127, with a result file",
+      run.status === 127 &&
+      value.status === "implementer_unavailable" &&
+      value.exitCode === 127 &&
+      /dispatches through its siblings/.test(value.error ?? ""));
+  }
+}
+
 // ---- 1. the watchdog fells the whole tree ----
 // Use agy's explicit watchdog here: this is the path that bounds a server-side hang
 // beyond agy's own --print-timeout, and it keeps the shared smoke fast.
@@ -1405,6 +1620,10 @@ const TIMEOUT_CASES = [
   { skill: "cursor", flags: ["--timeout", "6s"], exitDeadline: 45_000 },
   { skill: "vibe", flags: ["--timeout", "6s"], exitDeadline: 45_000 },
   { skill: "agy", flags: ["--timeout", "6s"], exitDeadline: 45_000 },
+  // wordpress forwards --timeout to the sibling, which owns the kill, and arms a backstop a grace
+  // window later. The sibling must fire first: if the backstop is what fells the tree, the reported
+  // status is still "timeout" but the run overshot by a minute, which the deadline below catches.
+  { skill: "wordpress", flags: ["--timeout", "6s"], exitDeadline: 45_000 },
 ];
 async function driveTimeout({ skill, flags, exitDeadline }, mode, extraEnv, tag) {
   const outDir = join(scratch, `out-${tag}-${skill}`);
