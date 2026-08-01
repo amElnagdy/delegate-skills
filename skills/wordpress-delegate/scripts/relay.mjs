@@ -12,9 +12,10 @@
  *
  * Trust posture: relay.mjs itself makes no network calls, reads or writes no
  * credentials, and sends no telemetry; it has no dependencies (Node built-ins
- * only). It shells out only to `node` (for the sibling relay) and `git`. The
- * implementer CLI the sibling launches does authenticate — exactly as you do at
- * the terminal. Read this file, and the sibling's, before you run them.
+ * only). It shells out to `node` (for the sibling relay) and `git`, plus the
+ * platform termination utility on Windows, where felling a process tree needs
+ * one. The implementer CLI the sibling launches does authenticate — exactly as
+ * you do at the terminal. Read this file, and the sibling's, before you run them.
  *
  * It deliberately does NOT commit, and neither does any sibling. Committing is
  * always the orchestrator's job — after it reviews the diff and re-runs the
@@ -315,7 +316,9 @@ const LANES = [
       /\b(dynamic|static|custom|inner) blocks?\b/,
       /\bInnerBlocks\b/,
       /\bblock (attribute|deprecation|variation|pattern|style|template|support|binding)s?\b/,
-      /\b@wordpress\/(blocks|block-editor|element|data|components|scripts|i18n)\b/,
+      // No leading \b: the boundary would have to sit between a non-word character and `@`, which
+      // is not a boundary at all, so `\b@wordpress` only ever matched glued to a word (`x@wordpress`).
+      /@wordpress\/(blocks|block-editor|element|data|components|scripts|i18n)\b/,
       /\buseBlockProps\b/,
       /\btheme\.json\b/,
       /\b(full site editing|FSE|block theme)\b/,

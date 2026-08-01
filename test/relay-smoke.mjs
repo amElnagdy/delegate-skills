@@ -1451,6 +1451,14 @@ for (const scenario of [
     cased.decision.matchedSignals.some((s) => /GUTENBERG/.test(s)) &&
     cased.decision.matchedSignals.some((s) => /registerBlockType/.test(s)));
 
+  // A signal that can never fire is invisible — the lane just scores lower than it should. `\b@` is
+  // the trap: the boundary would have to sit between a non-word character and `@`, which is not a
+  // boundary, so a leading \b there matches only when glued to a word. Pin the package mention.
+  const pkg = routed(["--dry-run"], "Import the block from @wordpress/blocks and register it");
+  check("wordpress routing: an @wordpress package mention is a block-editor signal",
+    pkg.decision?.lane === "block-editor" &&
+    pkg.decision.matchedSignals.some((s) => s.startsWith("@wordpress/")));
+
   // A read-only lane winning on one weak signal would return findings and an empty diff to someone
   // who asked for a fix, and read as the implementer doing nothing. One mention of "nonce" in a
   // bugfix brief demotes to implementation rather than silently withholding writes.
