@@ -10,3 +10,9 @@ node_modules/
 
 # local agent config symlink (see AGENTS.md)
 CLAUDE.md
+
+# Skills CLI install output, if you install this package into the repo while working on it
+# (`npx skills add .` — the validation step in AGENTS.md). The agent directory is whichever
+# agent the CLI detects; add yours here if it differs.
+.claude/
+skills-lock.json
