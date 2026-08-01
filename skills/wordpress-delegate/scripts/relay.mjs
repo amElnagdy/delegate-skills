@@ -828,8 +828,12 @@ function resolveSiblingRelay(implementer, opts) {
 }
 
 function killChild(child, signal = "SIGTERM") {
-  // The kill must reach the whole family: this relay's child is another relay, whose own child
-  // is the implementer CLI, whose children are its tools. Same idiom as every sibling relay.
+  // The one mechanic this relay owns rather than delegates, because a watchdog backstop and signal
+  // forwarding are impossible without it. It is deliberately bounded: the target is the sibling
+  // relay and nothing past it. The sibling spawns the implementer CLI detached, into a process
+  // group of its own, so this signal does not reach it — the sibling's own handler does, and it
+  // already knows how. Windows is the usual exception: with no process groups to signal, the
+  // taskkill /t below fells the tree under the sibling too and its handler never runs.
   if (process.platform === "win32") {
     if (signal !== "SIGTERM") return; // the first taskkill /f already felled the whole tree
     try { execFileSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: ["ignore", "ignore", "inherit"] }); }

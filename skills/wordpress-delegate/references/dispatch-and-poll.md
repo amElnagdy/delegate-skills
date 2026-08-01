@@ -5,8 +5,15 @@ preamble, and dispatches through the chosen sibling's own `relay.mjs`, which own
 mechanic. Your job collapses to: run one command, then read one file.
 
 This relay launches **no implementer CLI of its own**. It shells out to `node` (for the sibling) and
-`git`, and nothing else. Every guarantee about sandboxes, sessions, streaming, and process-tree kills
-is the sibling's, unchanged — this layer adds the routing decision and passes the rest through.
+`git`, and nothing else. Every guarantee about sandboxes, sessions, and streaming is the sibling's,
+unchanged — this layer adds the routing decision and passes the rest through.
+
+It does terminate one process: the sibling relay it spawned. A watchdog backstop and signal
+forwarding are impossible without that, so it is an owned exception, and a bounded one — reaching
+past the sibling to the implementer CLI is the sibling's own handler's job. (Windows is the usual
+exception: with no process groups to signal, the `taskkill /t` that fells the sibling fells the tree
+under it, and the sibling's handler never runs.) That is also the only case where this relay
+overrides the sibling's verdict — it did the killing, so the sibling could not know why it died.
 
 ## Before the first run: check the siblings
 

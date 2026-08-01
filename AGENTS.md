@@ -69,11 +69,18 @@ the skill's `relay.mjs`.
   built-ins only, no dependencies, no network calls of its own, no credentials, no telemetry. New
   scripts must hold the same line, and the README's trust section must stay accurate.
 - **A domain skill routes; it does not re-implement.** `wordpress-delegate` dispatches through a
-  sibling's `relay.mjs` rather than launching a CLI, so dispatch, polling, sandboxes, sessions, and
-  the process-tree kill stay owned by exactly one file per implementer. A domain relay that grew its
-  own version preflight, its own stream parser, or its own kill logic would be a bug, not a feature.
-  Its routing table is the extension point: one row per lane, and nothing else in the file knows the
-  lane names.
+  sibling's `relay.mjs` rather than launching a CLI, so the version preflight, the stream parser, and
+  the argv and sandbox translation for a given CLI stay owned by exactly one file per implementer. A
+  domain relay that grew its own copy of any of those would be a bug, not a feature. Its routing
+  table is the extension point: one row per lane, and nothing else in the file knows the lane names.
+- **Killing its own child is the one exception, and it is bounded.** A domain relay owns a watchdog
+  backstop and forwards `SIGTERM`/`SIGINT`/`SIGHUP`, and neither is possible without killing the
+  process it spawned. It kills exactly one thing — the sibling relay — and the sibling's own handler
+  is what reaches the implementer CLI, which leads a process group of its own. (On Windows there are
+  no process groups to signal, so the `taskkill /t` that fells the sibling fells the tree under it
+  too; the sibling's handler does not get to run. Same asymmetry every relay here already has.) That
+  is also the only case where a domain relay may override the sibling's verdict: it did the killing,
+  so the sibling could not know why it died.
 
 ## Before publishing a change
 

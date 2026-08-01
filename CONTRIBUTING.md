@@ -30,10 +30,16 @@ working tree, nothing commits, Node built-ins only, and autonomy is still stated
 own terms. Three extra rules keep it from becoming a second implementation of the loop:
 
 - **It launches no implementer CLI.** It shells out to `node` (for the sibling) and `git`. A domain
-  relay that grew its own version preflight, stream parser, or process-tree kill has forked the loop.
+  relay that grew its own version preflight, stream parser, or CLI argv and sandbox translation has
+  forked the loop.
+- **It kills its own child, and only its own child.** A watchdog backstop and signal forwarding both
+  need it, so this is an owned exception rather than a forked mechanic — but the domain relay
+  terminates the sibling relay and stops there. Reaching past the sibling to the implementer CLI is
+  the sibling's job, and it already does it. (Windows is the usual exception: with no process groups
+  to signal, the `taskkill /t` that fells the sibling fells everything under it.)
 - **The sibling's result is the authority.** Lift the contract fields, embed the sibling's own result
   verbatim, and override the verdict only where the domain relay did the killing and the sibling
-  could not know.
+  could not know — the one case the rule above creates.
 - **Routing is a table, and the table is the extension point.** One row per lane; adding a lane must
   not require touching anything else in the file.
 
