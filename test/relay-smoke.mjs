@@ -1807,6 +1807,47 @@ if (WIN) {
     const globalPath = join(cfgHome, ".config", "delegate-skills", "config.json");
     check("global config file created", existsSync(globalPath));
 
+    const linkedGlobalTarget = join(fleetRoot, "linked-global");
+    mkdirSync(linkedGlobalTarget);
+    const linkedGlobalFile = join(linkedGlobalTarget, "config.json");
+    writeFileSync(linkedGlobalFile, `${JSON.stringify(good, null, 2)}\n`);
+    if (WIN) {
+      rmSync(dirname(globalPath), { recursive: true, force: true });
+      symlinkSync(linkedGlobalTarget, dirname(globalPath), "junction");
+    } else {
+      rmSync(globalPath);
+      symlinkSync(linkedGlobalFile, globalPath);
+    }
+    const linkedGlobalLoad = spawnSync(
+      process.execPath,
+      [join(setupDir, "config.mjs"), "load", "--cwd", bare],
+      { encoding: "utf8", env: process.env },
+    );
+    let linkedGlobalMap = null;
+    try {
+      linkedGlobalMap = JSON.parse(linkedGlobalLoad.stdout);
+    } catch {
+      linkedGlobalMap = null;
+    }
+    check(
+      "config load follows a global config symlink",
+      linkedGlobalLoad.status === 0 &&
+        linkedGlobalMap?.lanes?.feature?.implementer === "opencode" &&
+        linkedGlobalMap?.lanes?.feature?.source === "global",
+    );
+
+    writeFileSync(linkedGlobalFile, "GLOBAL_PARSE_DETAIL_SENTINEL");
+    const invalidLinkedGlobal = spawnSync(
+      process.execPath,
+      [join(setupDir, "config.mjs"), "load", "--cwd", bare],
+      { encoding: "utf8", env: process.env },
+    );
+    check(
+      "global config keeps detailed JSON parse errors",
+      invalidLinkedGlobal.status === 2 && /GLOBAL_/.test(invalidLinkedGlobal.stderr),
+    );
+    writeFileSync(linkedGlobalFile, `${JSON.stringify(good, null, 2)}\n`);
+
     // Phase 2: --lane resolve / mismatch / flag override (global map only so far).
     const laneResolve = spawnSync(
       process.execPath,
@@ -2096,7 +2137,16 @@ if (WIN) {
     writeFileSync(join(escapeRepo, ".git", "HEAD"), "ref: refs/heads/master\n");
     writeFileSync(join(escapeRepo, ".git", "config"), "[core]\n\trepositoryformatversion = 0\n");
     try {
-      symlinkSync(escapeOutside, join(escapeRepo, ".delegate"));
+      symlinkSync(escapeOutside, join(escapeRepo, ".delegate"), WIN ? "junction" : "dir");
+      const escapeRead = spawnSync(
+        process.execPath,
+        [join(setupDir, "config.mjs"), "load", "--cwd", escapeRepo],
+        { encoding: "utf8", env: process.env },
+      );
+      check(
+        "config load rejects symlinked .delegate",
+        escapeRead.status === 2 && /symlink/.test(escapeRead.stderr),
+      );
       const escapeWrite = spawnSync(
         process.execPath,
         [join(setupDir, "config.mjs"), "write", "--scope", "project", "--cwd", escapeRepo, projectFile],
@@ -2174,6 +2224,133 @@ if (WIN) {
     check(
       "lane resolve: project config changes invalidate approval",
       rejectChangedProject.status === 2 && /project fleet config is not trusted/.test(rejectChangedProject.stderr),
+    );
+
+    const delegateDir = join(cfgRepo, ".delegate");
+    const projectConfig = join(delegateDir, "config.json");
+    const secretPrefix = "AKIA_READ_ORACLE_SENTINEL";
+    const secretFile = join(fleetRoot, "victim-secret.txt");
+    writeFileSync(secretFile, `${secretPrefix}_DO_NOT_DISCLOSE\n`);
+    rmSync(projectConfig, { force: true });
+    try {
+      symlinkSync(secretFile, projectConfig);
+      const escapingConfigRead = spawnSync(
+        process.execPath,
+        [join(setupDir, "config.mjs"), "load", "--cwd", cfgRepo],
+        { encoding: "utf8", env: process.env },
+      );
+      check(
+        "config load rejects an escaping project config symlink without leaking target bytes",
+        escapingConfigRead.status === 2 &&
+          /refusing to read/.test(escapingConfigRead.stderr) &&
+          !escapingConfigRead.stderr.includes(secretPrefix.slice(0, 10)),
+      );
+    } catch (error) {
+      check(`project config symlink read guard runnable (${error.code || error.message})`, WIN);
+    }
+
+    // A symlink whose target stays inside the repo passes the containment check, so the
+    // regular-file test is the only thing refusing it. Point it at a VALID config so a
+    // regression reads it successfully (status 0) instead of failing for some other reason.
+    rmSync(projectConfig, { force: true });
+    const insideTarget = join(cfgRepo, "inside-target.json");
+    writeFileSync(
+      insideTarget,
+      JSON.stringify({ version: "delegate-fleet.v1", lanes: { inside: { implementer: "codex" } } }),
+    );
+    try {
+      symlinkSync(insideTarget, projectConfig);
+      const insideLinkRead = spawnSync(
+        process.execPath,
+        [join(setupDir, "config.mjs"), "load", "--cwd", cfgRepo],
+        { encoding: "utf8", env: process.env },
+      );
+      check(
+        "config load refuses a project config symlink that stays inside the repository",
+        insideLinkRead.status === 2 && /not a regular file/.test(insideLinkRead.stderr),
+      );
+    } catch (error) {
+      check(`inside-repo config symlink guard runnable (${error.code || error.message})`, WIN);
+    }
+
+    // A dangling symlink must reach the sanitized message, not a raw ENOENT from realpath.
+    rmSync(projectConfig, { force: true });
+    try {
+      symlinkSync(join(cfgRepo, "no-such-target.json"), projectConfig);
+      const danglingRead = spawnSync(
+        process.execPath,
+        [join(setupDir, "config.mjs"), "load", "--cwd", cfgRepo],
+        { encoding: "utf8", env: process.env },
+      );
+      check(
+        "config load reports a dangling project config symlink without a raw fs error",
+        danglingRead.status === 2 &&
+          /not a regular file/.test(danglingRead.stderr) &&
+          !/ENOENT/.test(danglingRead.stderr),
+      );
+    } catch (error) {
+      check(`dangling config symlink guard runnable (${error.code || error.message})`, WIN);
+    }
+
+    rmSync(projectConfig, { force: true });
+    rmSync(insideTarget, { force: true });
+    writeFileSync(projectConfig, "PROJECT_PARSE_SECRET_SENTINEL");
+    const invalidProjectJson = spawnSync(
+      process.execPath,
+      [join(setupDir, "config.mjs"), "load", "--cwd", cfgRepo],
+      { encoding: "utf8", env: process.env },
+    );
+    check(
+      "project config JSON errors omit repository-supplied bytes",
+      invalidProjectJson.status === 2 &&
+        /invalid JSON/.test(invalidProjectJson.stderr) &&
+        !/PROJECT_PARSE_SECRET/.test(invalidProjectJson.stderr),
+    );
+
+    writeFileSync(projectConfig, JSON.stringify({ version: "SCHEMA_SECRET_SENTINEL", lanes: {} }));
+    const invalidProjectSchema = spawnSync(
+      process.execPath,
+      [join(setupDir, "config.mjs"), "load", "--cwd", cfgRepo],
+      { encoding: "utf8", env: process.env },
+    );
+    check(
+      "project config schema errors omit repository-supplied values",
+      invalidProjectSchema.status === 2 &&
+        /invalid schema/.test(invalidProjectSchema.stderr) &&
+        !/SCHEMA_SECRET/.test(invalidProjectSchema.stderr),
+    );
+
+    if (!WIN) {
+      rmSync(projectConfig, { force: true });
+      const mkfifo = spawnSync("mkfifo", [projectConfig], { encoding: "utf8" });
+      check("project config FIFO fixture created", mkfifo.status === 0);
+      if (mkfifo.status === 0) {
+        const fifoRead = spawnSync(
+          process.execPath,
+          [join(setupDir, "config.mjs"), "load", "--cwd", cfgRepo],
+          { encoding: "utf8", env: process.env, timeout: 2000 },
+        );
+        check(
+          "config load rejects a project config FIFO without hanging",
+          fifoRead.status === 2 &&
+            fifoRead.error?.code !== "ETIMEDOUT" &&
+            /regular file/.test(fifoRead.stderr),
+        );
+      }
+    }
+
+    rmSync(projectConfig, { force: true });
+    writeFileSync(projectConfig, Buffer.alloc(256 * 1024 + 1, "{"));
+    const oversizedProject = spawnSync(
+      process.execPath,
+      [join(setupDir, "config.mjs"), "load", "--cwd", cfgRepo],
+      { encoding: "utf8", env: process.env },
+    );
+    check(
+      "config load rejects an oversized project config before parsing",
+      oversizedProject.status === 2 &&
+        /exceeds the 256 KiB size limit/.test(oversizedProject.stderr) &&
+        !/invalid JSON|invalid schema/.test(oversizedProject.stderr),
     );
   } finally {
     if (prevHome === undefined) delete process.env.HOME;

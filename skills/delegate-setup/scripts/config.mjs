@@ -12,10 +12,15 @@
  */
 
 import {
+  closeSync,
+  constants as fsConstants,
   existsSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
+  readSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -41,6 +46,13 @@ import {
 
 /** Same ceiling relays use for --timeout (Node setTimeout max ~24.8 days). */
 const MAX_TIMER_MS = 2_147_483_647;
+
+// Fleet maps are small; this bounds memory and work on hostile project files.
+const MAX_CONFIG_BYTES = 256 * 1024;
+const NONBLOCKING_READ_FLAGS = fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK ?? 0);
+const PROJECT_READ_FLAGS =
+  NONBLOCKING_READ_FLAGS |
+  (process.platform === "win32" ? 0 : (fsConstants.O_NOFOLLOW ?? 0));
 
 const HELP = `config.mjs — load / validate / write delegate-fleet.v1 lane maps
 
@@ -278,6 +290,39 @@ function validateModelOrProvider(implementer, field, value, laneName, label) {
   return null;
 }
 
+function lstatProjectEntry(path) {
+  try {
+    return lstatSync(path);
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+function assertProjectPathContained(root, path, operation) {
+  const realRoot = realpathSync(root);
+  const realPath = realpathSync(path);
+  const rel = relative(realRoot, realPath);
+  if (!rel || rel.startsWith("..") || isAbsolute(rel)) {
+    throw new Error(`refusing to ${operation}: project path resolves outside the git repository`);
+  }
+  return rel;
+}
+
+function assertSafeProjectDelegateDirectory(root, delegateDir, operation) {
+  const stat = lstatSync(delegateDir);
+  if (stat.isSymbolicLink()) {
+    throw new Error(`refusing to ${operation}: .delegate is a symlink`);
+  }
+  if (!stat.isDirectory()) {
+    throw new Error(`refusing to ${operation}: .delegate is not a directory`);
+  }
+  const rel = assertProjectPathContained(root, delegateDir, operation);
+  if (rel !== ".delegate" && !rel.startsWith(`.delegate${sep}`)) {
+    throw new Error(`refusing to ${operation}: unexpected .delegate path`);
+  }
+}
+
 /**
  * Refuse project writes that escape the git root via a symlinked `.delegate`.
  */
@@ -285,30 +330,64 @@ export function assertSafeProjectConfigPath(cwd) {
   const root = findGitRoot(cwd);
   if (!root) throw new Error("project scope requires a git repository (--cwd)");
   const delegateDir = join(root, ".delegate");
-  if (existsSync(delegateDir) && lstatSync(delegateDir).isSymbolicLink()) {
-    throw new Error("refusing to write: .delegate is a symlink");
-  }
-  mkdirSync(delegateDir, { recursive: true });
-  if (lstatSync(delegateDir).isSymbolicLink()) {
-    throw new Error("refusing to write: .delegate is a symlink");
-  }
-  const realRoot = realpathSync(root);
-  const realDelegate = realpathSync(delegateDir);
-  const rel = relative(realRoot, realDelegate);
-  if (!rel || rel.startsWith("..") || isAbsolute(rel)) {
-    throw new Error("refusing to write: .delegate resolves outside the git repository");
-  }
-  if (rel !== ".delegate" && !rel.startsWith(`.delegate${sep}`)) {
-    throw new Error("refusing to write: unexpected .delegate path");
-  }
+  if (!lstatProjectEntry(delegateDir)) mkdirSync(delegateDir, { recursive: true });
+  assertSafeProjectDelegateDirectory(root, delegateDir, "write");
   return join(delegateDir, "config.json");
+}
+
+function readBoundedConfigBytes(path, flags) {
+  let descriptor;
+  try {
+    descriptor = openSync(path, flags);
+    const stat = fstatSync(descriptor);
+    if (!stat.isFile()) throw new Error(`${path}: expected a regular file`);
+    if (stat.size > MAX_CONFIG_BYTES) {
+      throw new Error(`${path}: exceeds the ${MAX_CONFIG_BYTES / 1024} KiB size limit`);
+    }
+    const raw = Buffer.alloc(stat.size);
+    let offset = 0;
+    while (offset < raw.length) {
+      const bytesRead = readSync(descriptor, raw, offset, raw.length - offset, offset);
+      if (bytesRead === 0) break;
+      offset += bytesRead;
+    }
+    return offset === raw.length ? raw : raw.subarray(0, offset);
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
 }
 
 export function readConfigFile(path) {
   if (!path || !existsSync(path)) return null;
-  const raw = readFileSync(path);
+  const raw = readBoundedConfigBytes(path, NONBLOCKING_READ_FLAGS);
   const parsed = parseConfigDocument(raw.toString("utf8"), path);
   if (!parsed.ok) throw new Error(parsed.error);
+  return { path, document: parsed.document, digest: configDigest(raw) };
+}
+
+function readProjectConfigFile(path) {
+  // projectConfigPath() built this as <git-root>/.delegate/config.json, so the root is
+  // recoverable by name - cheaper than a second `git rev-parse` on every dispatch.
+  const root = dirname(dirname(path));
+  const delegateDir = dirname(path);
+  if (!lstatProjectEntry(delegateDir)) return null;
+  assertSafeProjectDelegateDirectory(root, delegateDir, "read");
+  const configStat = lstatProjectEntry(path);
+  if (!configStat) return null;
+  // Type first: containment resolves the real path, which throws a raw ENOENT on a
+  // dangling symlink instead of the sanitized message a repo-supplied file must get.
+  if (!configStat.isFile()) {
+    throw new Error(`refusing to read: ${path} is not a regular file`);
+  }
+  assertProjectPathContained(root, path, "read");
+  const raw = readBoundedConfigBytes(path, PROJECT_READ_FLAGS);
+  const parsed = parseConfigDocument(raw.toString("utf8"), path);
+  if (!parsed.ok) {
+    const reason = parsed.error.startsWith(`${path}: invalid JSON (`)
+      ? "invalid JSON"
+      : "invalid schema";
+    throw new Error(`${path}: ${reason}`);
+  }
   return { path, document: parsed.document, digest: configDigest(raw) };
 }
 
@@ -352,7 +431,7 @@ export function loadEffective(cwd = process.cwd()) {
   const globalPath = globalConfigPath();
   const projectPath = projectConfigPath(cwd);
   const globalFile = readConfigFile(globalPath);
-  const projectFile = projectPath ? readConfigFile(projectPath) : null;
+  const projectFile = projectPath ? readProjectConfigFile(projectPath) : null;
   const projectTrusted = Boolean(projectFile && projectConfigTrusted(cwd, projectFile.digest));
   const effective = effectiveLanes(globalFile?.document, projectFile?.document);
   return {
