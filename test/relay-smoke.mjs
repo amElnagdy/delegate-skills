@@ -361,6 +361,43 @@ class FakeCli {
 `;
 
 const scratch = mkdtempSync(join(tmpdir(), "relay-smoke-"));
+
+// An empty option value must not read as "flag omitted". next() accepted whatever
+// argv provided and every option is falsy-tested at its use site, so "" meant
+// --lane fell back to the write-capable default and --session / --project /
+// --conversation silently started fresh work the operator asked to attach to.
+// parseArgs rejects before any implementer runs, so no fake CLI is needed here.
+{
+  const emptyBrief = join(scratch, "empty-value-brief.txt");
+  writeFileSync(emptyBrief, "do a thing\n");
+  const rejectsEmpty = (skill, flag) => {
+    const r = spawnSync(
+      process.execPath,
+      [relayPath(skill), "--brief", emptyBrief, "--cd", scratch, flag, ""],
+      { encoding: "utf8" },
+    );
+    return r.status !== 0 && r.stderr.includes(`${flag} requires a value`);
+  };
+  for (const skill of SKILLS) {
+    check(`${skill} relay rejects an empty --lane`, rejectsEmpty(skill, "--lane"));
+  }
+  // The same hole in options this PR did not introduce.
+  check("kimi relay rejects an empty --session", rejectsEmpty("kimi", "--session"));
+  check("agy relay rejects an empty --project", rejectsEmpty("agy", "--project"));
+  check("agy relay rejects an empty --conversation", rejectsEmpty("agy", "--conversation"));
+  for (const skill of SKILLS) {
+    const malformed = spawnSync(
+      process.execPath,
+      [relayPath(skill), "--brief", emptyBrief, "--cd", scratch, "--lane", "../../etc"],
+      { encoding: "utf8" },
+    );
+    check(
+      `${skill} relay rejects a malformed lane name before resolving`,
+      malformed.status !== 0 && /invalid --lane/.test(malformed.stderr),
+    );
+  }
+}
+
 const shimDir = join(scratch, "shim");
 mkdirSync(shimDir);
 writeFileSync(join(shimDir, "fake-cli.cjs"), FAKE);

@@ -90,8 +90,16 @@ const AUTONOMY_MODES = new Set(["workspace-write", "read-only", "full-access"]);
 
 const IMPLEMENTER_KEY = "grok";
 
+/** Lane names accepted by delegate-setup; see its implementers.mjs LANE_NAME. */
+const LANE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
 function applyFleetLane(opts, flagged) {
-  if (!opts.lane) return;
+  if (opts.lane === null) return;
+  // Reject a malformed name here instead of spawning a subprocess to be told
+  // the same thing, and so the message is identical across all ten relays.
+  if (!LANE_NAME_RE.test(opts.lane)) {
+    fail(`invalid --lane ${JSON.stringify(opts.lane)} (letters or digits, then . _ -)`);
+  }
   const script = join(dirname(fileURLToPath(import.meta.url)), "../../delegate-setup/scripts/lane.mjs");
   if (!existsSync(script)) {
     fail("--lane requires the delegate-setup skill installed beside this relay");
@@ -151,7 +159,11 @@ function parseArgs(argv) {
     const arg = argv[i];
     const next = () => {
       const value = argv[i + 1];
-      if (value === undefined) fail(`${arg} requires a value`);
+      // An empty value is not a value. Every option here is falsy-tested at its
+      // use site, so "" silently reads as "flag omitted": --lane would fall back
+      // to the write-capable default, --session/--project would start fresh work
+      // the operator asked to attach to.
+      if (value === undefined || value === "") fail(`${arg} requires a value`);
       i += 1;
       return value;
     };
