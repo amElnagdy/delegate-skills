@@ -77,30 +77,94 @@ export function globalConfigPath() {
   return join(base, "delegate-skills", "config.json");
 }
 
-export function findGitRoot(cwd) {
-  const r = spawnSync("git", ["-C", cwd, "rev-parse", "--show-toplevel"], {
+/** Repository-shaping environment: set means a repo is in play even if git failed. */
+const GIT_ENV_VARS = ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR"];
+
+/** A local rev-parse answers instantly; this only bounds a wedged or hung git. */
+const GIT_PROBE_TIMEOUT_MS = 10_000;
+const GIT_PROBE_MAX_BUFFER = 1024 * 1024;
+
+/** Backstop for the marker walk; the root check already terminates it. */
+const MAX_GIT_WALK_DEPTH = 256;
+
+function hasEntry(path) {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Did git fail because there is no repository, or because it refused to serve one?
+ * Answered by looking for the marker ourselves - git's stderr is localized and
+ * version-dependent, so it is not a contract we can parse.
+ */
+function repositoryMarkerNear(cwd) {
+  if (GIT_ENV_VARS.some((name) => process.env[name])) return true;
+  let dir = resolve(cwd);
+  for (let depth = 0; depth < MAX_GIT_WALK_DEPTH; depth += 1) {
+    // Linked worktrees and submodules use a .git FILE, so accept any entry type.
+    if (hasEntry(join(dir, ".git"))) return true;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return false;
+}
+
+function gitFailureMessage(cwd, reason) {
+  return (
+    `cannot determine the git repository for ${cwd}: ${reason}. ` +
+    "A project fleet config may apply here, so falling back to the global map would risk " +
+    "running a lane the project meant to replace. Common causes: dubious repository ownership " +
+    "(git config --global --add safe.directory <path>), a corrupt .git/config, or git missing from PATH."
+  );
+}
+
+/**
+ * One bounded probe for both git paths this file needs. Returns null ONLY when
+ * this genuinely is not a repository; throws when git refused to serve one,
+ * because a silent global-only fallback swaps a trusted read-only project lane
+ * for a same-named global lane that may be write-capable.
+ * @returns {{ root: string, gitDir: string } | null}
+ */
+function gitContext(cwd) {
+  const r = spawnSync("git", ["-C", cwd, "rev-parse", "--show-toplevel", "--absolute-git-dir"], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
+    timeout: GIT_PROBE_TIMEOUT_MS,
+    // SIGTERM alone never escalates for a child that ignores it.
+    killSignal: "SIGKILL",
+    maxBuffer: GIT_PROBE_MAX_BUFFER,
   });
-  if (r.status !== 0) return null;
-  const root = (r.stdout || "").trim();
-  return root || null;
+  if (!r.error && r.status === 0) {
+    const lines = (r.stdout || "").split("\n").map((line) => line.trim()).filter(Boolean);
+    if (lines.length >= 2) return { root: lines[0], gitDir: lines[1] };
+    throw new Error(gitFailureMessage(cwd, "git reported an unexpected repository layout"));
+  }
+  if (!repositoryMarkerNear(cwd)) return null;
+  let reason;
+  if (r.error?.code === "ETIMEDOUT") reason = `git did not respond within ${GIT_PROBE_TIMEOUT_MS} ms`;
+  else if (r.error?.code === "ENOENT") reason = "git is not installed or not on PATH";
+  else if (r.error) reason = `git could not run (${r.error.code || r.error.message})`;
+  else if (r.signal) reason = `git was terminated by ${r.signal}`;
+  else reason = `git exited with status ${r.status}`;
+  throw new Error(gitFailureMessage(cwd, reason));
+}
+
+export function findGitRoot(cwd) {
+  return gitContext(cwd)?.root ?? null;
 }
 
 export function projectConfigPath(cwd) {
-  const root = findGitRoot(cwd);
-  if (!root) return null;
-  return join(root, ".delegate", "config.json");
+  const git = gitContext(cwd);
+  return git ? join(git.root, ".delegate", "config.json") : null;
 }
 
-function projectTrustPath(cwd) {
-  const r = spawnSync("git", ["-C", cwd, "rev-parse", "--absolute-git-dir"], {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  if (r.status !== 0) return null;
-  const gitDir = (r.stdout || "").trim();
-  return gitDir ? join(gitDir, "delegate-skills", "project-config.sha256") : null;
+function projectTrustPath(git) {
+  return git ? join(git.gitDir, "delegate-skills", "project-config.sha256") : null;
 }
 
 function fail(message) {
@@ -326,8 +390,8 @@ function assertSafeProjectDelegateDirectory(root, delegateDir, operation) {
 /**
  * Refuse project writes that escape the git root via a symlinked `.delegate`.
  */
-export function assertSafeProjectConfigPath(cwd) {
-  const root = findGitRoot(cwd);
+export function assertSafeProjectConfigPath(cwd, git = gitContext(cwd)) {
+  const root = git?.root;
   if (!root) throw new Error("project scope requires a git repository (--cwd)");
   const delegateDir = join(root, ".delegate");
   if (!lstatProjectEntry(delegateDir)) mkdirSync(delegateDir, { recursive: true });
@@ -395,14 +459,14 @@ function configDigest(raw) {
   return createHash("sha256").update(raw).digest("hex");
 }
 
-function projectConfigTrusted(cwd, digest) {
-  const trustPath = projectTrustPath(cwd);
+function projectConfigTrusted(git, digest) {
+  const trustPath = projectTrustPath(git);
   if (!digest || !trustPath || !existsSync(trustPath)) return false;
   return readFileSync(trustPath, "utf8").trim() === digest;
 }
 
-function trustProjectConfig(cwd, digest) {
-  const trustPath = projectTrustPath(cwd);
+function trustProjectConfig(git, digest) {
+  const trustPath = projectTrustPath(git);
   if (!trustPath) throw new Error("project scope requires writable git metadata");
   mkdirSync(dirname(trustPath), { recursive: true });
   writeFileSync(trustPath, `${digest}\n`, "utf8");
@@ -429,10 +493,13 @@ export function effectiveLanes(globalDoc, projectDoc) {
 
 export function loadEffective(cwd = process.cwd()) {
   const globalPath = globalConfigPath();
-  const projectPath = projectConfigPath(cwd);
+  // One git probe for the whole load: the config path and the trust marker must
+  // describe the same repository, and re-probing risks two different answers.
+  const git = gitContext(cwd);
+  const projectPath = git ? join(git.root, ".delegate", "config.json") : null;
   const globalFile = readConfigFile(globalPath);
   const projectFile = projectPath ? readProjectConfigFile(projectPath) : null;
-  const projectTrusted = Boolean(projectFile && projectConfigTrusted(cwd, projectFile.digest));
+  const projectTrusted = Boolean(projectFile && projectConfigTrusted(git, projectFile.digest));
   const effective = effectiveLanes(globalFile?.document, projectFile?.document);
   return {
     version: CONFIG_VERSION,
@@ -517,10 +584,13 @@ function main(argv) {
       if (!file) fail("write needs a JSON file path");
       const parsed = parseConfigDocument(readFileSync(resolve(file), "utf8"), file);
       if (!parsed.ok) fail(parsed.error);
+      // Probe once so the config path and the trust marker cannot describe
+      // two different repositories.
+      const git = scope === "project" ? gitContext(cwd) : null;
       const target =
-        scope === "global" ? globalConfigPath() : assertSafeProjectConfigPath(cwd);
+        scope === "global" ? globalConfigPath() : assertSafeProjectConfigPath(cwd, git);
       const writtenDigest = writeAtomic(target, parsed.document);
-      if (scope === "project") trustProjectConfig(cwd, writtenDigest);
+      if (scope === "project") trustProjectConfig(git, writtenDigest);
       process.stdout.write(`${JSON.stringify({
         ok: true,
         path: target,

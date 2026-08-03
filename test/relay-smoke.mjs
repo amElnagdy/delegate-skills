@@ -2352,6 +2352,120 @@ if (WIN) {
         /exceeds the 256 KiB size limit/.test(oversizedProject.stderr) &&
         !/invalid JSON|invalid schema/.test(oversizedProject.stderr),
     );
+    // Git-context classification. Shims are shell scripts, so POSIX only; the
+    // behaviour they guard (never silently swap a project lane for a global one)
+    // is platform-independent.
+    if (!WIN) {
+      const gitRepo = join(fleetRoot, "git-ctx-repo");
+      mkdirSync(gitRepo);
+      spawnSync("git", ["init", "-q", gitRepo], { encoding: "utf8" });
+      spawnSync("git", ["-C", gitRepo, "commit", "-q", "--allow-empty", "-m", "i"], {
+        encoding: "utf8",
+        env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" },
+      });
+
+      // Global `guard` lane is write-capable; the trusted project lane replacing it
+      // is read-only. If git detection degrades, the global lane must NOT take over.
+      const gitGlobal = join(cfgHome, ".config", "delegate-skills", "config.json");
+      writeFileSync(gitGlobal, `${JSON.stringify({
+        version: "delegate-fleet.v1",
+        lanes: { guard: { implementer: "codex", sandbox: "danger-full-access" } },
+      }, null, 2)}\n`);
+      const gitProjectSrc = join(fleetRoot, "git-ctx-project.json");
+      writeFileSync(gitProjectSrc, `${JSON.stringify({
+        version: "delegate-fleet.v1",
+        lanes: { guard: { implementer: "codex", sandbox: "read-only" } },
+      }, null, 2)}\n`);
+      spawnSync(
+        process.execPath,
+        [join(setupDir, "config.mjs"), "write", "--scope", "project", "--cwd", gitRepo, gitProjectSrc],
+        { encoding: "utf8", env: process.env },
+      );
+      const trustedResolve = spawnSync(
+        process.execPath,
+        [join(setupDir, "lane.mjs"), "resolve", "--cwd", gitRepo, "--lane", "guard", "--implementer", "codex"],
+        { encoding: "utf8", env: process.env },
+      );
+      let trustedLane = null;
+      try {
+        trustedLane = JSON.parse(trustedResolve.stdout);
+      } catch {
+        trustedLane = null;
+      }
+      check(
+        "git context: trusted project lane resolves read-only before any git failure",
+        trustedResolve.status === 0 &&
+          trustedLane?.source === "project" &&
+          trustedLane?.dials?.sandbox === "read-only",
+      );
+
+      const shimDir = join(fleetRoot, "git-shims");
+      mkdirSync(shimDir);
+      const shimEnv = (dir) => ({ ...process.env, PATH: `${dir}${delimiter}${process.env.PATH}` });
+
+      const refusingGit = join(shimDir, "git");
+      writeFileSync(refusingGit, "#!/bin/sh\necho \"fatal: detected dubious ownership\" >&2\nexit 128\n");
+      chmodSync(refusingGit, 0o755);
+      const refusedResolve = spawnSync(
+        process.execPath,
+        [join(setupDir, "lane.mjs"), "resolve", "--cwd", gitRepo, "--lane", "guard", "--implementer", "codex"],
+        { encoding: "utf8", env: shimEnv(shimDir) },
+      );
+      check(
+        "git context: a refused repository fails loudly instead of falling back to the global lane",
+        refusedResolve.status === 2 &&
+          /cannot determine the git repository/.test(refusedResolve.stderr) &&
+          !/danger-full-access/.test(refusedResolve.stdout),
+      );
+      check(
+        "git context: the refusal message names an actionable cause",
+        /safe\.directory/.test(refusedResolve.stderr),
+      );
+
+      // Same broken git, but genuinely outside a repository: the global map must
+      // still load, otherwise every non-repo dispatch breaks. This has to live
+      // outside the checkout - fleetRoot is inside it, so the marker walk would
+      // (correctly) find this repo's own .git and refuse.
+      const outsideDir = mkdtempSync(join(tmpdir(), "delegate-outside-"));
+      try {
+        const outsideLoad = spawnSync(
+          process.execPath,
+          [join(setupDir, "config.mjs"), "load", "--cwd", outsideDir],
+          { encoding: "utf8", env: shimEnv(shimDir) },
+        );
+        let outsideMap = null;
+        try {
+          outsideMap = JSON.parse(outsideLoad.stdout);
+        } catch {
+          outsideMap = null;
+        }
+        check(
+          "git context: a broken git outside any repository still loads the global map",
+          outsideLoad.status === 0 &&
+            outsideMap?.projectPath === null &&
+            outsideMap?.lanes?.guard?.implementer === "codex",
+        );
+      } finally {
+        rmSync(outsideDir, { recursive: true, force: true });
+      }
+
+      const wedgedDir = join(fleetRoot, "git-wedged");
+      mkdirSync(wedgedDir);
+      const wedgedGit = join(wedgedDir, "git");
+      writeFileSync(wedgedGit, "#!/bin/sh\n/bin/sleep 45\n");
+      chmodSync(wedgedGit, 0o755);
+      const wedgedStart = Date.now();
+      const wedgedLoad = spawnSync(
+        process.execPath,
+        [join(setupDir, "config.mjs"), "load", "--cwd", gitRepo],
+        { encoding: "utf8", env: shimEnv(wedgedDir) },
+      );
+      const wedgedElapsed = Date.now() - wedgedStart;
+      check(
+        "git context: a wedged git is bounded rather than hanging the dispatch",
+        wedgedLoad.status === 2 && wedgedElapsed < 30_000 && /did not respond/.test(wedgedLoad.stderr),
+      );
+    }
   } finally {
     if (prevHome === undefined) delete process.env.HOME;
     else process.env.HOME = prevHome;
