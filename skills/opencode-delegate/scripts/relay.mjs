@@ -191,6 +191,16 @@ function parseArgs(argv) {
   if (opts.variant !== null && !SAFE_TOKEN.test(opts.variant)) {
     fail("--variant contains unsupported characters (allowed: letters, digits, . _ : / -)");
   }
+  // These ride the same argv as --model/--variant, and that argv reaches cmd.exe
+  // unquoted on win32 (shell:true for the opencode.cmd shim), so they need the
+  // same token shape. --agent is not an allow-list: opencode supports custom
+  // agents beyond build/plan.
+  if (opts.agent !== null && !SAFE_TOKEN.test(opts.agent)) {
+    fail("--agent contains unsupported characters (allowed: letters, digits, . _ : / -)");
+  }
+  if (opts.session !== null && !SAFE_TOKEN.test(opts.session)) {
+    fail("--session contains unsupported characters (allowed: letters, digits, . _ : / -)");
+  }
   // The watchdog is relay-only (the opencode launch has no timeout flag), so a malformed
   // --timeout must fail loudly here - a silent no-watchdog fallback would be wrong.
   if (opts.timeout !== null && parseDuration(opts.timeout) === null) {

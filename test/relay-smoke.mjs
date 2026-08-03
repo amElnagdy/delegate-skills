@@ -396,6 +396,29 @@ const scratch = mkdtempSync(join(tmpdir(), "relay-smoke-"));
       malformed.status !== 0 && /invalid --lane/.test(malformed.stderr),
     );
   }
+
+  // opencode spawns with shell:true on win32 for the .cmd shim, so every value in
+  // that argv needs a safe token shape - not just the two that already had one.
+  for (const [flag, value] of [["--agent", "build && whoami"], ["--session", "ses_x; rm -rf /"]]) {
+    const injected = spawnSync(
+      process.execPath,
+      [relayPath("opencode"), "--brief", emptyBrief, "--cd", scratch, flag, value],
+      { encoding: "utf8" },
+    );
+    check(
+      `opencode relay rejects a shell-unsafe ${flag}`,
+      injected.status !== 0 && injected.stderr.includes(`${flag} contains unsupported characters`),
+    );
+  }
+  const legitAgent = spawnSync(
+    process.execPath,
+    [relayPath("opencode"), "--brief", emptyBrief, "--cd", scratch, "--agent", "plan"],
+    { encoding: "utf8" },
+  );
+  check(
+    "opencode relay still accepts a legitimate --agent",
+    !/--agent contains unsupported/.test(legitAgent.stderr),
+  );
 }
 
 const shimDir = join(scratch, "shim");
