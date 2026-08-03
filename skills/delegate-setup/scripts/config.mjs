@@ -498,7 +498,18 @@ export function loadEffective(cwd = process.cwd()) {
   const git = gitContext(cwd);
   const projectPath = git ? join(git.root, ".delegate", "config.json") : null;
   const globalFile = readConfigFile(globalPath);
-  const projectFile = projectPath ? readProjectConfigFile(projectPath) : null;
+  // A repo-supplied project file must not take the user's own global map down
+  // with it: `load` still has to render the map so delegate-setup can walk the
+  // operator through fixing it. Dispatch is the caller's call - see projectError.
+  let projectFile = null;
+  let projectError = null;
+  if (projectPath) {
+    try {
+      projectFile = readProjectConfigFile(projectPath);
+    } catch (error) {
+      projectError = error.message || String(error);
+    }
+  }
   const projectTrusted = Boolean(projectFile && projectConfigTrusted(git, projectFile.digest));
   const effective = effectiveLanes(globalFile?.document, projectFile?.document);
   return {
@@ -506,8 +517,11 @@ export function loadEffective(cwd = process.cwd()) {
     globalPath,
     projectPath,
     globalPresent: Boolean(globalFile),
-    projectPresent: Boolean(projectFile),
+    // Present means "there is a project file here", readable or not - otherwise
+    // an unreadable one looks identical to no project config at all.
+    projectPresent: Boolean(projectFile) || projectError !== null,
     projectTrusted,
+    projectError,
     lanes: Object.fromEntries(
       Object.entries(effective).map(([name, { lane, source }]) => [
         name,

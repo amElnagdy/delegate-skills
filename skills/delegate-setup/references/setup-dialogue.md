@@ -11,7 +11,11 @@ When loading existing config:
 3. Otherwise show a **table of effective lanes** from the `lanes` object. Include a Source column (`global` / `project`).
 4. If `projectPresent` is true and `projectTrusted` is false, mark project lanes untrusted and explain
    that they cannot dispatch until the user approves a project write.
-5. Paste both raw JSON files only if the user asks.
+5. If `projectError` is set, the project file exists but could not be read (bad JSON, wrong schema,
+   not a regular file, too large). The listed lanes are global-only, and **no lane can dispatch** —
+   relays fail closed here, because an unreadable project file may have been replacing the very lane
+   being asked for. Report the reason, then offer to fix or remove the file and write it again.
+6. Paste both raw JSON files only if the user asks.
 
 ## Scope
 

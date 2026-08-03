@@ -2144,8 +2144,8 @@ if (WIN) {
         { encoding: "utf8", env: process.env },
       );
       check(
-        "config load rejects symlinked .delegate",
-        escapeRead.status === 2 && /symlink/.test(escapeRead.stderr),
+        "config load reports a symlinked .delegate as an unreadable project config",
+        escapeRead.status === 0 && /symlink/.test(JSON.parse(escapeRead.stdout).projectError || ""),
       );
       const escapeWrite = spawnSync(
         process.execPath,
@@ -2241,9 +2241,9 @@ if (WIN) {
       );
       check(
         "config load rejects an escaping project config symlink without leaking target bytes",
-        escapingConfigRead.status === 2 &&
-          /refusing to read/.test(escapingConfigRead.stderr) &&
-          !escapingConfigRead.stderr.includes(secretPrefix.slice(0, 10)),
+        escapingConfigRead.status === 0 &&
+          /refusing to read/.test(JSON.parse(escapingConfigRead.stdout).projectError || "") &&
+          !escapingConfigRead.stdout.includes(secretPrefix.slice(0, 10)),
       );
     } catch (error) {
       check(`project config symlink read guard runnable (${error.code || error.message})`, WIN);
@@ -2267,7 +2267,8 @@ if (WIN) {
       );
       check(
         "config load refuses a project config symlink that stays inside the repository",
-        insideLinkRead.status === 2 && /not a regular file/.test(insideLinkRead.stderr),
+        insideLinkRead.status === 0 &&
+          /not a regular file/.test(JSON.parse(insideLinkRead.stdout).projectError || ""),
       );
     } catch (error) {
       check(`inside-repo config symlink guard runnable (${error.code || error.message})`, WIN);
@@ -2284,9 +2285,9 @@ if (WIN) {
       );
       check(
         "config load reports a dangling project config symlink without a raw fs error",
-        danglingRead.status === 2 &&
-          /not a regular file/.test(danglingRead.stderr) &&
-          !/ENOENT/.test(danglingRead.stderr),
+        danglingRead.status === 0 &&
+          /not a regular file/.test(JSON.parse(danglingRead.stdout).projectError || "") &&
+          !/ENOENT/.test(danglingRead.stdout),
       );
     } catch (error) {
       check(`dangling config symlink guard runnable (${error.code || error.message})`, WIN);
@@ -2302,9 +2303,9 @@ if (WIN) {
     );
     check(
       "project config JSON errors omit repository-supplied bytes",
-      invalidProjectJson.status === 2 &&
-        /invalid JSON/.test(invalidProjectJson.stderr) &&
-        !/PROJECT_PARSE_SECRET/.test(invalidProjectJson.stderr),
+      invalidProjectJson.status === 0 &&
+        /invalid JSON/.test(JSON.parse(invalidProjectJson.stdout).projectError || "") &&
+        !/PROJECT_PARSE_SECRET/.test(invalidProjectJson.stdout),
     );
 
     writeFileSync(projectConfig, JSON.stringify({ version: "SCHEMA_SECRET_SENTINEL", lanes: {} }));
@@ -2315,9 +2316,9 @@ if (WIN) {
     );
     check(
       "project config schema errors omit repository-supplied values",
-      invalidProjectSchema.status === 2 &&
-        /invalid schema/.test(invalidProjectSchema.stderr) &&
-        !/SCHEMA_SECRET/.test(invalidProjectSchema.stderr),
+      invalidProjectSchema.status === 0 &&
+        /invalid schema/.test(JSON.parse(invalidProjectSchema.stdout).projectError || "") &&
+        !/SCHEMA_SECRET/.test(invalidProjectSchema.stdout),
     );
 
     if (!WIN) {
@@ -2332,9 +2333,9 @@ if (WIN) {
         );
         check(
           "config load rejects a project config FIFO without hanging",
-          fifoRead.status === 2 &&
+          fifoRead.status === 0 &&
             fifoRead.error?.code !== "ETIMEDOUT" &&
-            /regular file/.test(fifoRead.stderr),
+            /regular file/.test(JSON.parse(fifoRead.stdout).projectError || ""),
         );
       }
     }
@@ -2348,10 +2349,54 @@ if (WIN) {
     );
     check(
       "config load rejects an oversized project config before parsing",
-      oversizedProject.status === 2 &&
-        /exceeds the 256 KiB size limit/.test(oversizedProject.stderr) &&
-        !/invalid JSON|invalid schema/.test(oversizedProject.stderr),
+      oversizedProject.status === 0 &&
+        /exceeds the 256 KiB size limit/.test(JSON.parse(oversizedProject.stdout).projectError || "") &&
+        !/invalid JSON|invalid schema/.test(oversizedProject.stdout),
     );
+    // An unreadable project config: `load` degrades to the global map so setup can
+    // still guide a fix, but dispatch must refuse - the unreadable file may have
+    // been replacing the very lane being asked for.
+    // A real repo: a hand-made .git is not one, and git would walk up to the
+    // enclosing checkout instead, leaving this .delegate unread.
+    const brokenRepo = join(fleetRoot, "broken-project-repo");
+    mkdirSync(join(brokenRepo, ".delegate"), { recursive: true });
+    spawnSync("git", ["init", "-q", brokenRepo], { encoding: "utf8" });
+    writeFileSync(join(brokenRepo, ".delegate", "config.json"), "not json at all");
+    const brokenLoad = spawnSync(
+      process.execPath,
+      [join(setupDir, "config.mjs"), "load", "--cwd", brokenRepo],
+      { encoding: "utf8", env: process.env },
+    );
+    let brokenMap = null;
+    try {
+      brokenMap = JSON.parse(brokenLoad.stdout);
+    } catch {
+      brokenMap = null;
+    }
+    check(
+      "unreadable project config still lets load render the global map",
+      brokenLoad.status === 0 &&
+        typeof brokenMap?.projectError === "string" &&
+        brokenMap.projectPresent === true &&
+        brokenMap.projectTrusted === false &&
+        brokenMap?.lanes?.feature?.source === "global",
+    );
+    check(
+      "unreadable project config does not leak its bytes into projectError",
+      !/not json at all/.test(brokenLoad.stdout),
+    );
+    const brokenResolve = spawnSync(
+      process.execPath,
+      [join(setupDir, "lane.mjs"), "resolve", "--cwd", brokenRepo, "--lane", "feature", "--implementer", "opencode"],
+      { encoding: "utf8", env: process.env },
+    );
+    check(
+      "unreadable project config fails dispatch closed instead of using the global lane",
+      brokenResolve.status === 2 &&
+        /project fleet config cannot be read/.test(brokenResolve.stderr) &&
+        !/"dials"/.test(brokenResolve.stdout),
+    );
+
     // Git-context classification. Shims are shell scripts, so POSIX only; the
     // behaviour they guard (never silently swap a project lane for a global one)
     // is platform-independent.

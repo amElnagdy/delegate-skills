@@ -66,6 +66,9 @@ node "<skill-dir>/scripts/config.mjs" load --cwd "$PWD"
   both raw files unless asked.
 - If `projectPresent` is true and `projectTrusted` is false, label the project lanes **untrusted**.
   They cannot dispatch until the user reviews and approves a project write.
+- If `projectError` is set, the project file exists but is unreadable. The map shown is global-only
+  and **nothing can dispatch** until the file is fixed or removed — report the reason and offer to
+  rewrite it.
 
 Details: [references/setup-dialogue.md](references/setup-dialogue.md).
 

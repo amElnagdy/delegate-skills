@@ -79,6 +79,9 @@ node <skill-dir>/scripts/lane.mjs resolve --cwd <dir> --lane <name> --implemente
 
 `load` prints the **effective** map (each lane includes a `source` of `global` or `project`) and
 `projectTrusted`, which reports whether the current project content matches its local approval hash.
+An unreadable project file does not take the global map down with it: `load` still prints the
+global-only map and sets `projectError` to the reason, so setup can walk the user through fixing it.
 `lane.mjs resolve` is what `*-delegate` relays call for `--lane`: it fails loud on a missing
-lane, untrusted project config, or implementer mismatch, and prints relay-native dials
-(e.g. grok `sandbox` → `autonomy`).
+lane, untrusted project config, implementer mismatch, or any `projectError` — an unreadable project
+file may have been replacing the requested lane, so dispatch refuses rather than falling back to the
+global lane of the same name. It prints relay-native dials (e.g. grok `sandbox` → `autonomy`).

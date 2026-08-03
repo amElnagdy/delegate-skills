@@ -48,6 +48,16 @@ export function resolveLaneForRelay(cwd, laneName, implementerKey) {
     throw new Error(`unknown implementer ${JSON.stringify(implementerKey)}`);
   }
   const effective = loadEffective(cwd);
+  // An unreadable project config cannot be inspected for the lane being asked
+  // for, so we cannot tell whether it was meant to replace the global lane of
+  // the same name. Dispatching on the global lane could silently widen the
+  // autonomy the project pinned, so refuse instead of guessing.
+  if (effective.projectError) {
+    throw new Error(
+      `project fleet config cannot be read (${effective.projectError}); ` +
+        "fix or remove it, then approve it with delegate-setup before dispatch",
+    );
+  }
   const entry = effective.lanes[laneName];
   if (!entry) {
     throw new Error(`fleet lane not found: ${laneName}`);
