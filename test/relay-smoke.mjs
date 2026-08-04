@@ -1715,6 +1715,27 @@ if (WIN) {
     );
     rmSync(join(probeDir, "claude"), { force: true });
     rmSync(join(probeDir, "claude.impl.mjs"), { force: true });
+
+    // An empty PATH component is the current directory in POSIX lookup, so a
+    // relay's spawn would find a binary there. Discovery must agree, or it
+    // reports a CLI as missing that dispatch can actually run.
+    const cwdProbe = join(scratch, "discover-cwd");
+    mkdirSync(cwdProbe);
+    writeFileSync(
+      join(cwdProbe, "codex"),
+      '#!/bin/sh\ncase "$1" in --version) echo "9.9.9"; exit 0;; esac\nexit 0\n',
+    );
+    chmodSync(join(cwdProbe, "codex"), 0o755);
+    const cwdDiscover = spawnSync(process.execPath, [join(setupDir, "discover.mjs")], {
+      encoding: "utf8",
+      cwd: cwdProbe,
+      env: { ...process.env, PATH: `${delimiter}${probeDir}` },
+    });
+    const cwdReport = cwdDiscover.status === 0 ? JSON.parse(cwdDiscover.stdout) : null;
+    check(
+      "discover honours an empty PATH component as the current directory",
+      cwdReport?.discovered.find((d) => d.key === "codex")?.version === "9.9.9",
+    );
   }
 
   // Keep fixtures inside the repo tree so sandboxed CI/dev runs can write; seed a
