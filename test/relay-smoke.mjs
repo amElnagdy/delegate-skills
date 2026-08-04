@@ -1649,6 +1649,70 @@ if (WIN) {
     agyReport?.discovered.find(({ key }) => key === "agy")?.version === "1.2.3",
   );
 
+  // Probe hardening. These fixtures trap signals and emit megabytes, which needs
+  // a real interpreter, so POSIX only; the behaviour they pin is platform-neutral.
+  if (!WIN) {
+    const probeDir = join(scratch, "discover-probes");
+    mkdirSync(probeDir);
+    // PATH is deliberately just probeDir, so the fixture cannot reach a real CLI.
+    // That also means no interpreter lookup: exec node by absolute path from a
+    // /bin/sh stub rather than via `env node`.
+    const writeProbe = (name, body) => {
+      const script = join(probeDir, `${name}.impl.mjs`);
+      writeFileSync(script, body);
+      const p = join(probeDir, name);
+      writeFileSync(p, `#!/bin/sh\nexec "${process.execPath}" "${script}" "$@"\n`);
+      chmodSync(p, 0o755);
+      return p;
+    };
+    const runDiscover = () => {
+      const r = spawnSync(process.execPath, [join(setupDir, "discover.mjs")], {
+        encoding: "utf8",
+        env: { ...process.env, PATH: probeDir },
+      });
+      return r.status === 0 ? JSON.parse(r.stdout) : null;
+    };
+    const entry = (report, key) => report?.discovered.find((d) => d.key === key);
+
+    // A CLI that traps SIGTERM: without killSignal the timeout never escalates.
+    writeProbe("kimi", 'process.on("SIGTERM",()=>{});setTimeout(()=>process.exit(0),45000);\n');
+    const wedgedStart = Date.now();
+    const wedgedReport = runDiscover();
+    const wedgedElapsed = Date.now() - wedgedStart;
+    check(
+      "discover bounds a CLI that ignores SIGTERM",
+      wedgedReport !== null && wedgedElapsed < 30_000,
+    );
+    rmSync(join(probeDir, "kimi"), { force: true });
+    rmSync(join(probeDir, "kimi.impl.mjs"), { force: true });
+
+    // Version on line 1, then more output than the probe buffer holds.
+    writeProbe(
+      "agy",
+      'process.stdout.write("1.2.3: latest\\n");const b="x".repeat(1024*1024);for(let i=0;i<9;i++)process.stdout.write(b);\n',
+    );
+    check(
+      "discover recovers a version from output that overruns the probe buffer",
+      entry(runDiscover(), "agy")?.version === "1.2.3",
+    );
+    rmSync(join(probeDir, "agy"), { force: true });
+    rmSync(join(probeDir, "agy.impl.mjs"), { force: true });
+
+    // Logged-out answer on stdout, unrelated notice on stderr, non-zero exit.
+    writeProbe(
+      "claude",
+      'if(process.argv[2]==="--version"){console.log("1.0.0");process.exit(0)}\n' +
+        'console.error("npm notice: update available");\n' +
+        'console.log(JSON.stringify({loggedIn:false}));\nprocess.exit(1);\n',
+    );
+    check(
+      "discover reports authenticated false despite stderr noise",
+      entry(runDiscover(), "claude")?.authenticated === false,
+    );
+    rmSync(join(probeDir, "claude"), { force: true });
+    rmSync(join(probeDir, "claude.impl.mjs"), { force: true });
+  }
+
   // Keep fixtures inside the repo tree so sandboxed CI/dev runs can write; seed a
   // minimal .git without `git init` (hooks/config writes are often blocked).
   const fleetRoot = mkdtempSync(join(here, "..", ".tmp-fleet-smoke-"));
