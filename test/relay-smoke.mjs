@@ -87,8 +87,14 @@ const alive = (pid) => {
 // the one thing a hard-coded list cannot catch is its own omission.
 {
   const skillsDir = join(here, "..", "skills");
-  const onDiskDelegate = readdirSync(skillsDir).filter((d) => d.endsWith("-delegate")).sort();
-  const onDiskUtility = readdirSync(skillsDir).filter((d) => UTILITY_SKILLS.includes(d)).sort();
+  // Directories only, read once. A stray file under skills/ (a .DS_Store, an
+  // editor swap file) says nothing about skill registration, and letting one
+  // red the suite reports a packaging defect that is not there.
+  const skillDirs = readdirSync(skillsDir, { withFileTypes: true })
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name);
+  const onDiskDelegate = skillDirs.filter((d) => d.endsWith("-delegate")).sort();
+  const onDiskUtility = skillDirs.filter((d) => UTILITY_SKILLS.includes(d)).sort();
   const registered = new Set(
     JSON.parse(readFileSync(join(here, "..", "skills.sh.json"), "utf8"))
       .groupings.flatMap((g) => g.skills),
@@ -118,13 +124,11 @@ const alive = (pid) => {
   check("smoke matrix has no entry without a directory", SKILLS.every((s) => onDiskDelegate.includes(`${s}-delegate`)));
   check(
     "skills.sh.json has no entry without a directory",
-    [...registered].every((s) => existsSync(join(skillsDir, s))),
+    [...registered].every((s) => skillDirs.includes(s)),
   );
   check(
     "no unexpected skill directories",
-    readdirSync(skillsDir).every(
-      (d) => d.endsWith("-delegate") || UTILITY_SKILLS.includes(d),
-    ),
+    skillDirs.every((d) => d.endsWith("-delegate") || UTILITY_SKILLS.includes(d)),
   );
 }
 
@@ -2305,6 +2309,15 @@ if (WIN) {
         effective?.lanes?.feature?.effort === "high" &&
         effective?.projectTrusted === true,
     );
+    // The half that makes it a REPLACE rather than a merge: the global lane of
+    // this name also set model and variant, and neither may survive. Asserting
+    // only the project's own fields passes just as happily under a field-level
+    // merge, which would silently carry a global dial into a project lane.
+    check(
+      "whole-lane replace drops the global lane's other dials",
+      effective?.lanes?.feature?.model === undefined &&
+        effective?.lanes?.feature?.variant === undefined,
+    );
     check(
       "effective tests lane falls through to global",
       effective?.lanes?.tests?.implementer === "grok" && effective?.lanes?.tests?.source === "global",
@@ -2659,7 +2672,7 @@ if (WIN) {
     for (const implementer of ["agy", "kimi", "qoder"]) {
       writeFileSync(nulLane, JSON.stringify({
         version: "delegate-fleet.v1",
-        lanes: { x: { implementer, model: "a b" } },
+        lanes: { x: { implementer, model: "a\u0000b" } },
       }));
       const nulValidate = spawnSync(
         process.execPath,
