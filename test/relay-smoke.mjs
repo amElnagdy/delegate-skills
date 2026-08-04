@@ -1720,6 +1720,20 @@ if (WIN) {
   // Keep fixtures inside the repo tree so sandboxed CI/dev runs can write; seed a
   // minimal .git without `git init` (hooks/config writes are often blocked).
   const fleetRoot = mkdtempSync(join(here, "..", ".tmp-fleet-smoke-"));
+  // Same minimal seed, reusable. `git init` would contradict the note above, and
+  // an unchecked failure is worse than noisy: the fixture would not be a repo,
+  // rev-parse would resolve to the ENCLOSING checkout, and a project write would
+  // land .delegate/config.json in it.
+  const seedRepo = (dir) => {
+    mkdirSync(join(dir, ".git", "objects"), { recursive: true });
+    mkdirSync(join(dir, ".git", "refs", "heads"), { recursive: true });
+    writeFileSync(join(dir, ".git", "HEAD"), "ref: refs/heads/master\n");
+    writeFileSync(
+      join(dir, ".git", "config"),
+      "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = false\n",
+    );
+    return dir;
+  };
   const cfgHome = join(fleetRoot, "home");
   const cfgRepo = join(fleetRoot, "repo");
   const bare = join(fleetRoot, "bare");
@@ -2497,7 +2511,7 @@ if (WIN) {
     // enclosing checkout instead, leaving this .delegate unread.
     const brokenRepo = join(fleetRoot, "broken-project-repo");
     mkdirSync(join(brokenRepo, ".delegate"), { recursive: true });
-    spawnSync("git", ["init", "-q", brokenRepo], { encoding: "utf8" });
+    seedRepo(brokenRepo);
     writeFileSync(join(brokenRepo, ".delegate", "config.json"), "not json at all");
     const brokenLoad = spawnSync(
       process.execPath,
@@ -2538,7 +2552,7 @@ if (WIN) {
     // like a bad project file, not escape and take the global lanes down.
     const trustRepo = join(fleetRoot, "trust-marker-repo");
     mkdirSync(trustRepo, { recursive: true });
-    spawnSync("git", ["init", "-q", trustRepo], { encoding: "utf8" });
+    seedRepo(trustRepo);
     const trustProjectSrc = join(fleetRoot, "trust-marker-project.json");
     writeFileSync(trustProjectSrc, `${JSON.stringify({
       version: "delegate-fleet.v1",
@@ -2588,7 +2602,7 @@ if (WIN) {
       const spacedRepo = join(fleetRoot, "trailing space repo ");
       const sibling = join(fleetRoot, "trailing space repo");
       mkdirSync(spacedRepo, { recursive: true });
-      spawnSync("git", ["init", "-q", spacedRepo], { encoding: "utf8" });
+      seedRepo(spacedRepo);
       const spacedSrc = join(fleetRoot, "spaced-project.json");
       writeFileSync(spacedSrc, `${JSON.stringify({
         version: "delegate-fleet.v1",
@@ -2691,11 +2705,7 @@ if (WIN) {
     if (!WIN) {
       const gitRepo = join(fleetRoot, "git-ctx-repo");
       mkdirSync(gitRepo);
-      spawnSync("git", ["init", "-q", gitRepo], { encoding: "utf8" });
-      spawnSync("git", ["-C", gitRepo, "commit", "-q", "--allow-empty", "-m", "i"], {
-        encoding: "utf8",
-        env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" },
-      });
+      seedRepo(gitRepo);
 
       // Global `guard` lane is write-capable; the trusted project lane replacing it
       // is read-only. If git detection degrades, the global lane must NOT take over.
