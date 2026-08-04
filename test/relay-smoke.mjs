@@ -2541,6 +2541,29 @@ if (WIN) {
       } catch {
         spacedMap = null;
       }
+      // A CR is trailing whitespace too, and byte-identical to a CRLF terminator.
+      const crRepo = join(fleetRoot, "cr-repo\r");
+      mkdirSync(join(crRepo, ".git", "objects"), { recursive: true });
+      mkdirSync(join(crRepo, ".git", "refs", "heads"), { recursive: true });
+      writeFileSync(join(crRepo, ".git", "HEAD"), "ref: refs/heads/master\n");
+      writeFileSync(
+        join(crRepo, ".git", "config"),
+        "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = false\n",
+      );
+      const crWrite = spawnSync(
+        process.execPath,
+        [join(setupDir, "config.mjs"), "write", "--scope", "project", "--cwd", crRepo, spacedSrc],
+        { encoding: "utf8", env: process.env },
+      );
+      check(
+        "a repository path ending in CR writes inside that repository",
+        crWrite.status === 0 && existsSync(join(crRepo, ".delegate", "config.json")),
+      );
+      check(
+        "a repository path ending in CR does not create a trimmed sibling",
+        !existsSync(join(fleetRoot, "cr-repo")),
+      );
+
       check(
         "a repository path ending in whitespace loads its own project config",
         spacedLoad.status === 0 && spacedMap?.projectPath === join(spacedRepo, ".delegate", "config.json"),

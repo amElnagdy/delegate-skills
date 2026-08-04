@@ -145,13 +145,13 @@ function gitContext(cwd) {
     maxBuffer: GIT_PROBE_MAX_BUFFER,
   });
   if (!r.error && r.status === 0) {
-    // Strip only the record terminator. Trailing whitespace is legal in a path,
-    // and trimming it would silently retarget the repository root at a sibling
-    // directory - which `write --scope project` would then create.
-    const lines = (r.stdout || "")
-      .split("\n")
-      .map((line) => line.replace(/\r$/, ""))
-      .filter((line) => line.length > 0);
+    // Split on the terminator and touch nothing else. Trailing whitespace - a
+    // space, or a CR - is legal in a POSIX path, and removing it would silently
+    // retarget the root at a sibling directory that `write --scope project`
+    // would then create. "repo\r" + LF and "repo" + CRLF are byte-identical, so
+    // stripping CR is a guess; git writes LF for plumbing output on every
+    // platform, and the Windows CI leg covers that.
+    const lines = (r.stdout || "").split("\n").filter((line) => line.length > 0);
     // Exactly two: this rev-parse prints the toplevel then the git dir. More
     // means a path contains a newline, and taking the first two lines there
     // would yield a wrong root and a fragment for the git dir.
