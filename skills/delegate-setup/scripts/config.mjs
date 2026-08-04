@@ -145,7 +145,13 @@ function gitContext(cwd) {
     maxBuffer: GIT_PROBE_MAX_BUFFER,
   });
   if (!r.error && r.status === 0) {
-    const lines = (r.stdout || "").split("\n").map((line) => line.trim()).filter(Boolean);
+    // Strip only the record terminator. Trailing whitespace is legal in a path,
+    // and trimming it would silently retarget the repository root at a sibling
+    // directory - which `write --scope project` would then create.
+    const lines = (r.stdout || "")
+      .split("\n")
+      .map((line) => line.replace(/\r$/, ""))
+      .filter((line) => line.length > 0);
     // Exactly two: this rev-parse prints the toplevel then the git dir. More
     // means a path contains a newline, and taking the first two lines there
     // would yield a wrong root and a fragment for the git dir.

@@ -2504,6 +2504,49 @@ if (WIN) {
       trustResolve.status === 2,
     );
 
+    // A repository path may legally end in whitespace. Trimming rev-parse output
+    // would retarget the root at a sibling directory, and a project write would
+    // create it. Windows strips trailing spaces from directory names, so POSIX only.
+    if (!WIN) {
+      const spacedRepo = join(fleetRoot, "trailing space repo ");
+      const sibling = join(fleetRoot, "trailing space repo");
+      mkdirSync(spacedRepo, { recursive: true });
+      spawnSync("git", ["init", "-q", spacedRepo], { encoding: "utf8" });
+      const spacedSrc = join(fleetRoot, "spaced-project.json");
+      writeFileSync(spacedSrc, `${JSON.stringify({
+        version: "delegate-fleet.v1",
+        lanes: { feature: { implementer: "codex" } },
+      }, null, 2)}\n`);
+      const spacedWrite = spawnSync(
+        process.execPath,
+        [join(setupDir, "config.mjs"), "write", "--scope", "project", "--cwd", spacedRepo, spacedSrc],
+        { encoding: "utf8", env: process.env },
+      );
+      check(
+        "a repository path ending in whitespace writes inside that repository",
+        spacedWrite.status === 0 && existsSync(join(spacedRepo, ".delegate", "config.json")),
+      );
+      check(
+        "a repository path ending in whitespace does not create a trimmed sibling",
+        !existsSync(sibling),
+      );
+      const spacedLoad = spawnSync(
+        process.execPath,
+        [join(setupDir, "config.mjs"), "load", "--cwd", spacedRepo],
+        { encoding: "utf8", env: process.env },
+      );
+      let spacedMap = null;
+      try {
+        spacedMap = JSON.parse(spacedLoad.stdout);
+      } catch {
+        spacedMap = null;
+      }
+      check(
+        "a repository path ending in whitespace loads its own project config",
+        spacedLoad.status === 0 && spacedMap?.projectPath === join(spacedRepo, ".delegate", "config.json"),
+      );
+    }
+
     // Git-context classification. Shims are shell scripts, so POSIX only; the
     // behaviour they guard (never silently swap a project lane for a global one)
     // is platform-independent.
