@@ -16,6 +16,8 @@ import { delimiter, join, resolve } from "node:path";
 import { IMPLEMENTERS } from "./implementers.mjs";
 
 const PROBE_TIMEOUT_MS = 10_000;
+/** Generous for a version banner or model list, and bounded for a changelog dump. */
+const PROBE_MAX_BUFFER = 8 * 1024 * 1024;
 
 const HELP = `discover.mjs — probe PATH for installed implementer CLIs
 
@@ -40,6 +42,10 @@ function resolveBinary(binary) {
   const pathEntries = pathValue
     .split(delimiter)
     .map((entry) => entry.replace(/^"(.*)"$/, "$1"))
+    // An empty component means the current directory in POSIX lookup, which is
+    // where a relay's own spawn would find the binary. Dropping it made
+    // discovery report a CLI as missing that dispatch can actually run.
+    .map((entry) => (entry.length === 0 && process.platform !== "win32" ? "." : entry))
     .filter((entry) => entry.length > 0);
 
   if (process.platform === "win32") {
@@ -74,7 +80,12 @@ function resolveBinary(binary) {
 }
 
 function needsWindowsShell(impl, binaryPath) {
-  return process.platform === "win32" && (impl.winShell || /\.(?:cmd|bat)$/i.test(binaryPath));
+  // impl.winShell describes how the RELAYS launch: they spawn a bare name and
+  // need the shell to find a .cmd shim. Discovery already resolved a full path,
+  // so only a real .cmd/.bat needs cmd.exe here - routing a native .exe through
+  // the shell would put every install path through quoteForCmd, which rejects
+  // the % and ! that are legal in Windows directory names.
+  return process.platform === "win32" && /\.(?:cmd|bat)$/i.test(binaryPath);
 }
 
 /** Quote a path for cmd.exe when shell:true; reject metacharacters. */
@@ -90,6 +101,13 @@ function runProbe(binaryPath, args, useShell) {
   return execFileSync(command, args, {
     encoding: "utf8",
     timeout: PROBE_TIMEOUT_MS,
+    // Without this the timeout is advisory: the default SIGTERM never escalates
+    // for a CLI that traps it for graceful shutdown, and spawnSync keeps
+    // blocking until the child decides to exit.
+    killSignal: "SIGKILL",
+    // Some version probes are inherently unbounded (agy's is `changelog`), and
+    // the 1 MiB default throws ENOBUFS, discarding a version that was on line 1.
+    maxBuffer: PROBE_MAX_BUFFER,
     stdio: ["pipe", "pipe", "pipe"],
     shell: useShell,
   });
@@ -97,15 +115,20 @@ function runProbe(binaryPath, args, useShell) {
 
 function probeVersion(impl, binaryPath) {
   const useShell = needsWindowsShell(impl, binaryPath);
+  const firstVersion = (raw) => {
+    const firstLine = (raw || "").trim().split(/\r?\n/, 1)[0].trim();
+    if (!firstLine) return null;
+    if (impl.versionFormat !== "colon-prefix") return firstLine;
+    return /^([^:\s]+):/.exec(firstLine)?.[1] ?? firstLine;
+  };
   const tryArgs = (versionArgs) => {
     try {
-      const raw = runProbe(binaryPath, versionArgs, useShell);
-      const firstLine = raw.trim().split(/\r?\n/, 1)[0].trim();
-      if (!firstLine) return null;
-      if (impl.versionFormat !== "colon-prefix") return firstLine;
-      return /^([^:\s]+):/.exec(firstLine)?.[1] ?? firstLine;
-    } catch {
-      return null;
+      return firstVersion(runProbe(binaryPath, versionArgs, useShell));
+    } catch (error) {
+      // An over-large or timed-out probe still wrote the bytes we need: the
+      // version is on the first line. Recover it from the partial stdout rather
+      // than reporting null, which is indistinguishable from a broken install.
+      return typeof error.stdout === "string" ? firstVersion(error.stdout) : null;
     }
   };
   let version = tryArgs(impl.versionArgs);
@@ -135,9 +158,13 @@ function probeAuth(impl, binaryPath) {
     return true;
   } catch (error) {
     if (impl.authProbe.jsonField) {
-      const combined = `${error.stdout || ""}${error.stderr || ""}`;
-      if (combined.trim()) {
-        const parsed = readAuthField(combined, impl.authProbe.jsonField);
+      // Parse the streams separately. Concatenating them meant a single line of
+      // unrelated stderr - an update notice, a Node warning - made the whole
+      // string invalid JSON, degrading a real `false` into "unknown". The
+      // logged-out answer arrives on a non-zero exit, so this is the common path.
+      for (const stream of [error.stdout, error.stderr]) {
+        if (typeof stream !== "string" || !stream.trim()) continue;
+        const parsed = readAuthField(stream, impl.authProbe.jsonField);
         if (parsed !== null) return parsed;
       }
       return null;

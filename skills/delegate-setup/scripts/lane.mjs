@@ -58,7 +58,10 @@ export function resolveLaneForRelay(cwd, laneName, implementerKey) {
         "fix or remove it, then approve it with delegate-setup before dispatch",
     );
   }
-  const entry = effective.lanes[laneName];
+  // Own properties only: LANE_NAME admits `toString`, `constructor`, `valueOf`
+  // and friends, and a plain-object map answers those off Object.prototype, so
+  // the not-found guard was skipped and the mismatch branch died on a TypeError.
+  const entry = Object.hasOwn(effective.lanes, laneName) ? effective.lanes[laneName] : undefined;
   if (!entry) {
     throw new Error(`fleet lane not found: ${laneName}`);
   }
@@ -122,38 +125,6 @@ function normalizeDials(implementerKey, raw) {
   return dials;
 }
 
-/**
- * Apply resolved dials onto relay opts. `flagged` lists fields set by CLI flags.
- */
-export function mergeDials(opts, dials, flagged) {
-  for (const [field, value] of Object.entries(dials)) {
-    if (flagged.has(field)) continue;
-    // read-only / sandbox / agent / autonomy often share a flag surface
-    if (field === "sandbox" && (flagged.has("sandbox") || flagged.has("readOnly"))) continue;
-    if (field === "autonomy" && (flagged.has("autonomy") || flagged.has("sandbox") || flagged.has("readOnly"))) {
-      continue;
-    }
-    if (field === "agent" && (flagged.has("agent") || flagged.has("readOnly"))) continue;
-    if (field === "permissionMode" && (flagged.has("permissionMode") || flagged.has("readOnly"))) continue;
-    if (
-      field === "planOnly" &&
-      (flagged.has("planOnly") || flagged.has("readOnly") || flagged.has("fullAccess"))
-    ) {
-      continue;
-    }
-    if (
-      field === "readOnly" &&
-      (flagged.has("readOnly") ||
-        flagged.has("dangerouslySkipPermissions") ||
-        flagged.has("fullAccess"))
-    ) {
-      continue;
-    }
-    if (field === "force" && flagged.has("force")) continue;
-    opts[field] = value;
-  }
-}
-
 function parseResolveArgs(argv) {
   let cwd = process.cwd();
   let lane = null;
@@ -162,7 +133,9 @@ function parseResolveArgs(argv) {
     const arg = argv[i];
     const next = () => {
       const value = argv[++i];
-      if (value === undefined) fail(`${arg} requires a value`);
+      // Same rule as the relays that spawn this: an empty value is not a value,
+      // it just reads as "flag omitted" at the use site.
+      if (value === undefined || value === "") fail(`${arg} requires a value`);
       return value;
     };
     if (arg === "--cwd") cwd = resolvePath(next());

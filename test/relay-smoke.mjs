@@ -87,8 +87,14 @@ const alive = (pid) => {
 // the one thing a hard-coded list cannot catch is its own omission.
 {
   const skillsDir = join(here, "..", "skills");
-  const onDiskDelegate = readdirSync(skillsDir).filter((d) => d.endsWith("-delegate")).sort();
-  const onDiskUtility = readdirSync(skillsDir).filter((d) => UTILITY_SKILLS.includes(d)).sort();
+  // Directories only, read once. A stray file under skills/ (a .DS_Store, an
+  // editor swap file) says nothing about skill registration, and letting one
+  // red the suite reports a packaging defect that is not there.
+  const skillDirs = readdirSync(skillsDir, { withFileTypes: true })
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name);
+  const onDiskDelegate = skillDirs.filter((d) => d.endsWith("-delegate")).sort();
+  const onDiskUtility = skillDirs.filter((d) => UTILITY_SKILLS.includes(d)).sort();
   const registered = new Set(
     JSON.parse(readFileSync(join(here, "..", "skills.sh.json"), "utf8"))
       .groupings.flatMap((g) => g.skills),
@@ -118,13 +124,11 @@ const alive = (pid) => {
   check("smoke matrix has no entry without a directory", SKILLS.every((s) => onDiskDelegate.includes(`${s}-delegate`)));
   check(
     "skills.sh.json has no entry without a directory",
-    [...registered].every((s) => existsSync(join(skillsDir, s))),
+    [...registered].every((s) => skillDirs.includes(s)),
   );
   check(
     "no unexpected skill directories",
-    readdirSync(skillsDir).every(
-      (d) => d.endsWith("-delegate") || UTILITY_SKILLS.includes(d),
-    ),
+    skillDirs.every((d) => d.endsWith("-delegate") || UTILITY_SKILLS.includes(d)),
   );
 }
 
@@ -1649,9 +1653,108 @@ if (WIN) {
     agyReport?.discovered.find(({ key }) => key === "agy")?.version === "1.2.3",
   );
 
+  // Probe hardening. These fixtures trap signals and emit megabytes, which needs
+  // a real interpreter, so POSIX only; the behaviour they pin is platform-neutral.
+  if (!WIN) {
+    const probeDir = join(scratch, "discover-probes");
+    mkdirSync(probeDir);
+    // PATH is deliberately just probeDir, so the fixture cannot reach a real CLI.
+    // That also means no interpreter lookup: exec node by absolute path from a
+    // /bin/sh stub rather than via `env node`.
+    const writeProbe = (name, body) => {
+      const script = join(probeDir, `${name}.impl.mjs`);
+      writeFileSync(script, body);
+      const p = join(probeDir, name);
+      writeFileSync(p, `#!/bin/sh\nexec "${process.execPath}" "${script}" "$@"\n`);
+      chmodSync(p, 0o755);
+      return p;
+    };
+    const runDiscover = () => {
+      const r = spawnSync(process.execPath, [join(setupDir, "discover.mjs")], {
+        encoding: "utf8",
+        env: { ...process.env, PATH: probeDir },
+      });
+      return r.status === 0 ? JSON.parse(r.stdout) : null;
+    };
+    const entry = (report, key) => report?.discovered.find((d) => d.key === key);
+
+    // A CLI that traps SIGTERM: without killSignal the timeout never escalates.
+    writeProbe("kimi", 'process.on("SIGTERM",()=>{});setTimeout(()=>process.exit(0),45000);\n');
+    const wedgedStart = Date.now();
+    const wedgedReport = runDiscover();
+    const wedgedElapsed = Date.now() - wedgedStart;
+    check(
+      "discover bounds a CLI that ignores SIGTERM",
+      wedgedReport !== null && wedgedElapsed < 30_000,
+    );
+    rmSync(join(probeDir, "kimi"), { force: true });
+    rmSync(join(probeDir, "kimi.impl.mjs"), { force: true });
+
+    // Version on line 1, then more output than the probe buffer holds.
+    writeProbe(
+      "agy",
+      'process.stdout.write("1.2.3: latest\\n");const b="x".repeat(1024*1024);for(let i=0;i<9;i++)process.stdout.write(b);\n',
+    );
+    check(
+      "discover recovers a version from output that overruns the probe buffer",
+      entry(runDiscover(), "agy")?.version === "1.2.3",
+    );
+    rmSync(join(probeDir, "agy"), { force: true });
+    rmSync(join(probeDir, "agy.impl.mjs"), { force: true });
+
+    // Logged-out answer on stdout, unrelated notice on stderr, non-zero exit.
+    writeProbe(
+      "claude",
+      'if(process.argv[2]==="--version"){console.log("1.0.0");process.exit(0)}\n' +
+        'console.error("npm notice: update available");\n' +
+        'console.log(JSON.stringify({loggedIn:false}));\nprocess.exit(1);\n',
+    );
+    check(
+      "discover reports authenticated false despite stderr noise",
+      entry(runDiscover(), "claude")?.authenticated === false,
+    );
+    rmSync(join(probeDir, "claude"), { force: true });
+    rmSync(join(probeDir, "claude.impl.mjs"), { force: true });
+
+    // An empty PATH component is the current directory in POSIX lookup, so a
+    // relay's spawn would find a binary there. Discovery must agree, or it
+    // reports a CLI as missing that dispatch can actually run.
+    const cwdProbe = join(scratch, "discover-cwd");
+    mkdirSync(cwdProbe);
+    writeFileSync(
+      join(cwdProbe, "codex"),
+      '#!/bin/sh\ncase "$1" in --version) echo "9.9.9"; exit 0;; esac\nexit 0\n',
+    );
+    chmodSync(join(cwdProbe, "codex"), 0o755);
+    const cwdDiscover = spawnSync(process.execPath, [join(setupDir, "discover.mjs")], {
+      encoding: "utf8",
+      cwd: cwdProbe,
+      env: { ...process.env, PATH: `${delimiter}${probeDir}` },
+    });
+    const cwdReport = cwdDiscover.status === 0 ? JSON.parse(cwdDiscover.stdout) : null;
+    check(
+      "discover honours an empty PATH component as the current directory",
+      cwdReport?.discovered.find((d) => d.key === "codex")?.version === "9.9.9",
+    );
+  }
+
   // Keep fixtures inside the repo tree so sandboxed CI/dev runs can write; seed a
   // minimal .git without `git init` (hooks/config writes are often blocked).
   const fleetRoot = mkdtempSync(join(here, "..", ".tmp-fleet-smoke-"));
+  // Same minimal seed, reusable. `git init` would contradict the note above, and
+  // an unchecked failure is worse than noisy: the fixture would not be a repo,
+  // rev-parse would resolve to the ENCLOSING checkout, and a project write would
+  // land .delegate/config.json in it.
+  const seedRepo = (dir) => {
+    mkdirSync(join(dir, ".git", "objects"), { recursive: true });
+    mkdirSync(join(dir, ".git", "refs", "heads"), { recursive: true });
+    writeFileSync(join(dir, ".git", "HEAD"), "ref: refs/heads/master\n");
+    writeFileSync(
+      join(dir, ".git", "config"),
+      "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = false\n",
+    );
+    return dir;
+  };
   const cfgHome = join(fleetRoot, "home");
   const cfgRepo = join(fleetRoot, "repo");
   const bare = join(fleetRoot, "bare");
@@ -2241,6 +2344,15 @@ if (WIN) {
         effective?.lanes?.feature?.effort === "high" &&
         effective?.projectTrusted === true,
     );
+    // The half that makes it a REPLACE rather than a merge: the global lane of
+    // this name also set model and variant, and neither may survive. Asserting
+    // only the project's own fields passes just as happily under a field-level
+    // merge, which would silently carry a global dial into a project lane.
+    check(
+      "whole-lane replace drops the global lane's other dials",
+      effective?.lanes?.feature?.model === undefined &&
+        effective?.lanes?.feature?.variant === undefined,
+    );
     check(
       "effective tests lane falls through to global",
       effective?.lanes?.tests?.implementer === "grok" && effective?.lanes?.tests?.source === "global",
@@ -2420,7 +2532,7 @@ if (WIN) {
     // enclosing checkout instead, leaving this .delegate unread.
     const brokenRepo = join(fleetRoot, "broken-project-repo");
     mkdirSync(join(brokenRepo, ".delegate"), { recursive: true });
-    spawnSync("git", ["init", "-q", brokenRepo], { encoding: "utf8" });
+    seedRepo(brokenRepo);
     writeFileSync(join(brokenRepo, ".delegate", "config.json"), "not json at all");
     const brokenLoad = spawnSync(
       process.execPath,
@@ -2461,7 +2573,7 @@ if (WIN) {
     // like a bad project file, not escape and take the global lanes down.
     const trustRepo = join(fleetRoot, "trust-marker-repo");
     mkdirSync(trustRepo, { recursive: true });
-    spawnSync("git", ["init", "-q", trustRepo], { encoding: "utf8" });
+    seedRepo(trustRepo);
     const trustProjectSrc = join(fleetRoot, "trust-marker-project.json");
     writeFileSync(trustProjectSrc, `${JSON.stringify({
       version: "delegate-fleet.v1",
@@ -2511,7 +2623,7 @@ if (WIN) {
       const spacedRepo = join(fleetRoot, "trailing space repo ");
       const sibling = join(fleetRoot, "trailing space repo");
       mkdirSync(spacedRepo, { recursive: true });
-      spawnSync("git", ["init", "-q", spacedRepo], { encoding: "utf8" });
+      seedRepo(spacedRepo);
       const spacedSrc = join(fleetRoot, "spaced-project.json");
       writeFileSync(spacedSrc, `${JSON.stringify({
         version: "delegate-fleet.v1",
@@ -2570,17 +2682,51 @@ if (WIN) {
       );
     }
 
+    // Uses `bare`, not cfgRepo: the read-path tests above deliberately leave
+    // cfgRepo's project config unreadable, so resolve there fails closed first.
+    // A lane name that exists on Object.prototype must report "not found", not
+    // crash: LANE_NAME admits toString/constructor/valueOf, and a plain-object
+    // lane map answers those through the prototype chain.
+    for (const inherited of ["toString", "constructor", "valueOf", "hasOwnProperty"]) {
+      const proto = spawnSync(
+        process.execPath,
+        [join(setupDir, "lane.mjs"), "resolve", "--cwd", bare, "--lane", inherited, "--implementer", "codex"],
+        { encoding: "utf8", env: process.env },
+      );
+      check(
+        `lane resolve reports "${inherited}" as not found rather than crashing`,
+        proto.status === 2 &&
+          /fleet lane not found/.test(proto.stderr) &&
+          !/Cannot read properties|TypeError/.test(proto.stderr),
+      );
+    }
+
+    // A NUL survives trim(), so it validated and wrote cleanly, then threw out of
+    // spawn after the artifact directory existed but before any result was written.
+    const nulLane = join(fleetRoot, "nul-lane.json");
+    for (const implementer of ["agy", "kimi", "qoder"]) {
+      writeFileSync(nulLane, JSON.stringify({
+        version: "delegate-fleet.v1",
+        lanes: { x: { implementer, model: "a\u0000b" } },
+      }));
+      const nulValidate = spawnSync(
+        process.execPath,
+        [join(setupDir, "config.mjs"), "validate", nulLane],
+        { encoding: "utf8", env: process.env },
+      );
+      check(
+        `config validate rejects a null byte in a ${implementer} model dial`,
+        nulValidate.status === 2 && /null byte/.test(nulValidate.stderr),
+      );
+    }
+
     // Git-context classification. Shims are shell scripts, so POSIX only; the
     // behaviour they guard (never silently swap a project lane for a global one)
     // is platform-independent.
     if (!WIN) {
       const gitRepo = join(fleetRoot, "git-ctx-repo");
       mkdirSync(gitRepo);
-      spawnSync("git", ["init", "-q", gitRepo], { encoding: "utf8" });
-      spawnSync("git", ["-C", gitRepo, "commit", "-q", "--allow-empty", "-m", "i"], {
-        encoding: "utf8",
-        env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" },
-      });
+      seedRepo(gitRepo);
 
       // Global `guard` lane is write-capable; the trusted project lane replacing it
       // is read-only. If git detection degrades, the global lane must NOT take over.
