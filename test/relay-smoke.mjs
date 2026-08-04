@@ -2457,6 +2457,53 @@ if (WIN) {
         !/"dials"/.test(brokenResolve.stdout),
     );
 
+    // The approval marker can fail to read on its own; that must degrade exactly
+    // like a bad project file, not escape and take the global lanes down.
+    const trustRepo = join(fleetRoot, "trust-marker-repo");
+    mkdirSync(trustRepo, { recursive: true });
+    spawnSync("git", ["init", "-q", trustRepo], { encoding: "utf8" });
+    const trustProjectSrc = join(fleetRoot, "trust-marker-project.json");
+    writeFileSync(trustProjectSrc, `${JSON.stringify({
+      version: "delegate-fleet.v1",
+      lanes: { feature: { implementer: "codex", sandbox: "read-only" } },
+    }, null, 2)}\n`);
+    const trustWrite = spawnSync(
+      process.execPath,
+      [join(setupDir, "config.mjs"), "write", "--scope", "project", "--cwd", trustRepo, trustProjectSrc],
+      { encoding: "utf8", env: process.env },
+    );
+    const trustMarker = join(trustRepo, ".git", "delegate-skills", "project-config.sha256");
+    check("trust marker fixture written", trustWrite.status === 0 && existsSync(trustMarker));
+    // Replace the marker with a directory: readFileSync then fails with EISDIR.
+    rmSync(trustMarker, { force: true });
+    mkdirSync(trustMarker, { recursive: true });
+    const trustLoad = spawnSync(
+      process.execPath,
+      [join(setupDir, "config.mjs"), "load", "--cwd", trustRepo],
+      { encoding: "utf8", env: process.env },
+    );
+    let trustMap = null;
+    try {
+      trustMap = JSON.parse(trustLoad.stdout);
+    } catch {
+      trustMap = null;
+    }
+    check(
+      "an unreadable approval marker degrades load instead of taking global lanes down",
+      trustLoad.status === 0 &&
+        typeof trustMap?.projectError === "string" &&
+        trustMap.projectTrusted === false,
+    );
+    const trustResolve = spawnSync(
+      process.execPath,
+      [join(setupDir, "lane.mjs"), "resolve", "--cwd", trustRepo, "--lane", "feature", "--implementer", "codex"],
+      { encoding: "utf8", env: process.env },
+    );
+    check(
+      "an unreadable approval marker still fails dispatch closed",
+      trustResolve.status === 2,
+    );
+
     // Git-context classification. Shims are shell scripts, so POSIX only; the
     // behaviour they guard (never silently swap a project lane for a global one)
     // is platform-independent.
@@ -2504,17 +2551,18 @@ if (WIN) {
           trustedLane?.dials?.sandbox === "read-only",
       );
 
-      const shimDir = join(fleetRoot, "git-shims");
-      mkdirSync(shimDir);
+      // Not `shimDir`: that name is taken by the module-level fake-CLI shim.
+      const gitShimDir = join(fleetRoot, "git-shims");
+      mkdirSync(gitShimDir);
       const shimEnv = (dir) => ({ ...process.env, PATH: `${dir}${delimiter}${process.env.PATH}` });
 
-      const refusingGit = join(shimDir, "git");
+      const refusingGit = join(gitShimDir, "git");
       writeFileSync(refusingGit, "#!/bin/sh\necho \"fatal: detected dubious ownership\" >&2\nexit 128\n");
       chmodSync(refusingGit, 0o755);
       const refusedResolve = spawnSync(
         process.execPath,
         [join(setupDir, "lane.mjs"), "resolve", "--cwd", gitRepo, "--lane", "guard", "--implementer", "codex"],
-        { encoding: "utf8", env: shimEnv(shimDir) },
+        { encoding: "utf8", env: shimEnv(gitShimDir) },
       );
       check(
         "git context: a refused repository fails loudly instead of falling back to the global lane",
@@ -2536,7 +2584,7 @@ if (WIN) {
         const outsideLoad = spawnSync(
           process.execPath,
           [join(setupDir, "config.mjs"), "load", "--cwd", outsideDir],
-          { encoding: "utf8", env: shimEnv(shimDir) },
+          { encoding: "utf8", env: shimEnv(gitShimDir) },
         );
         let outsideMap = null;
         try {
@@ -2552,6 +2600,40 @@ if (WIN) {
         );
       } finally {
         rmSync(outsideDir, { recursive: true, force: true });
+      }
+
+      // An unreadable ancestor must not read as "no repository": that is the
+      // silent downgrade this whole guard exists to stop. Skipped when running
+      // as root, where the permission bits do not bite.
+      // Outside the checkout: under fleetRoot the walk would climb past the
+      // unreadable directory and find this repo's own .git, so the check would
+      // pass even with the EACCES handling reverted.
+      const blockedRoot = mkdtempSync(join(tmpdir(), "delegate-blocked-"));
+      const blocked = join(blockedRoot, "git-blocked");
+      mkdirSync(join(blocked, "sub"), { recursive: true });
+      mkdirSync(join(blocked, ".git"), { recursive: true });
+      chmodSync(blocked, 0o000);
+      let blockedReadable = true;
+      try {
+        readdirSync(join(blocked, "sub"));
+      } catch {
+        blockedReadable = false;
+      }
+      try {
+        if (!blockedReadable) {
+          const blockedLoad = spawnSync(
+            process.execPath,
+            [join(setupDir, "config.mjs"), "load", "--cwd", join(blocked, "sub")],
+            { encoding: "utf8", env: shimEnv(gitShimDir) },
+          );
+          check(
+            "git context: an unreadable ancestor fails loudly rather than reading as no repository",
+            blockedLoad.status === 2 && /cannot determine the git repository/.test(blockedLoad.stderr),
+          );
+        }
+      } finally {
+        chmodSync(blocked, 0o755);
+        rmSync(blockedRoot, { recursive: true, force: true });
       }
 
       const wedgedDir = join(fleetRoot, "git-wedged");

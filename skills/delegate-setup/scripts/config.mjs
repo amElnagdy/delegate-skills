@@ -91,8 +91,11 @@ function hasEntry(path) {
   try {
     lstatSync(path);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    // Only a genuine absence means "no marker here". Anything else - EACCES on a
+    // parent, EIO - leaves us unable to rule a repository out, and answering "no
+    // repository" there is the silent downgrade this walk exists to prevent.
+    return error.code !== "ENOENT" && error.code !== "ENOTDIR";
   }
 }
 
@@ -108,10 +111,12 @@ function repositoryMarkerNear(cwd) {
     // Linked worktrees and submodules use a .git FILE, so accept any entry type.
     if (hasEntry(join(dir, ".git"))) return true;
     const parent = dirname(dir);
-    if (parent === dir) break;
+    if (parent === dir) return false;
     dir = parent;
   }
-  return false;
+  // Ran out of depth before reaching the root, so the search never completed.
+  // Report "cannot rule one out" rather than "none", to fail loud not open.
+  return true;
 }
 
 function gitFailureMessage(cwd, reason) {
@@ -141,7 +146,12 @@ function gitContext(cwd) {
   });
   if (!r.error && r.status === 0) {
     const lines = (r.stdout || "").split("\n").map((line) => line.trim()).filter(Boolean);
-    if (lines.length >= 2) return { root: lines[0], gitDir: lines[1] };
+    // Exactly two: this rev-parse prints the toplevel then the git dir. More
+    // means a path contains a newline, and taking the first two lines there
+    // would yield a wrong root and a fragment for the git dir.
+    if (lines.length === 2 && isAbsolute(lines[0]) && isAbsolute(lines[1])) {
+      return { root: lines[0], gitDir: lines[1] };
+    }
     throw new Error(gitFailureMessage(cwd, "git reported an unexpected repository layout"));
   }
   if (!repositoryMarkerNear(cwd)) return null;
@@ -151,7 +161,10 @@ function gitContext(cwd) {
   else if (r.error) reason = `git could not run (${r.error.code || r.error.message})`;
   else if (r.signal) reason = `git was terminated by ${r.signal}`;
   else reason = `git exited with status ${r.status}`;
-  throw new Error(gitFailureMessage(cwd, reason));
+  // git's own first line usually names the real cause (ownership, bad config).
+  // It is not parsed - only shown - so no behaviour depends on its wording.
+  const said = (r.stderr || "").split("\n").map((line) => line.trim()).find(Boolean);
+  throw new Error(gitFailureMessage(cwd, said ? `${reason} (git said: ${said})` : reason));
 }
 
 export function findGitRoot(cwd) {
@@ -503,14 +516,20 @@ export function loadEffective(cwd = process.cwd()) {
   // operator through fixing it. Dispatch is the caller's call - see projectError.
   let projectFile = null;
   let projectError = null;
+  let projectTrusted = false;
   if (projectPath) {
     try {
       projectFile = readProjectConfigFile(projectPath);
+      // Reading the approval marker belongs inside the same recovery: it can
+      // fail on its own (unreadable, or not a regular file), and letting that
+      // escape would take the global lanes down exactly as a bad project file did.
+      projectTrusted = Boolean(projectFile && projectConfigTrusted(git, projectFile.digest));
     } catch (error) {
+      projectFile = null;
+      projectTrusted = false;
       projectError = error.message || String(error);
     }
   }
-  const projectTrusted = Boolean(projectFile && projectConfigTrusted(git, projectFile.digest));
   const effective = effectiveLanes(globalFile?.document, projectFile?.document);
   return {
     version: CONFIG_VERSION,
