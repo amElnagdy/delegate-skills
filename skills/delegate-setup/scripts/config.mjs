@@ -248,6 +248,13 @@ function validateLane(name, lane, label) {
     if (typeof lane[field] !== "string" || lane[field].length === 0) {
       return `${label}: lane ${name}.${field} must be a non-empty string`;
     }
+    // NUL rejected for every implementer, not just the ones with a character
+    // class: it survives trim(), so it validates and writes cleanly, then throws
+    // ERR_INVALID_ARG_VALUE out of spawn once the artifact directory already
+    // exists but before any result is written.
+    if (lane[field].includes("\0")) {
+      return `${label}: lane ${name}.${field} must not contain a null byte`;
+    }
     const valueError = validateDialValue(impl.key, field, lane[field], name, label);
     if (valueError) return valueError;
   }
