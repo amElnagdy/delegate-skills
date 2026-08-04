@@ -2634,6 +2634,44 @@ if (WIN) {
       );
     }
 
+    // Uses `bare`, not cfgRepo: the read-path tests above deliberately leave
+    // cfgRepo's project config unreadable, so resolve there fails closed first.
+    // A lane name that exists on Object.prototype must report "not found", not
+    // crash: LANE_NAME admits toString/constructor/valueOf, and a plain-object
+    // lane map answers those through the prototype chain.
+    for (const inherited of ["toString", "constructor", "valueOf", "hasOwnProperty"]) {
+      const proto = spawnSync(
+        process.execPath,
+        [join(setupDir, "lane.mjs"), "resolve", "--cwd", bare, "--lane", inherited, "--implementer", "codex"],
+        { encoding: "utf8", env: process.env },
+      );
+      check(
+        `lane resolve reports "${inherited}" as not found rather than crashing`,
+        proto.status === 2 &&
+          /fleet lane not found/.test(proto.stderr) &&
+          !/Cannot read properties|TypeError/.test(proto.stderr),
+      );
+    }
+
+    // A NUL survives trim(), so it validated and wrote cleanly, then threw out of
+    // spawn after the artifact directory existed but before any result was written.
+    const nulLane = join(fleetRoot, "nul-lane.json");
+    for (const implementer of ["agy", "kimi", "qoder"]) {
+      writeFileSync(nulLane, JSON.stringify({
+        version: "delegate-fleet.v1",
+        lanes: { x: { implementer, model: "a b" } },
+      }));
+      const nulValidate = spawnSync(
+        process.execPath,
+        [join(setupDir, "config.mjs"), "validate", nulLane],
+        { encoding: "utf8", env: process.env },
+      );
+      check(
+        `config validate rejects a null byte in a ${implementer} model dial`,
+        nulValidate.status === 2 && /null byte/.test(nulValidate.stderr),
+      );
+    }
+
     // Git-context classification. Shims are shell scripts, so POSIX only; the
     // behaviour they guard (never silently swap a project lane for a global one)
     // is platform-independent.
