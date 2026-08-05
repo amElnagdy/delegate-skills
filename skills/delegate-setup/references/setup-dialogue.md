@@ -84,6 +84,10 @@ quota on your say-so.
 - `authenticated: null` (unknown) usually means no auth probe is wired for that CLI — currently `agy`
   and `pi`, which expose no status command. Say that, rather than implying the login failed.
 - Prefer not binding a lane to a CLI discover reports as `authenticated: false`.
+- For claude specifically, `authenticated: false` can be a Keychain artifact when discovery itself
+  ran inside a sandbox: on macOS the live credentials sit in the login Keychain, and a sandbox that
+  blocks Keychain access makes the probe fall back to a possibly stale credentials file. Verify with
+  `claude auth status` outside the sandbox before treating the CLI as unauthenticated.
 - Never invent model ids (rule 6): use `models.values` when `status` is `reported`, or ask the user,
   or omit `model` when the CLI has a safe default (OpenCode does **not** — require a model for
   opencode lanes).
