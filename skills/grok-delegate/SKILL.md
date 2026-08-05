@@ -11,7 +11,7 @@ description: >-
 license: MIT
 compatibility: Requires the `grok` CLI (Grok Build) installed and authenticated (`grok login`, or `XAI_API_KEY`; beta access needs an eligible xAI subscription), Node 18+, and git. The orchestrating agent must be able to run shell commands and read files. Shell examples assume bash/zsh (macOS/Linux, or Git Bash/WSL on Windows).
 metadata:
-  version: 0.4.0
+  version: 0.4.1
 ---
 
 # Grok Delegate
