@@ -36,6 +36,10 @@ class FakeCli {
       Console.WriteLine("fake agy analysis completed");
       return 0;
     }
+    if (mode == "agy-silent-edit") {
+      File.AppendAllText(Environment.GetEnvironmentVariable("SMOKE_EDIT_FILE"), "dispatch edit\n");
+      return 0;
+    }
     if (mode == "agy-silent-noop") return 0;
     if (Environment.GetEnvironmentVariable("SMOKE_MODE") == "qoder-success") {
       File.WriteAllLines(Environment.GetEnvironmentVariable("SMOKE_ARGS_FILE"), args);

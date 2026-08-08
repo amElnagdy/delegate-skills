@@ -72,7 +72,8 @@
  */
 
 import {spawn, execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync, renameSync, readFileSync, existsSync, appendFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, writeFileSync, renameSync, readFileSync, readlinkSync, lstatSync, existsSync, appendFileSync } from "node:fs";
 import {join, resolve, basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { constants, tmpdir } from "node:os";
@@ -310,6 +311,43 @@ function gitTouchedFiles(cwd) {
   }
 }
 
+function gitWorktreeFingerprint(cwd) {
+  try {
+    const git = (args) => execFileSync("git", args, {
+      cwd,
+      timeout: 10_000,
+      killSignal: "SIGKILL",
+      stdio: ["ignore", "pipe", "ignore"],
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    const status = git(["status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames"]);
+    const fingerprint = createHash("sha256").update("status\0").update(status);
+    fingerprint.update("\0index\0").update(git(["diff", "--cached", "--raw", "--full-index", "--no-renames", "-z", "--"]));
+    fingerprint.update("\0worktree\0").update(git(["diff", "--raw", "--full-index", "--no-renames", "-z", "--"]));
+
+    const paths = [...new Set(status.toString("utf8").split("\0").filter(Boolean).map((entry) => entry.slice(3)))].sort();
+    for (const path of paths) {
+      const fullPath = join(cwd, path);
+      fingerprint.update("\0path\0").update(path).update("\0");
+      let stat;
+      try {
+        stat = lstatSync(fullPath);
+      } catch (error) {
+        if (error?.code !== "ENOENT") throw error;
+        fingerprint.update("missing");
+        continue;
+      }
+      fingerprint.update(String(stat.mode)).update("\0");
+      if (stat.isSymbolicLink()) fingerprint.update(readlinkSync(fullPath));
+      else if (stat.isFile()) fingerprint.update(git(["hash-object", "--no-filters", "--", path]));
+      else return null;
+    }
+    return fingerprint.digest("hex");
+  } catch {
+    return null;
+  }
+}
+
 function timestamp() {
   return new Date().toISOString().replace(/[:.]/g, "-");
 }
@@ -448,7 +486,7 @@ function reportVersionTimeout(writeResult, run, timeoutMs, error) {
 }
 
 function dispatchToAgy(opts, brief, run, writeResult, watchdogMs) {
-  const beforeTree = gitTouchedFiles(opts.cd);
+  const beforeState = gitWorktreeFingerprint(opts.cd);
   const argv = buildArgv(opts, brief, run);
   // Antigravity's installer provides a native `agy` binary. Launch directly so
   // multi-line briefs and paths with spaces are passed as argv, not shell text.
@@ -564,8 +602,9 @@ function dispatchToAgy(opts, brief, run, writeResult, watchdogMs) {
     const permissionDenied = /no output produced\s+[—-]\s+a tool required the "([^"]+)" permission that headless\s+mode cannot prompt for, so it was auto-denied/i.exec(stderr);
     // agy-delegate has no read-only dispatch mode: a report-only analysis can complete
     // without edits, but a write-capable coding dispatch with neither evidence is a no-op.
-    const treeChanged = beforeTree !== null && touchedFiles !== null && JSON.stringify(beforeTree) !== JSON.stringify(touchedFiles);
-    const silentNoop = code === 0 && !finalMessage && !treeChanged;
+    const afterState = gitWorktreeFingerprint(opts.cd);
+    const worktreeChanged = beforeState !== null && afterState !== null && beforeState !== afterState;
+    const silentNoop = code === 0 && !finalMessage && !worktreeChanged;
     // A timed-out run is failed even if agy handles SIGTERM by exiting 0 -
     // orchestrators key off status and the relay exit code.
     const succeeded = code === 0 && !watchdogFired && !permissionDenied && !silentNoop;

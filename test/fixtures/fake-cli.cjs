@@ -34,6 +34,10 @@ if (process.env.SMOKE_MODE === "agy-analysis") {
   console.log("fake agy analysis completed");
   process.exit(0);
 }
+if (process.env.SMOKE_MODE === "agy-silent-edit") {
+  fs.appendFileSync(process.env.SMOKE_EDIT_FILE, "dispatch edit\n");
+  process.exit(0);
+}
 if (process.env.SMOKE_MODE === "agy-silent-noop") process.exit(0);
 if (process.env.SMOKE_MODE === "qoder-success") {
   fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify(args));
