@@ -16,7 +16,7 @@ Allocation policy only. Users cannot rank model IDs — that is your job, not th
 | --- | --- | --- |
 | 1 | What kind of work do you delegate most? | The main lane — and its **name**. “migrations”, “bug triage”, “release-prep” beat the canned `feature`/`tests`/`ui`/`fast`/`complex` five |
 | 2 | Which paid subscriptions should I burn, and which should I spare? | Quota economics. Discovery cannot see plans, limits, or what a run costs — only the user knows |
-| 3 | Any CLI you already trust, or one that has burned you? | Lived experience outranks your priors about the underlying models. A trust answer qualifies a CLI for high-stakes lanes and for orchestrating — it is not an order to assign it work: "trusted + spared" means qualified but normally excluded (the spare rule is in `SKILL.md` step 3) |
+| 3 | Any CLI you already trust — and for what kind of work? Any that has burned you? | Lived experience outranks your priors about the underlying models. Trust is scoped: an answer qualifies the CLI for work like the work that earned it — follow up on the scope before it qualifies a high-stakes lane. It is never an order to assign work: "trusted + spared" means qualified but normally excluded (the spare rule is in `SKILL.md` step 3) |
 | 4 | Default to fast and cheap, or slow and thorough? | Effort / variant dials, and who gets the `complex` lane |
 
 Stop at four.
