@@ -100,17 +100,15 @@ function makeLineScanner(onObject) {
   return (chunk) => {
     if (!chunk) return;
     buf += chunk;
-    if (buf.length > MAX_BUFFERED_CHARS) {
-      buf = "";
-      return;
-    }
     const lines = buf.split("\n");
     buf = lines.pop() ?? "";
     for (const line of lines) {
+      if (line.length > MAX_BUFFERED_CHARS) continue;
       const trimmed = line.trim();
       if (!trimmed) continue;
       try { onObject(JSON.parse(trimmed)); } catch { /* skip non-JSON lines */ }
     }
+    if (buf.length > MAX_BUFFERED_CHARS) buf = "";
   };
 }
 

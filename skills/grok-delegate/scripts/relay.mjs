@@ -100,17 +100,15 @@ function makeEventScanner(onObject) {
   return (chunk) => {
     if (!chunk) return;
     buf += chunk;
-    if (buf.length > MAX_BUFFERED_CHARS) {
-      // Unterminated or malformed tail that will never close; drop it and reset
-      // so the next chunk starts a fresh scan.
-      buf = "";
-      depth = 0;
-      start = -1;
-      inString = false;
-      escaped = false;
-      return;
-    }
     for (let i = 0; i < buf.length; i += 1) {
+      if (start !== -1 && i - start >= MAX_BUFFERED_CHARS) {
+        // Drop the oversized partial object's state, but keep scanning this
+        // chunk so a later concatenated event is not lost.
+        depth = 0;
+        start = -1;
+        inString = false;
+        escaped = false;
+      }
       const ch = buf[i];
       if (inString) {
         if (escaped) escaped = false;

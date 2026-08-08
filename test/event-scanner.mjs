@@ -33,7 +33,7 @@ function loadScanner(relay, symbol) {
   return new Function(`${maxBufferedChars}\n${scanner}\nreturn ${symbol};`)();
 }
 
-// Parity guarantees these copies match every relay that ships each scanner.
+// Parity covers every makeEventScanner copy; Vibe's makeLineScanner is tested directly.
 const makeEventScanner = loadScanner("claude", "makeEventScanner");
 const makeLineScanner = loadScanner("vibe", "makeLineScanner");
 
@@ -118,8 +118,7 @@ test("event scanner: empty chunks are ignored without emitting", () => {
 
 test("event scanner: oversized unterminated tail is dropped, later event parses", () => {
   const { events, scan } = collectScanner(makeEventScanner);
-  const junk = "{".repeat(1_100_000);
-  scan(junk);
+  scan(`{"broken":"${"x".repeat(1_100_000)}`);
   assert.deepEqual(events, []);
   scan('{"ok":1}');
   assert.deepEqual(events, [{ ok: 1 }]);
@@ -127,11 +126,27 @@ test("event scanner: oversized unterminated tail is dropped, later event parses"
 
 test("event scanner: oversized tail split across chunks is still dropped", () => {
   const { events, scan } = collectScanner(makeEventScanner);
-  scan("{".repeat(600_000));
-  scan("{".repeat(600_000));
+  scan(`{"broken":"${"x".repeat(600_000)}`);
+  scan("x".repeat(600_000));
   assert.deepEqual(events, []);
   scan('{"ok":1}');
   assert.deepEqual(events, [{ ok: 1 }]);
+});
+
+test("event scanner: oversized tail does not hide a later event in the same chunk", () => {
+  const { events, scan } = collectScanner(makeEventScanner);
+  scan(`{"broken":"${"x".repeat(1_100_000)}{"ok":1}`);
+  assert.deepEqual(events, [{ ok: 1 }]);
+});
+
+test("event scanner: post-reset partial event continues in the next chunk", () => {
+  const { events, scan } = collectScanner(makeEventScanner);
+  scan(`{"broken":"${"x".repeat(1_100_000)}{"later":`);
+  assert.deepEqual(events, []);
+  scan("1");
+  assert.deepEqual(events, []);
+  scan("}");
+  assert.deepEqual(events, [{ later: 1 }]);
 });
 
 test("line scanner: one object per line", () => {
@@ -166,6 +181,12 @@ test("line scanner: oversized unterminated line is dropped, later line parses", 
   scan("x".repeat(1_100_000));
   assert.deepEqual(events, []);
   scan('{"ok":1}\n');
+  assert.deepEqual(events, [{ ok: 1 }]);
+});
+
+test("line scanner: oversized line does not hide a later event in the same chunk", () => {
+  const { events, scan } = collectScanner(makeLineScanner);
+  scan(`${"x".repeat(1_100_000)}\n{"ok":1}\n`);
   assert.deepEqual(events, [{ ok: 1 }]);
 });
 

@@ -26,9 +26,9 @@ claude. They match codex. Corrected picture:
 | `parseDuration(duration)` | BigInt variant with in-function `MAX_TIMER_MS` ceiling in **8/10**; agy and pi use the Number variant with call-site-only guards. |
 | `MAX_TIMER_MS` | defined in 9/10; pi inlines `2_147_483_647` instead. |
 | `writeJsonAtomic` | named helper **only in claude** (`${path}.tmp-${pid}`); 9/10 inline temp+rename (`${path}.${pid}.tmp`). |
-| `makeEventScanner(onObject)` | PR #39 unified and parity-gated the 7 event-relay copies. |
+| `makeEventScanner(onObject)` | PR #39 unified and parity-gated the 7 copies. |
 
-PR #39 also inlined and parity-gated `MAX_BUFFERED_CHARS` across all eight scanner relays and Vibe's `makeLineScanner`.
+PR #39 also inlined and parity-gated `MAX_BUFFERED_CHARS` across all eight relay scripts and directly tested Vibe's `makeLineScanner`.
 
 ## The plan — two commits
 

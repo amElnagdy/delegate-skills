@@ -12,7 +12,6 @@ const SYMBOLS = [
   ["gitTouchedFiles", "function", RELAYS],
   ["MAX_BUFFERED_CHARS", "const", ["claude", "cursor", "grok", "kimi", "opencode", "pi", "qoder", "vibe"]],
   ["makeEventScanner", "function", ["claude", "cursor", "grok", "kimi", "opencode", "pi", "qoder"]],
-  ["makeLineScanner", "function", ["vibe"]],
 ];
 let failed = 0;
 const check = (name, condition) => {

@@ -53,7 +53,7 @@ if (process.env.SMOKE_MODE === "qoder-success") {
 if (process.env.SMOKE_MODE === "vibe-success") {
   fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify(args));
   console.log(JSON.stringify({ role: "assistant", content: "working" }));
-  console.log(JSON.stringify({ role: "assistant", content: "fake vibe completed" }));
+  fs.writeSync(1, JSON.stringify({ role: "assistant", content: "fake vibe completed" }));
   process.exit(0);
 }
 if (["pi-success", "pi-error"].includes(process.env.SMOKE_MODE)) {
