@@ -1,14 +1,16 @@
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export async function runAgy(h) {
-  const run = (name, mode) => {
+  const run = (name, mode, preexistingFile = null) => {
     const outDir = join(h.scratch, `out-${name}-agy`);
+    const workDir = h.freshRepo(`work-${name}-agy`);
+    if (preexistingFile) writeFileSync(join(workDir, preexistingFile), "pre-existing change\n");
     const result = spawnSync(process.execPath, [
       h.relayPath("agy"),
       "--brief", h.briefPath,
-      "--cd", h.freshRepo(`work-${name}-agy`),
+      "--cd", workDir,
       "--out-dir", outDir,
     ], { env: { ...h.baseEnv, SMOKE_MODE: mode }, encoding: "utf8", timeout: 15_000 });
     return { result, value: existsSync(join(outDir, "result.json")) ? h.result(outDir) : {} };
@@ -24,6 +26,12 @@ export async function runAgy(h) {
   const silent = run("silent-noop", "agy-silent-noop");
   h.check("agy silent no-op: no final message or edits cannot report completed",
     silent.result.status !== 0 && silent.value.status === "failed");
+
+  const dirtySilent = run("dirty-silent-noop", "agy-silent-noop", "pre-existing.txt");
+  h.check("agy PR #56 regression: pre-existing dirt is not dispatch evidence",
+    dirtySilent.result.status !== 0 &&
+    dirtySilent.value.status === "failed" &&
+    dirtySilent.value.touchedFiles?.some((line) => line.endsWith("pre-existing.txt")));
 
   const analysis = run("analysis", "agy-analysis");
   h.check("agy analysis: a report without edits remains completed",

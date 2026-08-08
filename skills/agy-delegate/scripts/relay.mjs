@@ -448,6 +448,7 @@ function reportVersionTimeout(writeResult, run, timeoutMs, error) {
 }
 
 function dispatchToAgy(opts, brief, run, writeResult, watchdogMs) {
+  const beforeTree = gitTouchedFiles(opts.cd);
   const argv = buildArgv(opts, brief, run);
   // Antigravity's installer provides a native `agy` binary. Launch directly so
   // multi-line briefs and paths with spaces are passed as argv, not shell text.
@@ -562,8 +563,9 @@ function dispatchToAgy(opts, brief, run, writeResult, watchdogMs) {
     const diagnostics = stderr.split("\n").map((line) => line.trimEnd()).filter(Boolean).slice(-20);
     const permissionDenied = /no output produced\s+[—-]\s+a tool required the "([^"]+)" permission that headless\s+mode cannot prompt for, so it was auto-denied/i.exec(stderr);
     // agy-delegate has no read-only dispatch mode: a report-only analysis can complete
-    // with a clean tree, but a write-capable coding dispatch with neither evidence is a no-op.
-    const silentNoop = code === 0 && !finalMessage && (!Array.isArray(touchedFiles) || touchedFiles.length === 0);
+    // without edits, but a write-capable coding dispatch with neither evidence is a no-op.
+    const treeChanged = beforeTree !== null && touchedFiles !== null && JSON.stringify(beforeTree) !== JSON.stringify(touchedFiles);
+    const silentNoop = code === 0 && !finalMessage && !treeChanged;
     // A timed-out run is failed even if agy handles SIGTERM by exiting 0 -
     // orchestrators key off status and the relay exit code.
     const succeeded = code === 0 && !watchdogFired && !permissionDenied && !silentNoop;
