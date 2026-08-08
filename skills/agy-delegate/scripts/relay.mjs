@@ -343,7 +343,16 @@ function gitWorktreeFingerprint(cwd) {
       else if (stat.isDirectory()) {
         const nestedState = gitWorktreeFingerprint(fullPath);
         if (nestedState === null) return null;
-        fingerprint.update("submodule\0").update(git(["-C", fullPath, "rev-parse", "--verify", "HEAD"])).update(nestedState);
+        let headState;
+        try {
+          headState = git(["-C", fullPath, "rev-parse", "--verify", "HEAD"]);
+        } catch {
+          const symbolicHead = git(["-C", fullPath, "symbolic-ref", "--quiet", "HEAD"]).toString("utf8").trim();
+          const target = spawnSync("git", ["-C", fullPath, "show-ref", "--verify", "--quiet", symbolicHead], { cwd, timeout: 10_000, killSignal: "SIGKILL", stdio: "ignore" });
+          if (target.status !== 1) return null;
+          headState = Buffer.from(`unborn\0${symbolicHead}`);
+        }
+        fingerprint.update("submodule\0").update(headState).update(nestedState);
       } else return null;
     }
     return fingerprint.digest("hex");

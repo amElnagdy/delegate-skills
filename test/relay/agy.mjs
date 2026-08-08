@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export async function runAgy(h) {
@@ -17,6 +17,13 @@ export async function runAgy(h) {
     runGit(workDir, ["-c", "protocol.file.allow=always", "submodule", "add", "-q", sourceDir, "nested"]);
     runGit(workDir, ["-c", "user.name=Relay Smoke", "-c", "user.email=relay-smoke@example.invalid", "commit", "-qm", "fixture"]);
     writeFileSync(join(workDir, "nested", "tracked.txt"), "pre-existing submodule dirt\n");
+    return workDir;
+  };
+  const unbornNestedRepo = (name) => {
+    const workDir = h.freshRepo(`work-${name}-agy`);
+    const nestedDir = join(workDir, "nested");
+    mkdirSync(nestedDir);
+    runGit(nestedDir, ["init", "-q"]);
     return workDir;
   };
   const run = (name, mode, preexistingFile = null, workDir = h.freshRepo(`work-${name}-agy`)) => {
@@ -81,6 +88,15 @@ export async function runAgy(h) {
     dirtySubmoduleEdited.value.exitCode === 0 &&
     dirtySubmoduleEdited.value.finalMessage === "" &&
     dirtySubmoduleEdited.value.touchedFiles?.some((line) => line.endsWith("nested")));
+
+  const unbornNestedEdited = run("unborn-nested-edit", "agy-silent-edit", "pre-existing.txt", unbornNestedRepo("unborn-nested-edit"));
+  h.check("agy PR #56 regression: an unborn nested repo does not erase dispatch evidence",
+    unbornNestedEdited.result.status === 0 &&
+    unbornNestedEdited.value.status === "completed" &&
+    unbornNestedEdited.value.exitCode === 0 &&
+    unbornNestedEdited.value.finalMessage === "" &&
+    unbornNestedEdited.value.touchedFiles?.some((line) => line.endsWith("nested/")) &&
+    unbornNestedEdited.value.touchedFiles?.some((line) => line.endsWith("pre-existing.txt")));
 
   const analysis = run("analysis", "agy-analysis");
   h.check("agy analysis: a report without edits remains completed",
