@@ -16,7 +16,7 @@ Allocation policy only. Users cannot rank model IDs — that is your job, not th
 | --- | --- | --- |
 | 1 | What kind of work do you delegate most? | The main lane — and its **name**. “migrations”, “bug triage”, “release-prep” beat the canned `feature`/`tests`/`ui`/`fast`/`complex` five |
 | 2 | Which paid subscriptions should I burn, and which should I spare? | Quota economics. Discovery cannot see plans, limits, or what a run costs — only the user knows |
-| 3 | Any CLI you already trust, or one that has burned you? | Lived experience outranks your priors about the underlying models |
+| 3 | Any CLI you already trust, or one that has burned you? | Lived experience outranks your priors about the underlying models. A trust answer qualifies a CLI for high-stakes lanes and for orchestrating — it is not an order to assign it work: "trusted + spared" means qualified but normally excluded (the spare rule is in `SKILL.md` step 3) |
 | 4 | Default to fast and cheap, or slow and thorough? | Effort / variant dials, and who gets the `complex` lane |
 
 Stop at four.
@@ -52,8 +52,15 @@ form loses exactly what they exist to collect.
 - What to tell the user before running it: it counts session files and reads their timestamps. It
   never opens one, so no conversation content is read.
 - `usage: null` also covers a CLI with no local state directory — never report it as zero.
-- Large disparities are honest evidence: 1600 codex sessions against 20 pi sessions tells you where
-  the user actually works. That earns the main lane.
+- Large disparities show where activity occurs — not what role the CLI played in it. 1600 codex
+  sessions against 20 pi sessions cannot tell you whether the user works inside codex (and would
+  orchestrate from it) or sends delegated work to it. Treat a meaningful disparity as a signal to
+  **ask**, never to assign: "codex has the most local sessions, but the scan cannot tell whether
+  you work inside it or delegate work to it — should I protect its quota, burn it as an
+  implementer, or treat it as mixed?" Combine the answer with the burn/spare interview answer
+  before proposing anything.
+- Low usage alone is not evidence of task fit. A surplus CLI still needs to be installed,
+  authenticated, and reliable to earn a lane.
 - Small differences are noise. 97 against 61 decides nothing — fall back to the interview or to your
   opinion, and label it as such.
 - `lastUsed` weighs as much as the count. A big count that stopped months ago is a CLI the user moved

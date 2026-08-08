@@ -10,7 +10,7 @@ description: >-
 license: MIT
 compatibility: Requires Node 18+. No implementer CLIs are required — the skill discovers what is available.
 metadata:
-  version: 0.4.1
+  version: 0.4.2
 ---
 
 # Delegate Setup
@@ -107,6 +107,30 @@ decide:
 - **An unanswered question shrinks the map; it never licenses a substitution.** Propose fewer, more
   conservative lanes, name the axis you are blind on (no quota answer → say the map is quota-blind),
   and invite the answer anytime. Re-ask once at most; never backfill silence with priors.
+
+**Delegation economics.** The orchestrator reviews and lands every result — the review is the
+quality gate, so optimize total cost, not implementer prestige:
+
+- Prefer capable, authenticated, **low-usage** CLIs for bounded, objectively gated work (tests,
+  mechanical refactors, straightforward fixes) when their reliability keeps review and rework
+  economical. Lanes push token burn away from the subscriptions the user is protecting, toward
+  surplus capacity.
+- Avoid binding a lane to a CLI the user is protecting or orchestrates from, by default; bind it
+  only when the user asks for it or no acceptable alternative exists. Lanes are
+  **orchestrator-blind**: the same lane fires from every seat the user drives from, and from that
+  CLI's own seat it dispatches the CLI to itself.
+- Surplus placement breaks down when rework and review cost exceed the savings; when the
+  implementer is flaky; when correctness rides on security, concurrency, migrations, or unstated
+  domain knowledge; and when the output **is** the product (debate, architecture, research) —
+  review limits damage, it does not manufacture a good first attempt. Bind those lanes to stronger
+  implementers.
+- An explicit "spare X" answer removes X from proposed lanes by default, and overrides blanket
+  posture answers on any lane the user explicitly retains for X — ask whether the posture applies
+  there; omit the dial if unanswered. Never silently stretch one answer across an axis it
+  conflicts with.
+
+Question phrasings for the burn/spare and trust interview live in
+[references/setup-dialogue.md](references/setup-dialogue.md).
 
 Then propose the lanes. Name them after the work the user described; fall back to `feature`, `tests`,
 `ui`, `fast`, `complex`. Installed implementers only.

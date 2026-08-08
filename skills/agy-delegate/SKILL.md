@@ -10,7 +10,7 @@ description: >-
 license: MIT
 compatibility: Requires the `agy` CLI installed and authenticated, Node 18+, and git. The orchestrating agent must be able to run shell commands and read files. Shell examples assume bash/zsh (macOS/Linux, or Git Bash/WSL on Windows). Windows launch is not yet verified for this relay.
 metadata:
-  version: 0.4.1
+  version: 0.4.2
 ---
 
 # Antigravity Delegate
