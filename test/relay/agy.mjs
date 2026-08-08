@@ -3,9 +3,24 @@ import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export async function runAgy(h) {
-  const run = (name, mode, preexistingFile = null) => {
-    const outDir = join(h.scratch, `out-${name}-agy`);
+  const runGit = (cwd, args) => {
+    const result = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
+    if (result.status !== 0) throw new Error(result.stderr || `git ${args.join(" ")} failed`);
+  };
+  const dirtySubmoduleRepo = (name) => {
+    const sourceDir = h.freshRepo(`source-${name}-agy`);
+    writeFileSync(join(sourceDir, "tracked.txt"), "committed\n");
+    runGit(sourceDir, ["add", "tracked.txt"]);
+    runGit(sourceDir, ["-c", "user.name=Relay Smoke", "-c", "user.email=relay-smoke@example.invalid", "commit", "-qm", "fixture"]);
+
     const workDir = h.freshRepo(`work-${name}-agy`);
+    runGit(workDir, ["-c", "protocol.file.allow=always", "submodule", "add", "-q", sourceDir, "nested"]);
+    runGit(workDir, ["-c", "user.name=Relay Smoke", "-c", "user.email=relay-smoke@example.invalid", "commit", "-qm", "fixture"]);
+    writeFileSync(join(workDir, "nested", "tracked.txt"), "pre-existing submodule dirt\n");
+    return workDir;
+  };
+  const run = (name, mode, preexistingFile = null, workDir = h.freshRepo(`work-${name}-agy`)) => {
+    const outDir = join(h.scratch, `out-${name}-agy`);
     if (preexistingFile) writeFileSync(join(workDir, preexistingFile), "pre-existing change\n");
     const result = spawnSync(process.execPath, [
       h.relayPath("agy"),
@@ -50,6 +65,22 @@ export async function runAgy(h) {
     dirtyEdited.value.exitCode === 0 &&
     dirtyEdited.value.finalMessage === "" &&
     dirtyEdited.value.touchedFiles?.some((line) => line.endsWith("pre-existing.txt")));
+
+  const dirtySubmoduleNoop = run("dirty-submodule-noop", "agy-silent-noop", null, dirtySubmoduleRepo("dirty-submodule-noop"));
+  h.check("agy PR #56 regression: unchanged dirty submodule is not dispatch evidence",
+    dirtySubmoduleNoop.result.status === 1 &&
+    dirtySubmoduleNoop.value.status === "failed" &&
+    dirtySubmoduleNoop.value.exitCode === 1 &&
+    dirtySubmoduleNoop.value.error?.includes("without a final message") &&
+    dirtySubmoduleNoop.value.touchedFiles?.some((line) => line.endsWith("nested")));
+
+  const dirtySubmoduleEdited = run("dirty-submodule-edit", "agy-silent-edit", join("nested", "tracked.txt"), dirtySubmoduleRepo("dirty-submodule-edit"));
+  h.check("agy PR #56 regression: editing an already-dirty submodule is dispatch evidence",
+    dirtySubmoduleEdited.result.status === 0 &&
+    dirtySubmoduleEdited.value.status === "completed" &&
+    dirtySubmoduleEdited.value.exitCode === 0 &&
+    dirtySubmoduleEdited.value.finalMessage === "" &&
+    dirtySubmoduleEdited.value.touchedFiles?.some((line) => line.endsWith("nested")));
 
   const analysis = run("analysis", "agy-analysis");
   h.check("agy analysis: a report without edits remains completed",

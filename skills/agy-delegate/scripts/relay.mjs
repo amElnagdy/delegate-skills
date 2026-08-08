@@ -340,7 +340,11 @@ function gitWorktreeFingerprint(cwd) {
       fingerprint.update(String(stat.mode)).update("\0");
       if (stat.isSymbolicLink()) fingerprint.update(readlinkSync(fullPath));
       else if (stat.isFile()) fingerprint.update(git(["hash-object", "--no-filters", "--", path]));
-      else return null;
+      else if (stat.isDirectory()) {
+        const nestedState = gitWorktreeFingerprint(fullPath);
+        if (nestedState === null) return null;
+        fingerprint.update("submodule\0").update(git(["-C", fullPath, "rev-parse", "--verify", "HEAD"])).update(nestedState);
+      } else return null;
     }
     return fingerprint.digest("hex");
   } catch {
