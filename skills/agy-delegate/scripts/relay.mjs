@@ -60,7 +60,8 @@
  *
  * Exit codes: a pre-run usage error (bad/missing args, empty brief) exits 2
  * before any run and writes no result file; a missing `agy` binary exits 127;
- * otherwise the exit code mirrors Antigravity's own (0 success, non-zero failure).
+ * otherwise the exit code mirrors Antigravity's own, except that an exit-zero
+ * permission denial or silent write-dispatch no-op is forced to exit 1.
  * If the child dies on a signal, the exit code is 128 plus the signal number and
  * `result.json` records the signal.
  * Once the brief validates, `result.json` is written on every outcome -
@@ -556,24 +557,35 @@ function dispatchToAgy(opts, brief, run, writeResult, watchdogMs) {
     if (watchdogFired) killChild(child, "SIGKILL");
     const finalMessage = stdout.trim();
     if (finalMessage) writeFileSync(run.finalPath, finalMessage, "utf8");
+    const touchedFiles = gitTouchedFiles(opts.cd);
+    const stderr = readFileSync(run.stderrPath, "utf8");
+    const diagnostics = stderr.split("\n").map((line) => line.trimEnd()).filter(Boolean).slice(-20);
+    const permissionDenied = /no output produced\s+[—-]\s+a tool required the "([^"]+)" permission that headless\s+mode cannot prompt for, so it was auto-denied/i.exec(stderr);
+    // agy-delegate has no read-only dispatch mode: a report-only analysis can complete
+    // with a clean tree, but a write-capable coding dispatch with neither evidence is a no-op.
+    const silentNoop = code === 0 && !finalMessage && (!Array.isArray(touchedFiles) || touchedFiles.length === 0);
     // A timed-out run is failed even if agy handles SIGTERM by exiting 0 -
     // orchestrators key off status and the relay exit code.
-    const succeeded = code === 0 && !watchdogFired;
+    const succeeded = code === 0 && !watchdogFired && !permissionDenied && !silentNoop;
     const mapped = code ?? (constants.signals[signal] ? 128 + constants.signals[signal] : 1);
     const result = writeResult({
       status: succeeded ? "completed" : watchdogFired ? "timeout" : "failed",
       exitCode: succeeded ? 0 : mapped === 0 ? 1 : mapped,
       signal: signal ?? null,
       finalMessage,
-      touchedFiles: gitTouchedFiles(opts.cd),
-      ...(succeeded ? {} : { stderrTail: stderrTail.slice(-20) }),
+      touchedFiles,
+      ...(!succeeded || !finalMessage ? { stderrTail: diagnostics } : {}),
       ...(watchdogFired
         ? {
             error: opts.timeout !== null
               ? `agy did not finish within --timeout ${opts.timeout}; killed by the relay watchdog`
               : `agy did not exit within --print-timeout ${opts.printTimeout} plus 60s grace; killed by the relay watchdog`,
           }
-        : {}),
+        : permissionDenied
+          ? { error: `Antigravity auto-denied the ${permissionDenied[1]} permission because headless --print cannot prompt; ask the human whether to re-dispatch with --dangerously-skip-permissions and treat that run as full access` }
+          : silentNoop
+            ? { error: "agy exited 0 without a final message or observable working-tree changes; the relay cannot confirm this write dispatch completed" }
+            : {}),
     });
     printSummary(result, run.resultPath);
     process.exit(result.exitCode);
