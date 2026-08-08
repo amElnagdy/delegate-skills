@@ -79,7 +79,8 @@ anything — one question, three options, not a wizard:
 > How should I pick the lanes? **(1) Quick defaults** — I decide, no questions.
 > **(2) Interview** — about four questions on how you want work allocated.
 > **(3) Usage scan** — I re-read your CLIs’ local session folders (counts and dates only, never the
-> conversations) and let the numbers pick your main lanes. Happy to do 2 and 3 together.
+> conversations) and let the numbers place your lanes — if one CLI dominates, expect one question
+> about its role. Happy to do 2 and 3 together.
 
 - **Quick defaults** → propose immediately.
 - **Interview** → the four questions (allocation policy, never model rankings) and how to ask them
@@ -111,10 +112,12 @@ decide:
 **Delegation economics.** The orchestrator reviews and lands every result — the review is the
 quality gate, so optimize total cost, not implementer prestige:
 
-- Prefer capable, authenticated, **low-usage** CLIs for bounded, objectively gated work (tests,
-  mechanical refactors, straightforward fixes) when their reliability keeps review and rework
-  economical. Lanes push token burn away from the subscriptions the user is protecting, toward
-  surplus capacity.
+- Prefer capable, authenticated, burnable, **low-usage** CLIs for bounded, objectively gated work
+  (tests, mechanical refactors, straightforward fixes) when their reliability keeps review and
+  rework economical — lanes push token burn away from the subscriptions the user is protecting.
+  Low usage alone does not establish burnable: discovery cannot see plans, limits, or per-run
+  cost, and a rarely-used CLI may be metered or deliberately avoided. Burnable comes from the
+  user's quota answer — or, in quick defaults, from your labeled opinion.
 - Avoid binding a lane to a CLI the user is protecting or orchestrates from, by default; bind it
   only when the user asks for it or no acceptable alternative exists. Lanes are
   **orchestrator-blind**: the same lane fires from every seat the user drives from, and from that

@@ -57,8 +57,9 @@ form loses exactly what they exist to collect.
   orchestrate from it) or sends delegated work to it. Treat a meaningful disparity as a signal to
   **ask**, never to assign: "codex has the most local sessions, but the scan cannot tell whether
   you work inside it or delegate work to it — should I protect its quota, burn it as an
-  implementer, or treat it as mixed?" Combine the answer with the burn/spare interview answer
-  before proposing anything.
+  implementer, or treat it as mixed?" Combine the answer with the burn/spare interview answer when
+  the interview also ran; in a scan-only session the role answer is your only quota evidence —
+  propose conservatively and name the map quota-blind (the shrink rule in `SKILL.md` step 3).
 - Low usage alone is not evidence of task fit. A surplus CLI still needs to be installed,
   authenticated, and reliable to earn a lane.
 - Small differences are noise. 97 against 61 decides nothing — fall back to the interview or to your
