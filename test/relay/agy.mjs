@@ -37,8 +37,10 @@ export async function runAgy(h) {
 
   const dirtySilent = run("dirty-silent-noop", "agy-silent-noop", "pre-existing.txt");
   h.check("agy PR #56 regression: pre-existing dirt is not dispatch evidence",
-    dirtySilent.result.status !== 0 &&
+    dirtySilent.result.status === 1 &&
     dirtySilent.value.status === "failed" &&
+    dirtySilent.value.exitCode === 1 &&
+    dirtySilent.value.error?.includes("without a final message") &&
     dirtySilent.value.touchedFiles?.some((line) => line.endsWith("pre-existing.txt")));
 
   const dirtyEdited = run("dirty-silent-edit", "agy-silent-edit", "pre-existing.txt");
@@ -53,5 +55,6 @@ export async function runAgy(h) {
   h.check("agy analysis: a report without edits remains completed",
     analysis.result.status === 0 &&
     analysis.value.status === "completed" &&
+    analysis.value.exitCode === 0 &&
     analysis.value.finalMessage === "fake agy analysis completed");
 }
