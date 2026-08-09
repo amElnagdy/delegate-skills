@@ -19,6 +19,7 @@ const SYMBOLS = [
   ["canonicalFilePath", "function", READ_ONLY_TRIPWIRE_RELAYS],
   ["gitTripwireState", "function", READ_ONLY_TRIPWIRE_RELAYS],
   ["pathFingerprint", "function", READ_ONLY_TRIPWIRE_RELAYS],
+  ["gitIndexFingerprints", "function", READ_ONLY_TRIPWIRE_RELAYS],
   ["fingerprintPaths", "function", READ_ONLY_TRIPWIRE_RELAYS],
   ["fingerprintDirtyPaths", "function", READ_ONLY_TRIPWIRE_RELAYS],
   ["changedDirtyPaths", "function", READ_ONLY_TRIPWIRE_RELAYS],

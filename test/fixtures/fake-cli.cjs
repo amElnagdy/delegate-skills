@@ -33,6 +33,17 @@ if (process.env.SMOKE_MODE === "capture") {
 if (process.env.SMOKE_WRITE_FILE) {
   fs.writeFileSync(process.env.SMOKE_WRITE_FILE, "written by fake cli\n");
 }
+if (process.env.SMOKE_APPEND_INVALID_UTF8) {
+  fs.appendFileSync(Buffer.from(process.env.SMOKE_APPEND_INVALID_UTF8, "hex"), "appended by fake cli\n");
+}
+if (process.env.SMOKE_INDEX_ONLY_FILE) {
+  const { execFileSync } = require("node:child_process");
+  const oid = execFileSync("git", ["hash-object", "-w", "--stdin"], {
+    input: "new staged content\n",
+    encoding: "utf8",
+  }).trim();
+  execFileSync("git", ["update-index", "--cacheinfo", `100644,${oid},${process.env.SMOKE_INDEX_ONLY_FILE}`]);
+}
 if (process.env.SMOKE_GIT_RENAME_FROM && process.env.SMOKE_GIT_RENAME_TO) {
   require("node:child_process").execFileSync("git", [
     "mv", "-f", process.env.SMOKE_GIT_RENAME_FROM, process.env.SMOKE_GIT_RENAME_TO,

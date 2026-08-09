@@ -194,7 +194,7 @@ Per skill — platform, CLI version, and what the run exercised:
 - `agy-delegate` — macOS, `agy` 1.0.16: headless edit run, `--print=` delivery, absolute `--add-dir`
   workspace pin.
 - `claude-delegate` — macOS, `claude` 2.1.220: write run under `acceptEdits`; plan mode refusing an
-  edit, with the porcelain tripwire true on a violation and false on a clean run;
+  edit, with the Git tripwire true on a violation and false on a clean run;
   `--session`/`--resume-last` resume; `claude_unavailable`/127 and usage errors exiting 2 without a
   result file; deny rules and the shell sandbox blocking `git commit`, `git push`, `git -C <dir> push`,
   a nested `claude`, and a `$HOME` write.

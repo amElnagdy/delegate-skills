@@ -68,10 +68,10 @@ touched-files report shows only Grok's edits and nothing of the helper's own.
 - `touchedFiles` — `git status --porcelain` lines in the working root: your review starting point. `null` (not `[]`) when git can't report; `[]` means git ran and the tree is clean
 - `briefPath` / `eventsPath` / `finalPath` — the exact brief relay sent, the raw streaming-json event stream, and the final-message file
 - `workdir`, `autonomy`, `model`, `effort`, `resumeLast`, `startedAt`, `finishedAt`
-- `readOnlyViolation` — present on dispatched `--read-only` runs: `true` when git porcelain or the
-  fingerprint of a readable, already-dirty Git-visible path proves a change; `false` when coverage is
-  complete and detects none; `null` when coverage is incomplete. Ignored paths, submodule internals,
-  perfect restores, and attribution remain outside it — the diff review, not this flag, is the guarantee
+- `readOnlyViolation` — present on dispatched `--read-only` runs: `true` when parsed git porcelain or
+  the working-tree/index fingerprint of an already-dirty Git-visible path proves a change; `false`
+  when coverage is complete and detects none; `null` when coverage is incomplete. Ignored paths,
+  submodule internals, perfect restores, and attribution remain outside it — the diff review, not this flag, is the guarantee
 - `stderrTail` — last ~20 stderr lines; present on every run that did not complete (`failed`, `timeout`, `aborted`), absent on `completed`, `grok_unavailable`, and launch failures
 - `error` — present on a launch failure, and on `timeout` and `aborted` runs
 

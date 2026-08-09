@@ -110,8 +110,8 @@ container or VM when only a host-level boundary is acceptable.
 
 `--read-only` removes Edit, Write, Bash/PowerShell, Agent, MCP, skills, and commands from the child and
 uses `plan` mode. Local hooks still load outside that tool surface and can write. The relay compares
-`git status --porcelain` and fingerprints paths that were already dirty for every outcome, including
-aborts:
+parsed `git status --porcelain -z -uall` and fingerprints working-tree identity and index entries for
+paths that were already dirty on every outcome, including aborts:
 
 - `readOnlyViolation: true` — either signal proves a Git-visible change.
 - `readOnlyViolation: false` — coverage was complete and neither signal detected a change.

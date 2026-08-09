@@ -88,6 +88,7 @@ import { join, resolve, basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { constants, tmpdir } from "node:os";
 import { StringDecoder } from "node:string_decoder";
+import { TextDecoder } from "node:util";
 
 const VERSION_PROBE_TIMEOUT_MS = 10_000;
 const MAX_TIMER_MS = 2_147_483_647;
@@ -352,13 +353,13 @@ function gitStatusEntries(cwd) {
   try {
     const output = execFileSync("git", ["status", "--porcelain", "-z", "-uall"], {
       cwd,
-      encoding: "utf8",
       timeout: 10_000,
       killSignal: "SIGKILL",
       stdio: ["ignore", "pipe", "ignore"],
       maxBuffer: 64 * 1024 * 1024,
     });
-    const fields = output.split("\0").filter((field) => field.length > 0);
+    const fields = new TextDecoder("utf-8", { fatal: true }).decode(output)
+      .split("\0").filter((field) => field.length > 0);
     const entries = [];
     for (let i = 0; i < fields.length; i += 1) {
       const entry = fields[i];
@@ -456,15 +457,40 @@ function pathFingerprint(absolutePath) {
   }
 }
 
+function gitIndexFingerprints(root, paths) {
+  try {
+    const output = execFileSync("git", ["ls-files", "--stage", "-z"], {
+      cwd: root,
+      timeout: 10_000,
+      killSignal: "SIGKILL",
+      stdio: ["ignore", "pipe", "ignore"],
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    const wanted = new Set(paths);
+    const prints = new Map(paths.map((path) => [path, []]));
+    for (const field of new TextDecoder("utf-8", { fatal: true }).decode(output).split("\0")) {
+      if (!field) continue;
+      const separator = field.indexOf("\t");
+      if (separator === -1) return null;
+      const path = field.slice(separator + 1);
+      if (wanted.has(path)) prints.get(path).push(field.slice(0, separator));
+    }
+    return prints;
+  } catch {
+    return null;
+  }
+}
+
 function fingerprintPaths(root, paths) {
   // `complete` goes false the moment one path cannot be fingerprinted, so the caller reports
   // "unknown" instead of an unearned clean bill of health.
+  const indexPrints = gitIndexFingerprints(root, paths);
   const prints = new Map();
-  let complete = true;
+  let complete = indexPrints !== null;
   for (const path of paths) {
-    const print = pathFingerprint(join(root, path));
-    if (print === FINGERPRINT_UNREADABLE || print === FINGERPRINT_DIRECTORY) complete = false;
-    prints.set(path, print);
+    const file = pathFingerprint(join(root, path));
+    if (file === FINGERPRINT_UNREADABLE || file === FINGERPRINT_DIRECTORY) complete = false;
+    prints.set(path, { file, index: indexPrints?.get(path) ?? null });
   }
   return { prints, complete };
 }
@@ -493,9 +519,13 @@ function changedDirtyPaths(before) {
   const changed = [];
   for (const [path, print] of before.prints) {
     const current = now.prints.get(path);
-    if (print === FINGERPRINT_UNREADABLE || current === FINGERPRINT_UNREADABLE) continue;
-    if (print === FINGERPRINT_DIRECTORY && current === FINGERPRINT_DIRECTORY) continue;
-    if (current !== print) changed.push(path);
+    const fileKnown = print.file !== FINGERPRINT_UNREADABLE && current.file !== FINGERPRINT_UNREADABLE;
+    const fileChanged = fileKnown &&
+      !(print.file === FINGERPRINT_DIRECTORY && current.file === FINGERPRINT_DIRECTORY) &&
+      current.file !== print.file;
+    const indexChanged = print.index !== null && current.index !== null &&
+      JSON.stringify(current.index) !== JSON.stringify(print.index);
+    if (fileChanged || indexChanged) changed.push(path);
   }
   return { changed: changed.sort(), complete: before.complete && now.complete };
 }
@@ -735,8 +765,8 @@ function dispatchToGrok(opts, run, writeResult) {
   // and flags a violation in the result instead of pretending to enforce.
   const relayArtifacts = [run.briefPath, run.eventsPath, run.finalPath, run.resultPath];
   const beforeTree = opts.autonomy === "read-only" ? gitTripwireState(opts.cd, relayArtifacts) : null;
-  // Contents of the paths that are ALREADY dirty. Their porcelain lines will not move if the
-  // run edits them, so the line comparison alone cannot see those writes.
+  // Working-tree and index state for paths that are ALREADY dirty. Their porcelain lines will not
+  // move if the run edits them, so the line comparison alone cannot see those writes.
   const beforeFingerprints = opts.autonomy === "read-only" ? fingerprintDirtyPaths(opts.cd, relayArtifacts) : null;
   // every dispatched result that reports touchedFiles carries the verdict, aborted runs included -
   // an aborted --read-only review can still have modified the tree

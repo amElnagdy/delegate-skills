@@ -133,7 +133,8 @@ pre-approves PowerShell so the run remains non-interactive, but that shell is no
 `claude.exe` and npm `claude.cmd` launch paths are implemented; Windows verification is pending.
 
 `--read-only` uses `plan` mode with only Read, Glob, and Grep. It removes edit, write, and shell paths,
-then compares git porcelain and fingerprints the Git-visible paths that were already dirty.
+then compares parsed git porcelain and fingerprints the working-tree identity and index entries of
+Git-visible paths that were already dirty.
 `readOnlyViolation` is `true` when either signal proves a change, `false` when coverage is complete and
 detects none, and `null` when coverage is incomplete. This is a reporting tripwire, not an OS boundary:
 ignored paths and perfect restores are outside it, local hooks can write, and concurrent changes cannot

@@ -41,6 +41,9 @@ async function runScenario(h, skill, scenario) {
   if (scenario.repo === false) mkdirSync(workDir);
   if (scenario.unknown) addDirtySubmodule(workDir);
   if (scenario.dirty) writeFileSync(join(workDir, "already-dirty.txt"), "pre-existing\n");
+  if (scenario.invalidUtf8) {
+    writeFileSync(Buffer.concat([Buffer.from(`${workDir}/invalid-`), Buffer.from([0xff])]), "pre-existing\n");
+  }
   if (scenario.untrackedDirectory) {
     mkdirSync(join(workDir, "loose"));
     writeFileSync(join(workDir, "loose", "existing.txt"), "pre-existing\n");
@@ -52,6 +55,14 @@ async function runScenario(h, skill, scenario) {
     runGit(workDir, ["-c", "user.name=Smoke", "-c", "user.email=smoke@example.invalid", "commit", "-qm", "fixture"]);
     if (scenario.preexistingArtifactRename) runGit(workDir, ["mv", "source.txt", "final.txt"]);
   }
+  if (scenario.indexOnly) {
+    writeFileSync(join(workDir, "index-dirty.txt"), "base\n");
+    runGit(workDir, ["add", "index-dirty.txt"]);
+    runGit(workDir, ["-c", "user.name=Smoke", "-c", "user.email=smoke@example.invalid", "commit", "-qm", "fixture"]);
+    writeFileSync(join(workDir, "index-dirty.txt"), "old staged content\n");
+    runGit(workDir, ["add", "index-dirty.txt"]);
+    writeFileSync(join(workDir, "index-dirty.txt"), "worktree content\n");
+  }
   const outDir = scenario.artifactsInside
     ? workDir
     : join(h.scratch, `out-${skill}-${scenario.name}`);
@@ -61,6 +72,8 @@ async function runScenario(h, skill, scenario) {
       : scenario.dirty ? "claude-read-only-append" : "claude-read-only-clean",
     ...(skill === "grok" && scenario.dirty ? { SMOKE_APPEND_FILE: "already-dirty.txt" } : {}),
     ...(scenario.untrackedDirectory ? { SMOKE_WRITE_FILE: join("loose", "new.txt") } : {}),
+    ...(scenario.invalidUtf8 ? { SMOKE_APPEND_INVALID_UTF8: "696e76616c69642dff" } : {}),
+    ...(scenario.indexOnly ? { SMOKE_INDEX_ONLY_FILE: "index-dirty.txt" } : {}),
     ...(scenario.artifactEndpointRename ? {
       SMOKE_GIT_RENAME_FROM: "source.txt",
       SMOKE_GIT_RENAME_TO: "final.txt",
@@ -79,11 +92,26 @@ async function runScenario(h, skill, scenario) {
 }
 
 export async function runReadOnlyTripwire(h) {
+  let invalidUtf8Filenames = !h.WIN;
+  if (invalidUtf8Filenames) {
+    const probeDir = join(h.scratch, "invalid-utf8-probe");
+    mkdirSync(probeDir);
+    try {
+      writeFileSync(Buffer.concat([Buffer.from(`${probeDir}/probe-`), Buffer.from([0xff])]), "probe\n");
+    } catch {
+      invalidUtf8Filenames = false;
+    }
+  }
+  if (!invalidUtf8Filenames) {
+    console.log("  skip  invalid UTF-8 filename: host filesystem rejects arbitrary filename bytes");
+  }
   const scenarios = [
     { name: "clean", expected: false },
     { name: "unknown", repo: false, expected: null },
     { name: "already-dirty", dirty: true, expected: true },
+    { name: "index-only-already-dirty", indexOnly: true, expected: true },
     { name: "proof-over-unknown", dirty: true, unknown: true, expected: true },
+    ...(invalidUtf8Filenames ? [{ name: "invalid-utf8-filename", invalidUtf8: true, expected: null }] : []),
     { name: "new-file-in-untracked-directory", untrackedDirectory: true, expected: true },
     { name: "relay-artifacts", artifactsInside: true, expected: false },
     { name: "preexisting-artifact-rename", artifactsInside: true, preexistingArtifactRename: true, expected: false },
