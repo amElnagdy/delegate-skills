@@ -776,6 +776,7 @@ function pathFingerprint(absolutePath) {
 }
 
 function gitIndexFingerprints(root, paths) {
+  if (paths.length === 0) return new Map();
   try {
     const output = execFileSync("git", ["ls-files", "--stage", "-z"], {
       cwd: root,
