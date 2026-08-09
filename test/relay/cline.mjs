@@ -118,6 +118,15 @@ export async function runCline(h) {
       "--cd", workDir,
     ], { env: h.baseEnv, encoding: "utf8" });
     h.check("cline win32 brief: %/quote/newline brief is rejected before dispatch", unsafeBrief.status === 2);
+
+    const unsafeCdPath = join(h.scratch, "dir-with-!bang");
+    mkdirSync(unsafeCdPath, { recursive: true });
+    const unsafeCd = spawnSync(process.execPath, [
+      h.relayPath("cline"),
+      "--brief", h.briefPath,
+      "--cd", unsafeCdPath,
+    ], { env: h.baseEnv, encoding: "utf8" });
+    h.check("cline win32 cd: path with % or ! is rejected before dispatch", unsafeCd.status === 2);
   }
 
   const errorOutDir = join(h.scratch, "out-error-cline");

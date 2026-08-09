@@ -15,11 +15,12 @@
  * is used. The `cline` process it launches does authenticate — exactly as you do
  * at the terminal. Read this file before you run it.
  *
- * The brief is passed to cline as its `[prompt]` positional argument — cline's
- * `--json` output mode requires a prompt argument (it rejects a pipe-only
- * invocation), so stdin is never used to send the brief. The single prompt token
- * is argv — quote it, keep briefs focused, and keep secrets out of the brief on
- * shared machines — reference workspace files or environment variables instead.
+ * The brief is passed to cline as its `[prompt]` positional argument — the
+ * transport this relay uses. Cline's `--json` output mode accepts a prompt
+ * argument or piped stdin; the relay always uses the positional, so stdin is
+ * never used to send the brief. The single prompt token is argv — quote it,
+ * keep briefs focused, and keep secrets out of the brief on shared machines —
+ * reference workspace files or environment variables instead.
  *
  * It deliberately does NOT commit. Committing is always the orchestrator's job
  * — after it reviews the diff and re-runs the project gates.
@@ -29,13 +30,13 @@
  * is no sandbox; `--plan` restricts cline to plan mode (analysis only). The diff
  * reported in `touchedFiles` is the record of what changed.
  *
-*  On native Windows `cline` is an npm-installed `.cmd` shim this relay launches
- *  with shell:true. shell:true does not quote argv, so the two spaceable values
- *  (`--cwd` and the brief) are quoted by the relay — which is why a brief
- *  containing %, !, a quote, or a newline cannot be dispatched on Windows. Keep
- *  the brief to a single line on Windows — cline rejects a bare model id, so
- *  `--model` must be a vendor-qualified id like `deepseek/deepseek-v4-flash`
- *  when given.
+* On native Windows `cline` is an npm-installed `.cmd` shim this relay launches
+ * with shell:true, which does not quote argv: the relay quotes the two spaceable
+ * values (`--cwd` and the brief) itself. That is why a brief containing %, !, a
+ * quote, or a newline cannot be dispatched on Windows — keep the brief on a
+ * single line there. And `--model` ids must be vendor-qualified
+ * (`provider/model`, e.g. `deepseek/deepseek-v4-flash`): cline rejects a bare
+ * model id such as `deepseek-v4-flash`.
  *
  * Usage:
  *   node relay.mjs --brief <file> [options]
@@ -204,7 +205,7 @@ function parseArgs(argv) {
       fail(`--${flag} value contains unsupported characters (allowed: letters, digits, . _ : / -)`);
     }
   }
-  // cline 3.0.52+ rejects a bare model id at startup ("expected modelType/model").
+  // cline rejects a bare model id at startup ("expected modelType/model").
   // Fail before dispatch instead of after, so the requested id is never ambiguous.
   if (opts.model !== null && !opts.model.includes("/")) {
     fail(`--model "${opts.model}" is not a vendor-qualified id; cline rejects it (expected provider/model, e.g. deepseek/deepseek-v4-flash)`);
@@ -220,6 +221,9 @@ function parseArgs(argv) {
   }
   if (!existsSync(opts.cd) || !statSync(opts.cd).isDirectory()) {
     fail(`working directory not found: ${opts.cd}`);
+  }
+  if (process.platform === "win32" && /[\0\r\n"%!]/.test(opts.cd)) {
+    fail(`--cd "${opts.cd}" contains characters (%, !, a quote, or a newline) that the Windows cline.cmd launch cannot serialize safely; choose a path without them`);
   }
   return opts;
 }
@@ -362,10 +366,9 @@ function quoteWindowsArg(value) {
 }
 
 function buildArgv(opts, brief) {
-  // cline's --json requires the prompt as a positional [prompt] argument — it
-  // rejects a pipe-only invocation with "JSON output mode requires a prompt
-  // argument or piped stdin". -v (verbose) is required so run_start carries
-  // the requested provider/model.
+  // cline's --json accepts the prompt as a positional [prompt] argument or as
+  // piped stdin; the relay always uses the positional. -v (verbose) is required
+  // so run_start carries the requested provider/model.
   const argv = ["--json", "-v"];
   if (opts.provider) argv.push("--provider", opts.provider);
   if (opts.model) argv.push("--model", opts.model);
@@ -775,7 +778,7 @@ function printSummary(result, resultPath) {
   if (result.planMode) lines.push("mode: plan-only (analysis, no edits)");
   if (result.resumed) lines.push("mode: resumed an existing session");
   if (result.actualModel) lines.push(`model: ${result.actualProvider ? `${result.actualProvider}/` : ""}${result.actualModel}`);
-  if (result.sessionId) lines.push(`session id (resume with: --session ${result.sessionId}): ${result.sessionId}`);
+  if (result.sessionId) lines.push(`session id: ${result.sessionId} (resume with: --session ${result.sessionId})`);
   const touched = result.touchedFiles;
   if (touched === null) {
     lines.push("touched files: git unavailable - inspect the working tree directly");
@@ -798,4 +801,8 @@ function printSummary(result, resultPath) {
   process.stdout.write(`${lines.join("\n")}\n`);
 }
 
-main();
+main().catch((error) => {
+  const detail = error && error.stack ? error.stack : String(error);
+  process.stderr.write(`relay: unexpected internal error: ${detail}\n`);
+  fail("relay: unexpected internal error (no result written)");
+});
