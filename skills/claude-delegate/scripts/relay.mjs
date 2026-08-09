@@ -774,7 +774,7 @@ function pathFingerprint(absolutePath) {
   }
   if (stats.isSymbolicLink()) {
     try {
-      return `symlink:${readlinkSync(absolutePath)}`;
+      return `symlink:${readlinkSync(absolutePath, { encoding: "buffer" }).toString("hex")}`;
     } catch {
       return FINGERPRINT_UNREADABLE;
     }

@@ -45,6 +45,9 @@ async function runScenario(h, skill, scenario) {
     writeFileSync(join(workDir, "already-dirty.txt"), "pre-existing\n");
     symlinkSync("already-dirty.txt", join(workDir, "final.txt"));
   }
+  if (scenario.rawSymlinkTarget) {
+    symlinkSync(Buffer.from([0xff]), join(workDir, "already-dirty-link"));
+  }
   if (scenario.caseAliasedArtifact || scenario.caseRenamedArtifact || scenario.caseDistinctUserWrite) {
     writeFileSync(join(workDir, "FINAL.TXT"), "tracked user file\n");
     runGit(workDir, ["add", "FINAL.TXT"]);
@@ -91,6 +94,10 @@ async function runScenario(h, skill, scenario) {
     ...(appendFile ? { SMOKE_APPEND_FILE: appendFile } : {}),
     ...(scenario.untrackedDirectory ? { SMOKE_WRITE_FILE: join("loose", "new.txt") } : {}),
     ...(scenario.invalidUtf8 ? { SMOKE_APPEND_INVALID_UTF8: "696e76616c69642dff" } : {}),
+    ...(scenario.rawSymlinkTarget ? {
+      SMOKE_RETARGET_SYMLINK: "already-dirty-link",
+      SMOKE_SYMLINK_TARGET_HEX: "fe",
+    } : {}),
     ...(scenario.indexOnly ? { SMOKE_INDEX_ONLY_FILE: "index-dirty.txt" } : {}),
     ...(scenario.artifactEndpointRename ? {
       SMOKE_GIT_RENAME_FROM: "source.txt",
@@ -147,6 +154,7 @@ export async function runReadOnlyTripwire(h) {
     { name: "preexisting-artifact-rename", artifactsInside: true, preexistingArtifactRename: true, expected: false },
     { name: "artifact-endpoint-rename", artifactsInside: true, artifactEndpointRename: true, expected: true },
     { name: "relay-artifacts-plus-write", artifactsInside: true, dirty: true, expected: true },
+    ...(!h.WIN ? [{ name: "raw-symlink-target-write", rawSymlinkTarget: true, expected: true }] : []),
     ...(!h.WIN ? [{ name: "artifact-symlink-target-write", artifactsInside: true, artifactSymlink: true, expected: true }] : []),
   ];
   for (const skill of ["claude", "grok"]) {

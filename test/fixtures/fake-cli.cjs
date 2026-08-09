@@ -36,6 +36,10 @@ if (process.env.SMOKE_WRITE_FILE) {
 if (process.env.SMOKE_APPEND_INVALID_UTF8) {
   fs.appendFileSync(Buffer.from(process.env.SMOKE_APPEND_INVALID_UTF8, "hex"), "appended by fake cli\n");
 }
+if (process.env.SMOKE_RETARGET_SYMLINK && process.env.SMOKE_SYMLINK_TARGET_HEX) {
+  fs.unlinkSync(process.env.SMOKE_RETARGET_SYMLINK);
+  fs.symlinkSync(Buffer.from(process.env.SMOKE_SYMLINK_TARGET_HEX, "hex"), process.env.SMOKE_RETARGET_SYMLINK);
+}
 if (process.env.SMOKE_INDEX_ONLY_FILE) {
   const { execFileSync } = require("node:child_process");
   const oid = execFileSync("git", ["hash-object", "-w", "--stdin"], {
