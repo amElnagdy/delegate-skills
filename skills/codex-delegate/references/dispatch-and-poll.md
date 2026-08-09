@@ -52,10 +52,11 @@ touched-files report shows only Codex's edits and nothing of the helper's own.
 
 `--clean-env` is not a broader security boundary: Codex can still access files and other same-user
 secrets available through `HOME`, `CODEX_HOME`, OS facilities, and the selected sandbox. File- or
-OS-backed auth and normal configuration still load, but environment-backed auth (`CODEX_API_KEY`,
-`OPENAI_API_KEY`, or `CODEX_ACCESS_TOKEN`) and provider, proxy, certificate, or MCP settings that
-reference a stripped variable need that variable named with `--keep-env`. The same filtered
-environment is used for preflight and dispatch.
+OS-backed auth and normal configuration still load, but direct environment-backed auth
+(`CODEX_API_KEY` or `CODEX_ACCESS_TOKEN`) needs that variable named with `--keep-env`.
+`OPENAI_API_KEY` can still matter as a custom-provider credential; provider, proxy, certificate, or
+MCP settings that reference any stripped variable likewise need it named with `--keep-env`. The same
+filtered environment is used for preflight and dispatch.
 
 ## The result
 
