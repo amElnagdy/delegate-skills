@@ -715,12 +715,12 @@ function dirtyPaths(cwd) {
 
 function canonicalFilePath(path) {
   const absolute = resolve(path);
-  try { return join(realpathSync(dirname(absolute)), basename(absolute)); } catch { return absolute; }
+  try { return join(realpathSync.native(dirname(absolute)), basename(absolute)); } catch { return absolute; }
 }
 
 function gitPathKey(root, path) {
   let canonicalRoot;
-  try { canonicalRoot = realpathSync(root); } catch { canonicalRoot = resolve(root); }
+  try { canonicalRoot = realpathSync.native(root); } catch { canonicalRoot = resolve(root); }
   const key = relative(canonicalRoot, canonicalFilePath(path));
   return process.platform === "win32" ? key.replaceAll("\\", "/") : key;
 }

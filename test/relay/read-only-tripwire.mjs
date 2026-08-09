@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
-import { delimiter, join, relative } from "node:path";
+import { existsSync, mkdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
+import { delimiter, join } from "node:path";
 
 function runGit(cwd, args) {
   const command = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
@@ -91,19 +91,6 @@ async function runScenario(h, skill, scenario) {
     const verdict = h.result(outDir).readOnlyViolation;
     h.check(`${skill} ${scenario.name}: verdict is ${String(scenario.expected)} (got ${String(verdict)})`,
       verdict === scenario.expected);
-    if (h.WIN && scenario.artifactsInside && verdict !== scenario.expected) {
-      const gitRoot = runGit(workDir, ["rev-parse", "--show-toplevel"]);
-      const canonicalRoot = realpathSync(gitRoot);
-      const canonicalWorkDir = realpathSync(workDir);
-      console.error(JSON.stringify({
-        workDir,
-        gitRoot,
-        canonicalRoot,
-        canonicalWorkDir,
-        finalKey: relative(canonicalRoot, join(canonicalWorkDir, "final.txt")).replaceAll("\\", "/"),
-        status: runGit(workDir, ["status", "--porcelain", "-z", "-uall"]),
-      }));
-    }
   }
   if (outcome.exitCode !== 0) console.error(`${skill} ${scenario.name} relay stderr:\n${outcome.stderr}`);
 }
