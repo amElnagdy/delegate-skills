@@ -41,6 +41,27 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 Relative `--file`, `--read`, and `--history-file` paths resolve against `--cd`, not the relay's own
 cwd, so they mean what they look like they mean regardless of flag order.
 
+### Local and self-hosted endpoints
+
+`--api-base` points Aider at any OpenAI-compatible server - llama.cpp's server, Ollama, vLLM,
+LM Studio - so a delegated run can go to a model on the user's own hardware:
+
+```bash
+node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo \
+  --model openai/<served-model-name> --api-base http://127.0.0.1:<port>/v1 \
+  --edit-format whole --file src/target.py
+```
+
+The `openai/` prefix selects the protocol, not a provider catalog entry; the name after it is
+whatever the server reports. Export any non-empty `OPENAI_API_KEY` - the client library requires the
+header even when the server ignores its value. `--edit-format whole` is the usual choice for smaller
+local models, which frequently cannot produce the exact search/replace blocks Aider's default `diff`
+format needs; pair it with `--file` so whole-file rewrites stay small.
+
+A server that is not listening reads as a hang rather than an error: Aider retries the connection
+until the `--timeout` watchdog fires and the relay reports `status: "timeout"`. Check the endpoint is
+up before dispatching a long brief.
+
 The default `30m` watchdog suits short runs. Implementation briefs routinely need `--timeout 1h` or
 `2h`; a watchdog that fires mid-edit leaves a partial tree.
 

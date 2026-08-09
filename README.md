@@ -64,7 +64,7 @@ Skip setup when you want one implementer or one-off dials. Pick the skill for a 
 
 | Skill | Implementer CLI | Write access (default) | Read-only run | Resume |
 | --- | --- | --- | --- | --- |
-| [`aider-delegate`](skills/aider-delegate/SKILL.md) | [Aider](https://aider.chat) (`aider`) | `--yes-always`; no sandbox or permission modes; commits force-disabled [^aider] | `--read-only` (`--dry-run`) | `--resume-last` (chat history, per-worktree) |
+| [`aider-delegate`](skills/aider-delegate/SKILL.md) | [Aider](https://aider.chat) (`aider`) — any OpenAI-compatible endpoint, including a local or self-hosted model via `--api-base` | `--yes-always`; no sandbox or permission modes; commits force-disabled [^aider] | `--read-only` (`--dry-run`) | `--resume-last` (chat history, per-worktree) |
 | [`agy-delegate`](skills/agy-delegate/SKILL.md) | Google Antigravity (`agy`) | Antigravity's own `permissions`; bypass opt-in | — [^none] | `--resume-last`, `--conversation <id>` |
 | [`claude-delegate`](skills/claude-delegate/SKILL.md) | [Claude Code](https://code.claude.com/docs/en/overview) (`claude`) | `acceptEdits` + explicit tool surface | `--read-only` (`plan` mode) | `--resume-last`, `--session <id>` |
 | [`codex-delegate`](skills/codex-delegate/SKILL.md) | [OpenAI Codex](https://github.com/openai/codex) (`codex`) | `--sandbox workspace-write` | `--read-only` | `--resume-last`, `--session <id>` |

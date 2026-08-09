@@ -5,8 +5,11 @@ description: >-
   it yourself. Use this whenever the user wants to hand implementation work to Aider - phrasings like
   "have Aider do X", "delegate this to aider", "run it through Aider", or "use Aider to
   implement/fix/refactor" - or wants to run a queue of coding tasks through Aider while staying the
-  reviewer. Also covers driving Aider against a local OpenAI-compatible endpoint. DO NOT USE for tasks
-  small enough to do inline, or when the user wants the code written directly without delegating.
+  reviewer. Also the skill for delegating coding work to a **local or self-hosted model** - phrasings
+  like "have my local model do X", "delegate this to llama.cpp / Ollama / vLLM / LM Studio", or "run
+  this through the local LLM" - since Aider drives any OpenAI-compatible endpoint via `--api-base`.
+  DO NOT USE for tasks small enough to do inline, or when the user wants the code written directly
+  without delegating.
 license: MIT
 compatibility: Requires the `aider` CLI installed with a configured model, Node 18+, and git. The orchestrating agent must be able to run shell commands and read files. Shell examples assume bash/zsh (macOS/Linux, or Git Bash/WSL on Windows).
 metadata:
@@ -54,15 +57,31 @@ otherwise writes `.aider*` into `.gitignore` on startup and dirties the tree you
 ## Choose the model
 
 Aider uses its own configured model when `--model` is omitted. Pass `--model <name>` to pick another.
-To drive an OpenAI-compatible endpoint - including a local one - pair the model with `--api-base`:
+
+## Local and self-hosted models
+
+Aider talks to any OpenAI-compatible endpoint, so this is also the skill for delegating to a model
+running on the user's own hardware - llama.cpp's server, Ollama, vLLM, LM Studio, or anything else
+that serves the same API. Pair `--model` with `--api-base`:
 
 ```bash
 node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo \
-  --model openai/<served-model-name> --api-base http://127.0.0.1:8080/v1
+  --model openai/<served-model-name> --api-base http://127.0.0.1:<port>/v1
 ```
 
-Local endpoints usually still want a placeholder `OPENAI_API_KEY` in the environment, because the
-client library requires the header even when the server ignores it.
+Three things differ from a hosted provider:
+
+- **The `openai/` prefix is required.** It tells Aider to speak the OpenAI protocol to your endpoint;
+  the part after it is whatever name your server reports, not a provider catalog name.
+- **A placeholder key is still needed.** Export any non-empty `OPENAI_API_KEY`. The client library
+  requires the header even when the server ignores its value.
+- **Ask for a smaller edit format.** Local models often fail Aider's default `diff` format, which
+  requires exact search/replace blocks. `--edit-format whole` trades tokens for reliability; keep the
+  brief's scope tight with `--file` so whole-file rewrites stay cheap.
+
+A local endpoint that is not running looks like a hang, not an error: Aider retries the connection
+until the relay's `--timeout` watchdog fires and reports `status: "timeout"`. Confirm the server is up
+before dispatching a long brief.
 
 ## The loop
 
