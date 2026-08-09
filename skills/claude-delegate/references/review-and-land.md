@@ -44,8 +44,9 @@ forbids staging. A local hook, another tool, or an unusual command path may stil
 index.
 
 For `--read-only`, treat `readOnlyViolation: true` as a hard warning and `null` as unknown. `false`
-means only that the porcelain lines stayed equal; an already-dirty file can change without altering
-its line. Compare the actual diff when read-only integrity matters.
+means the Git-visible tripwire had complete coverage and detected no change. Ignored paths, submodule
+internals, perfect restores, and attribution remain outside its contract. Compare the actual diff when
+read-only integrity matters.
 
 ## Hold the diff against the brief
 

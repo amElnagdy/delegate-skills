@@ -30,6 +30,10 @@
  * agent's own edit tool, and headless `plan` mode is advisory — a determined run
  * can still write the working tree. Always confirm `touchedFiles` after a
  * read-only run; don't rely on the flag alone.
+ * The relay reports `readOnlyViolation` as true when git porcelain or an
+ * already-dirty Git-visible path proves a change, false when coverage is
+ * complete and detects none, and null when coverage is incomplete. It cannot
+ * attribute a concurrent change to Grok and does not cover ignored paths.
  *
  * The brief is handed to grok via `--prompt-file`, never argv: it stays out of
  * the host process list, isn't bounded by the OS arg-length cap, and a brief
@@ -79,7 +83,7 @@
 
 import { spawn, execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, writeFileSync, renameSync, readFileSync, existsSync, appendFileSync, lstatSync, readlinkSync, openSync, readSync, closeSync } from "node:fs";
+import { mkdirSync, writeFileSync, renameSync, readFileSync, existsSync, appendFileSync, lstatSync, readlinkSync, openSync, readSync, closeSync, realpathSync } from "node:fs";
 import { join, resolve, basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { constants, tmpdir } from "node:os";
@@ -332,6 +336,8 @@ function gitRepoRoot(cwd) {
     return execFileSync("git", ["rev-parse", "--show-toplevel"], {
       cwd,
       encoding: "utf8",
+      timeout: 10_000,
+      killSignal: "SIGKILL",
       stdio: ["ignore", "pipe", "ignore"],
     }).trim() || null;
   } catch {
@@ -347,6 +353,8 @@ function dirtyPaths(cwd) {
     const output = execFileSync("git", ["status", "--porcelain", "-z", "-uall"], {
       cwd,
       encoding: "utf8",
+      timeout: 10_000,
+      killSignal: "SIGKILL",
       stdio: ["ignore", "pipe", "ignore"],
       maxBuffer: 64 * 1024 * 1024,
     });
@@ -430,7 +438,7 @@ function fingerprintPaths(root, paths) {
   return { prints, complete };
 }
 
-function fingerprintDirtyPaths(cwd) {
+function fingerprintDirtyPaths(cwd, excludedPaths) {
   // Only the already-dirty set is covered. A path that is clean at dispatch and gets written
   // surfaces as a brand-new porcelain line anyway, and fingerprinting a whole repository per run
   // would cost far more than the case it covers.
@@ -438,21 +446,31 @@ function fingerprintDirtyPaths(cwd) {
   if (root === null) return null;
   const paths = dirtyPaths(cwd);
   if (paths === null) return null;
-  return { root, ...fingerprintPaths(root, paths) };
+  const canonical = (path) => {
+    const absolute = resolve(path);
+    try { return join(realpathSync(dirname(absolute)), basename(absolute)); } catch { return absolute; }
+  };
+  const excluded = new Set(excludedPaths.map(canonical));
+  return {
+    root,
+    ...fingerprintPaths(root, paths.filter((path) => !excluded.has(canonical(resolve(root, path))))),
+  };
 }
 
 function changedDirtyPaths(before) {
   // Re-fingerprint exactly the baseline paths, not whatever happens to be dirty now: a path the
   // run newly dirtied is already reported by the porcelain comparison, and letting an unreadable
   // one of those blind this signal would be a regression, not caution.
-  if (!before || !before.complete) return null;
+  if (!before) return { changed: [], complete: false };
   const now = fingerprintPaths(before.root, [...before.prints.keys()]);
-  if (!now.complete) return null;
   const changed = [];
   for (const [path, print] of before.prints) {
-    if (now.prints.get(path) !== print) changed.push(path);
+    const current = now.prints.get(path);
+    if (print === FINGERPRINT_UNREADABLE || current === FINGERPRINT_UNREADABLE) continue;
+    if (print === FINGERPRINT_DIRECTORY && current === FINGERPRINT_DIRECTORY) continue;
+    if (current !== print) changed.push(path);
   }
-  return changed.sort();
+  return { changed: changed.sort(), complete: before.complete && now.complete };
 }
 
 function readOnlyVerdict(beforeTree, afterTree, beforeFingerprints) {
@@ -462,8 +480,8 @@ function readOnlyVerdict(beforeTree, afterTree, beforeFingerprints) {
   const changed = changedDirtyPaths(beforeFingerprints);
   const porcelainMoved =
     beforeTree !== null && afterTree !== null && JSON.stringify(beforeTree) !== JSON.stringify(afterTree);
-  if (porcelainMoved || (changed !== null && changed.length > 0)) return true;
-  if (beforeTree === null || afterTree === null || changed === null) return null;
+  if (porcelainMoved || changed.changed.length > 0) return true;
+  if (beforeTree === null || afterTree === null || !changed.complete) return null;
   return false;
 }
 
@@ -690,8 +708,9 @@ function dispatchToGrok(opts, run, writeResult) {
   const beforeTree = opts.autonomy === "read-only" ? gitTouchedFiles(opts.cd) : null;
   // Contents of the paths that are ALREADY dirty. Their porcelain lines will not move if the
   // run edits them, so the line comparison alone cannot see those writes.
-  const beforeFingerprints = opts.autonomy === "read-only" ? fingerprintDirtyPaths(opts.cd) : null;
-  // every result that reports touchedFiles carries the verdict, aborted runs included -
+  const relayArtifacts = [run.briefPath, run.eventsPath, run.finalPath, run.resultPath];
+  const beforeFingerprints = opts.autonomy === "read-only" ? fingerprintDirtyPaths(opts.cd, relayArtifacts) : null;
+  // every dispatched result that reports touchedFiles carries the verdict, aborted runs included -
   // an aborted --read-only review can still have modified the tree
   const readOnlyFlag = (touched) =>
     opts.autonomy === "read-only"
@@ -812,6 +831,7 @@ function dispatchToGrok(opts, run, writeResult) {
     if (settled) return;
     settled = true;
     clearWatchdog();
+    const touchedFiles = gitTouchedFiles(opts.cd);
     const result = writeResult({
       status: "failed",
       exitCode: 1,
@@ -819,7 +839,8 @@ function dispatchToGrok(opts, run, writeResult) {
       sessionId,
       finalMessage: assembleFinal(),
       usage,
-      touchedFiles: gitTouchedFiles(opts.cd),
+      touchedFiles,
+      ...readOnlyFlag(touchedFiles),
       error: String(err && err.message ? err.message : err),
     });
     printSummary(result, run.resultPath);
@@ -887,7 +908,7 @@ function printSummary(result, resultPath) {
   if (result.signal === "SIGKILL" && result.status === "failed") lines.push("hint: the host killed the process (commonly the OOM killer or a supervisor timeout) — this is not a grok error; check host memory and re-dispatch, or split the task into smaller briefs.");
   if (result.signal === "SIGTERM" && result.status === "failed") lines.push("hint: something outside the relay terminated grok (a supervisor, the session ending, or a manual kill) — when the relay itself does the killing it reports status \"timeout\" or \"aborted\" instead; inspect the working tree before re-dispatching.");
   if (result.readOnlyViolation === null) lines.push("warning: this --read-only run could not be verified - git could not report, or a submodule or unreadable path left coverage incomplete; inspect the working tree directly.");
-  if (result.readOnlyViolation) lines.push("warning: this --read-only run modified the working tree — grok's read-only is best-effort; review the diff before trusting the run.");
+  if (result.readOnlyViolation === true) lines.push("warning: a git-visible change was detected during this --read-only run — grok's read-only is best-effort; review the diff before trusting the run.");
   lines.push(`autonomy: ${result.autonomy}`);
   if (result.resumeLast) lines.push("mode: resumed most recent session (--continue)");
   else if (result.sessionId && result.status !== "grok_unavailable") {

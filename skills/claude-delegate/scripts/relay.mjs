@@ -34,7 +34,7 @@
  * write, shell, MCP, skill, command, or Agent tool. The relay also compares git
  * porcelain before and after, and also fingerprints the contents of the paths
  * that were already dirty, and emits `readOnlyViolation`. This is a tripwire,
- * not an OS boundary: it reports writes, it does not prevent them. It is
+ * not an OS boundary: it reports detected Git-visible changes, it does not prevent them. It is
  * three-valued - `null` means coverage was incomplete (git unavailable, a
  * submodule, an unreadable path), never "nothing happened". Git-ignored paths
  * are outside it.
@@ -111,6 +111,7 @@ import {
   openSync,
   readSync,
   closeSync,
+  realpathSync,
 } from "node:fs";
 import {basename, delimiter, join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -653,6 +654,8 @@ function gitRepoRoot(cwd) {
     return execFileSync("git", ["rev-parse", "--show-toplevel"], {
       cwd,
       encoding: "utf8",
+      timeout: 10_000,
+      killSignal: "SIGKILL",
       stdio: ["ignore", "pipe", "ignore"],
     }).trim() || null;
   } catch {
@@ -668,6 +671,8 @@ function dirtyPaths(cwd) {
     const output = execFileSync("git", ["status", "--porcelain", "-z", "-uall"], {
       cwd,
       encoding: "utf8",
+      timeout: 10_000,
+      killSignal: "SIGKILL",
       stdio: ["ignore", "pipe", "ignore"],
       maxBuffer: 64 * 1024 * 1024,
     });
@@ -751,7 +756,7 @@ function fingerprintPaths(root, paths) {
   return { prints, complete };
 }
 
-function fingerprintDirtyPaths(cwd) {
+function fingerprintDirtyPaths(cwd, excludedPaths) {
   // Only the already-dirty set is covered. A path that is clean at dispatch and gets written
   // surfaces as a brand-new porcelain line anyway, and fingerprinting a whole repository per run
   // would cost far more than the case it covers.
@@ -759,21 +764,31 @@ function fingerprintDirtyPaths(cwd) {
   if (root === null) return null;
   const paths = dirtyPaths(cwd);
   if (paths === null) return null;
-  return { root, ...fingerprintPaths(root, paths) };
+  const canonical = (path) => {
+    const absolute = resolve(path);
+    try { return join(realpathSync(dirname(absolute)), basename(absolute)); } catch { return absolute; }
+  };
+  const excluded = new Set(excludedPaths.map(canonical));
+  return {
+    root,
+    ...fingerprintPaths(root, paths.filter((path) => !excluded.has(canonical(resolve(root, path))))),
+  };
 }
 
 function changedDirtyPaths(before) {
   // Re-fingerprint exactly the baseline paths, not whatever happens to be dirty now: a path the
   // run newly dirtied is already reported by the porcelain comparison, and letting an unreadable
   // one of those blind this signal would be a regression, not caution.
-  if (!before || !before.complete) return null;
+  if (!before) return { changed: [], complete: false };
   const now = fingerprintPaths(before.root, [...before.prints.keys()]);
-  if (!now.complete) return null;
   const changed = [];
   for (const [path, print] of before.prints) {
-    if (now.prints.get(path) !== print) changed.push(path);
+    const current = now.prints.get(path);
+    if (print === FINGERPRINT_UNREADABLE || current === FINGERPRINT_UNREADABLE) continue;
+    if (print === FINGERPRINT_DIRECTORY && current === FINGERPRINT_DIRECTORY) continue;
+    if (current !== print) changed.push(path);
   }
-  return changed.sort();
+  return { changed: changed.sort(), complete: before.complete && now.complete };
 }
 
 function readOnlyVerdict(beforeTree, afterTree, beforeFingerprints) {
@@ -783,8 +798,8 @@ function readOnlyVerdict(beforeTree, afterTree, beforeFingerprints) {
   const changed = changedDirtyPaths(beforeFingerprints);
   const porcelainMoved =
     beforeTree !== null && afterTree !== null && JSON.stringify(beforeTree) !== JSON.stringify(afterTree);
-  if (porcelainMoved || (changed !== null && changed.length > 0)) return true;
-  if (beforeTree === null || afterTree === null || changed === null) return null;
+  if (porcelainMoved || changed.changed.length > 0) return true;
+  if (beforeTree === null || afterTree === null || !changed.complete) return null;
   return false;
 }
 
@@ -802,10 +817,6 @@ function gitTouchedFiles(cwd) {
   } catch {
     return null;
   }
-}
-
-function samePorcelain(before, after) {
-  return JSON.stringify(before) === JSON.stringify(after);
 }
 
 function stderrTail(stderrPath) {
@@ -1076,9 +1087,9 @@ function printSummary(result, resultPath) {
     lines.push("warning: bypassPermissions was explicitly enabled; direct file tools can reach beyond normal permission boundaries.");
   }
   if (result.readOnlyViolation === true) {
-    lines.push("warning: this --read-only run changed git porcelain; inspect the working tree immediately.");
+    lines.push("warning: a git-visible change was detected during this --read-only run; inspect the working tree immediately.");
   } else if (result.readOnlyViolation === null) {
-    lines.push("warning: git could not verify whether this --read-only run changed the working tree.");
+    lines.push("warning: this --read-only tripwire had incomplete coverage; inspect the working tree directly.");
   }
   if (result.signal === "SIGKILL" && result.status === "failed") {
     lines.push("hint: the host killed claude (commonly an OOM killer or supervisor timeout); inspect the tree and host resources.");
@@ -1138,7 +1149,8 @@ function main() {
   const beforeTree = opts.readOnly ? gitTouchedFiles(opts.cd) : null;
   // Contents of the paths that are ALREADY dirty. Their porcelain lines will not move if the
   // run edits them, so the line comparison above cannot see those writes on its own.
-  const beforeFingerprints = opts.readOnly ? fingerprintDirtyPaths(opts.cd) : null;
+  const relayArtifacts = [run.briefPath, run.eventsPath, run.finalPath, run.stderrPath, run.settingsPath, run.resultPath];
+  const beforeFingerprints = opts.readOnly ? fingerprintDirtyPaths(opts.cd, relayArtifacts) : null;
   const version = launcher ? preflightVersion(launcher, env, opts.cd) : null;
   const state = {
     sessionId: opts.session,

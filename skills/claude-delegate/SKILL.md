@@ -133,10 +133,11 @@ pre-approves PowerShell so the run remains non-interactive, but that shell is no
 `claude.exe` and npm `claude.cmd` launch paths are implemented; Windows verification is pending.
 
 `--read-only` uses `plan` mode with only Read, Glob, and Grep. It removes edit, write, and shell paths,
-then compares git porcelain before and after. `readOnlyViolation` is `true` when that snapshot changed,
-`false` when it did not, and `null` when git could not report. This is not an OS boundary: an edit
-inside an already-dirty file can leave porcelain unchanged, local hooks run outside the restricted
-tool surface, and unrelated host processes can write.
+then compares git porcelain and fingerprints the Git-visible paths that were already dirty.
+`readOnlyViolation` is `true` when either signal proves a change, `false` when coverage is complete and
+detects none, and `null` when coverage is incomplete. This is a reporting tripwire, not an OS boundary:
+ignored paths and perfect restores are outside it, local hooks can write, and concurrent changes cannot
+be attributed to Claude.
 
 `--dangerously-skip-permissions` is an explicit opt-in to Claude's `bypassPermissions` mode. The
 restricted tool surface, direct commit/push deny rules, and supported-platform shell sandbox remain,

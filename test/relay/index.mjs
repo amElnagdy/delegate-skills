@@ -9,6 +9,7 @@ import { runTimeoutBounds } from "./timeout-bounds.mjs";
 import { runQoder } from "./qoder.mjs";
 import { runPi } from "./pi.mjs";
 import { runClaude } from "./claude.mjs";
+import { runReadOnlyTripwire } from "./read-only-tripwire.mjs";
 import { runTimeoutTree } from "./timeout-tree.mjs";
 import { runAbort } from "./abort.mjs";
 import { runDelegateSetup } from "./delegate-setup.mjs";
@@ -25,6 +26,7 @@ export const runners = [
   ["qoder", runQoder],
   ["pi", runPi],
   ["claude", runClaude],
+  ["read-only-tripwire", runReadOnlyTripwire],
   ["timeout-tree", runTimeoutTree],
   ["abort", runAbort],
   ["delegate-setup", runDelegateSetup],

@@ -38,7 +38,7 @@ Options:
 | `--model <name>` | Grok model (default: Grok's own configured default). |
 | `--effort <level>` | Reasoning effort for this run (`--effort`). |
 | `--max-turns <n>` | Maximum number of agent turns for this run (`--max-turns`). |
-| `--read-only` | Review/diagnosis intent (`--sandbox read-only --permission-mode plan`). **Best-effort, not enforced** — grok can still edit the tree headlessly. The relay snapshots `git status` before the run and sets `readOnlyViolation: true` in `result.json` if the tree changed. |
+| `--read-only` | Review/diagnosis intent (`--sandbox read-only --permission-mode plan`). **Best-effort, not enforced** — grok can still edit the tree headlessly. The relay reports a tri-state Git-visible change tripwire. |
 | `--full-access` | Unrestricted auto-approve (`--always-approve --sandbox off`); opt-in. |
 | `--resume-last` | Continue the most recent Grok session for this cwd; send only the delta brief. |
 | `--session <id>` | Continue a specific session id; mutually exclusive with `--resume-last`. |
@@ -68,10 +68,10 @@ touched-files report shows only Grok's edits and nothing of the helper's own.
 - `touchedFiles` — `git status --porcelain` lines in the working root: your review starting point. `null` (not `[]`) when git can't report; `[]` means git ran and the tree is clean
 - `briefPath` / `eventsPath` / `finalPath` — the exact brief relay sent, the raw streaming-json event stream, and the final-message file
 - `workdir`, `autonomy`, `model`, `effort`, `resumeLast`, `startedAt`, `finishedAt`
-- `readOnlyViolation` — present on `--read-only` runs only: `true` when the working tree changed
-  between dispatch and completion, i.e. the best-effort read-only was not honored. A porcelain-level
-  tripwire: it catches new dirt, but an edit inside an already-dirty file can evade it — the diff
-  review, not this flag, is the guarantee
+- `readOnlyViolation` — present on dispatched `--read-only` runs: `true` when git porcelain or the
+  fingerprint of a readable, already-dirty Git-visible path proves a change; `false` when coverage is
+  complete and detects none; `null` when coverage is incomplete. Ignored paths, submodule internals,
+  perfect restores, and attribution remain outside it — the diff review, not this flag, is the guarantee
 - `stderrTail` — last ~20 stderr lines; present on every run that did not complete (`failed`, `timeout`, `aborted`), absent on `completed`, `grok_unavailable`, and launch failures
 - `error` — present on a launch failure, and on `timeout` and `aborted` runs
 

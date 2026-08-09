@@ -3,7 +3,11 @@ const args = process.argv.slice(2);
 // Every probe form one relay or another uses: --version, grok's \`version\` subcommand, and
 // agy's \`changelog\`. Treating them alike lets any relay's hang/fail mode be driven by name.
 const versionProbe = args.includes("--version") || args[0] === "version" || args[0] === "changelog";
-if (versionProbe && process.env.SMOKE_MODE === "grok-version-fallback-budget") {
+if (versionProbe && process.env.SMOKE_MODE === "grok-spawn-error" && process.platform !== "win32") {
+  fs.renameSync(require("node:path").join(__dirname, "grok"), require("node:path").join(__dirname, "grok.removed"));
+  console.log("fake-cli 0.0.0-smoke");
+  process.exit(0);
+} else if (versionProbe && process.env.SMOKE_MODE === "grok-version-fallback-budget") {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 700);
   if (args[0] === "version") {
     console.error("fake documented version failure");
@@ -54,6 +58,16 @@ if (process.env.SMOKE_MODE === "vibe-success") {
   fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify(args));
   console.log(JSON.stringify({ role: "assistant", content: "working" }));
   console.log(JSON.stringify({ role: "assistant", content: "fake vibe completed" }));
+  process.exit(0);
+}
+if (process.env.SMOKE_MODE === "grok-read-only") {
+  if (process.env.SMOKE_APPEND_FILE) {
+    fs.appendFileSync(process.env.SMOKE_APPEND_FILE, "appended by fake grok\n");
+  }
+  if (!process.env.SMOKE_EMPTY_FINAL) {
+    console.log(JSON.stringify({ type: "text", data: "fake grok completed" }));
+  }
+  console.log(JSON.stringify({ type: "end", sessionId: "grok-session-1" }));
   process.exit(0);
 }
 if (["pi-success", "pi-error"].includes(process.env.SMOKE_MODE)) {

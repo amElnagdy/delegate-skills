@@ -38,7 +38,7 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 | `--max-budget-usd <amount>` | Positive decimal spend cap for print mode. |
 | `--resume-last` | Resume the latest session for this cwd with Claude's `--continue`; send a delta brief. |
 | `--session <id>` | Resume a specific session with Claude's `--resume <id>`; mutually exclusive with `--resume-last`. |
-| `--read-only` | Plan mode with only Read, Glob, and Grep, plus before/after git-porcelain comparison. |
+| `--read-only` | Plan mode with only Read, Glob, and Grep, plus a Git-visible change tripwire. |
 | `--dangerously-skip-permissions` | Opt into Claude's `bypassPermissions`; mutually exclusive with `--read-only`. |
 | `-h`, `--help` | Print the relay header and option reference. |
 
@@ -109,16 +109,18 @@ container or VM when only a host-level boundary is acceptable.
 ### Read-only profile
 
 `--read-only` removes Edit, Write, Bash/PowerShell, Agent, MCP, skills, and commands from the child and
-uses `plan` mode. Local hooks still load outside that tool surface and can write. The relay snapshots
-`git status --porcelain` before dispatch and again for every outcome, including aborts:
+uses `plan` mode. Local hooks still load outside that tool surface and can write. The relay compares
+`git status --porcelain` and fingerprints paths that were already dirty for every outcome, including
+aborts:
 
-- `readOnlyViolation: true` — porcelain changed.
-- `readOnlyViolation: false` — porcelain did not change.
-- `readOnlyViolation: null` — git could not report either snapshot.
+- `readOnlyViolation: true` — either signal proves a Git-visible change.
+- `readOnlyViolation: false` — coverage was complete and neither signal detected a change.
+- `readOnlyViolation: null` — coverage was incomplete, for example because git could not report or a
+  dirty submodule or unreadable path could not be fingerprinted.
 
-This detects new dirt but cannot attribute it. An edit inside an already-dirty file may not change its
-porcelain line, and another OS process can alter the tree during the run. Inspect the diff whenever
-read-only integrity matters.
+This detects new dirt and changes to readable, already-dirty Git-visible paths, but cannot attribute a
+concurrent change. Ignored paths, submodule internals, and writes perfectly restored before the final
+snapshot remain outside coverage. Inspect the diff whenever read-only integrity matters.
 
 ### Permission bypass
 
@@ -132,8 +134,8 @@ human's explicit acceptance.
 
 The default artifact directory is outside the repository so relay output does not pollute
 `touchedFiles`. A caller-selected `--out-dir` inside the worktree will appear in git status. For a
-meaningful `--read-only` tripwire, keep artifacts outside the worktree; the baseline is intentionally
-taken after initial artifacts are created so the relay does not flag its own setup writes.
+meaningful `--read-only` review, keep artifacts outside the worktree. The fingerprint signal excludes
+only the relay-owned artifact paths, so their later writes do not prove a violation.
 
 - `brief.txt` — exact stdin brief.
 - `events.jsonl` — raw stdout bytes from `--output-format stream-json`.

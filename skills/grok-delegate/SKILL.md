@@ -135,10 +135,11 @@ safe. Reach for `--full-access` only when the human asks for it.
 filesystem/network access, not grok's own edit tool, and headless `plan` mode is advisory — a run
 verified here still wrote the working tree when told to. Use `--read-only` to *signal* review intent,
 but always confirm `touchedFiles` afterward; treat the diff, not the flag, as the guarantee. The relay
-automates the check: it snapshots `git status` before a `--read-only` run and sets
-`readOnlyViolation: true` in `result.json` (with a summary warning) when the tree changed anyway.
-It's a porcelain-level tripwire — an edit inside an already-dirty file can evade it, so on a dirty
-tree the diff review stays the only real guarantee.
+automates a reporting tripwire: it compares git porcelain and fingerprints Git-visible paths that were
+already dirty. `readOnlyViolation` is `true` when either signal proves a change, `false` when coverage
+is complete and detects none, and `null` when coverage is incomplete. Ignored paths, submodule
+internals, perfect restores, and attribution of concurrent changes remain outside it, so the diff
+review stays the guarantee.
 
 ## Authorization model
 

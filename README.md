@@ -77,8 +77,8 @@ Skip setup when you want one implementer or one-off dials. Pick the skill for a 
 
 [^none]: No CLI-enforced read-only mode. `touchedFiles` and the diff, not a flag, are the guarantee.
 
-[^grok]: `grok` cannot be prevented from writing headlessly, so the relay snapshots the tree and sets
-`readOnlyViolation: true` when a read-only run wrote anyway.
+[^grok]: `grok` cannot be prevented from writing headlessly. The relay reports a tri-state
+`readOnlyViolation` tripwire for detected Git-visible changes; it does not enforce or attribute them.
 
 Each skill name links to its `SKILL.md`, which owns that implementer's prerequisites, flags, and
 caveats. Building one for another CLI? [Claim it first](../../issues?q=is%3Aissue+label%3Aimplementer),
