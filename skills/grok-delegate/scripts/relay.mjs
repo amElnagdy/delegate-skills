@@ -100,6 +100,7 @@ const IMPLEMENTER_KEY = "grok";
 
 function makeEventScanner(onObject) {
   let buf = "";
+  let index = 0;
   let depth = 0;
   let start = -1;
   let inString = false;
@@ -107,52 +108,55 @@ function makeEventScanner(onObject) {
   return (chunk) => {
     if (!chunk) return;
     buf += chunk;
-    for (let i = 0; i < buf.length; i += 1) {
-      const ch = buf[i];
-      // Only track strings inside an object (depth > 0). At depth 0 we are
-      // skipping a junk prefix, and an unmatched `"` there must not swallow the
-      // real `{...}` that follows in the same chunk.
-      if (inString) {
-        if (escaped) escaped = false;
-        else if (ch === "\\") escaped = true;
-        else if (ch === '"') inString = false;
-      } else if (ch === '"') {
-        if (depth > 0) inString = true;
-      } else if (ch === "{") {
-        if (depth === 0) start = i;
-        depth += 1;
-      } else if (ch === "}") {
-        if (depth > 0) {
-          depth -= 1;
-          if (depth === 0 && start !== -1) {
-            const slice = buf.slice(start, i + 1);
-            try { onObject(JSON.parse(slice)); } catch { /* skip malformed */ }
-            start = -1;
+    for (;;) {
+      while (index < buf.length) {
+        const ch = buf[index];
+        // Only track strings inside an object (depth > 0). At depth 0 we are
+        // skipping a junk prefix, and an unmatched `"` there must not swallow the
+        // real `{...}` that follows in the same chunk.
+        if (inString) {
+          if (escaped) escaped = false;
+          else if (ch === "\\") escaped = true;
+          else if (ch === '"') inString = false;
+        } else if (ch === '"') {
+          if (depth > 0) inString = true;
+        } else if (ch === "{") {
+          if (depth === 0) start = index;
+          depth += 1;
+        } else if (ch === "}") {
+          if (depth > 0) {
+            depth -= 1;
+            if (depth === 0 && start !== -1) {
+              const slice = buf.slice(start, index + 1);
+              try { onObject(JSON.parse(slice)); } catch { /* skip malformed */ }
+              start = -1;
+            }
           }
         }
+        index += 1;
       }
-      if (i === buf.length - 1 && depth > 0 && start !== -1 && buf.length - start > MAX_BUFFERED_CHARS) {
-        // A complete object may exceed the retained-input cap within this
-        // chunk. Drop only an oversized partial, then rescan its suffix so a
-        // later concatenated event is not lost.
-        buf = buf.slice(start + MAX_BUFFERED_CHARS);
-        start = -1;
-        depth = 0;
-        inString = false;
-        escaped = false;
-        i = -1;
-      }
+      if (depth === 0 || start === -1 || buf.length - start <= MAX_BUFFERED_CHARS) break;
+      // A complete object may exceed the retained-input cap within this chunk.
+      // Drop only an oversized partial, then rescan its suffix so a later
+      // concatenated event is not lost.
+      buf = buf.slice(start + MAX_BUFFERED_CHARS);
+      index = 0;
+      start = -1;
+      depth = 0;
+      inString = false;
+      escaped = false;
     }
-    // Retain only an in-progress object (if any) so the buffer cannot grow
-    // without bound; everything already emitted or skipped is dropped.  Reset
-    // the scanner state: the next call re-derives depth/string/escape by
-    // scanning the retained prefix (which always begins at an object's `{`)
-    // from scratch.
-    buf = depth > 0 && start !== -1 ? buf.slice(start) : "";
-    start = -1;
-    depth = 0;
-    inString = false;
-    escaped = false;
+    if (depth > 0 && start !== -1) {
+      if (start > 0) {
+        buf = buf.slice(start);
+        index -= start;
+        start = 0;
+      }
+    } else {
+      buf = "";
+      index = 0;
+      start = -1;
+    }
   };
 }
 
