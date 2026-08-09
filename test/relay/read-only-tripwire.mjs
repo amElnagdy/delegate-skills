@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
 
 function runGit(cwd, args) {
@@ -41,6 +41,10 @@ async function runScenario(h, skill, scenario) {
   if (scenario.repo === false) mkdirSync(workDir);
   if (scenario.unknown) addDirtySubmodule(workDir);
   if (scenario.dirty) writeFileSync(join(workDir, "already-dirty.txt"), "pre-existing\n");
+  if (scenario.artifactSymlink) {
+    writeFileSync(join(workDir, "already-dirty.txt"), "pre-existing\n");
+    symlinkSync("already-dirty.txt", join(workDir, "final.txt"));
+  }
   if (scenario.invalidUtf8) {
     writeFileSync(Buffer.concat([Buffer.from(`${workDir}/invalid-`), Buffer.from([0xff])]), "pre-existing\n");
   }
@@ -117,6 +121,7 @@ export async function runReadOnlyTripwire(h) {
     { name: "preexisting-artifact-rename", artifactsInside: true, preexistingArtifactRename: true, expected: false },
     { name: "artifact-endpoint-rename", artifactsInside: true, artifactEndpointRename: true, expected: true },
     { name: "relay-artifacts-plus-write", artifactsInside: true, dirty: true, expected: true },
+    ...(!h.WIN ? [{ name: "artifact-symlink-target-write", artifactsInside: true, artifactSymlink: true, expected: true }] : []),
   ];
   for (const skill of ["claude", "grok"]) {
     for (const scenario of scenarios) await runScenario(h, skill, scenario);

@@ -113,7 +113,7 @@ import {
   closeSync,
   realpathSync,
 } from "node:fs";
-import {basename, delimiter, join, resolve, dirname } from "node:path";
+import {basename, delimiter, join, relative, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { constants as osConstants, tmpdir } from "node:os";
 import { StringDecoder } from "node:string_decoder";
@@ -718,17 +718,24 @@ function canonicalFilePath(path) {
   try { return join(realpathSync(dirname(absolute)), basename(absolute)); } catch { return absolute; }
 }
 
+function gitPathKey(root, path) {
+  let canonicalRoot;
+  try { canonicalRoot = realpathSync(root); } catch { canonicalRoot = resolve(root); }
+  const key = relative(canonicalRoot, canonicalFilePath(path));
+  return process.platform === "win32" ? key.replaceAll("\\", "/") : key;
+}
+
 function gitTripwireState(cwd, excludedPaths) {
   const root = gitRepoRoot(cwd);
   if (root === null) return null;
   const entries = gitStatusEntries(cwd);
   if (entries === null) return null;
-  const excluded = new Set(excludedPaths.map(canonicalFilePath));
+  const excluded = new Set(excludedPaths.map((path) => gitPathKey(root, path)));
   return entries.flatMap((entry) => [
     [entry.status, "path", entry.path],
     ...(entry.origin === null ? [] : [[entry.status.replace(/[^RC]/g, " "), "origin", entry.origin]]),
   ]
-    .filter(([, , path]) => !excluded.has(canonicalFilePath(resolve(root, path)))));
+    .filter(([, , path]) => !excluded.has(path)));
 }
 
 function pathFingerprint(absolutePath) {
@@ -822,10 +829,10 @@ function fingerprintDirtyPaths(cwd, excludedPaths) {
   if (root === null) return null;
   const paths = dirtyPaths(cwd);
   if (paths === null) return null;
-  const excluded = new Set(excludedPaths.map(canonicalFilePath));
+  const excluded = new Set(excludedPaths.map((path) => gitPathKey(root, path)));
   return {
     root,
-    ...fingerprintPaths(root, paths.filter((path) => !excluded.has(canonicalFilePath(resolve(root, path))))),
+    ...fingerprintPaths(root, paths.filter((path) => !excluded.has(path))),
   };
 }
 
