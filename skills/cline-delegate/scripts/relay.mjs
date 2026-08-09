@@ -25,9 +25,9 @@
  * Autonomy: the relay explicitly sets Cline's `--auto-approve` (true in act
  * mode, false with `--plan`). Plan mode can request a switch to act mode, so
  * `--plan --auto-approve true` is rejected to preserve the read-only gate.
- * Cline also supports sandbox through `--data-dir` / `CLINE_SANDBOX` and
- * command policy through `CLINE_COMMAND_PERMISSIONS`; this relay does not
- * configure them. The diff reported in `touchedFiles` records what changed.
+ * Cline also supports sandbox through `--data-dir` / `CLINE_SANDBOX`; this
+ * relay does not configure it. The diff reported in `touchedFiles` records
+ * what changed.
  *
  * On native Windows `cline` is an npm-installed `.cmd` shim this relay launches
  * with shell:true. Provider and model values therefore accept only shell-safe

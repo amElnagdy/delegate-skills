@@ -26,8 +26,8 @@ The loop needs only a shell command and file access, so any comparable orchestra
 
 - The task is small enough to do inline; delegation overhead is not worth it.
 - The `cline` CLI is not installed or authenticated.
-- You require the relay to configure a sandbox or command policy. Cline exposes those controls,
-  but this relay leaves them to the CLI environment; use `--plan` when the run must be read-only.
+- You require the relay to configure a sandbox. Cline exposes sandbox controls, but this relay
+  leaves them to the CLI environment; use `--plan` when the run must be read-only.
 
 ## Prerequisites (check once)
 
@@ -101,10 +101,9 @@ incomplete, re-dispatch a corrected brief in a fresh run and review again.
 The relay explicitly passes Cline's `--auto-approve`, defaulting to `true` in act mode. Cline
 plan mode can request a switch to act mode, so `--plan` forces `--auto-approve false`; the relay
 rejects `--plan --auto-approve true`. That pair is the read-only gate. Cline also exposes sandbox
-through `--data-dir` / `CLINE_SANDBOX` and command policy through `CLINE_COMMAND_PERMISSIONS`,
-but the relay does not configure or override them. Plan-first for anything risky, then review the
-plan before a separate act-mode dispatch. Malformed or malicious briefs remain dangerous in act
-mode because commands run as the current user.
+through `--data-dir` / `CLINE_SANDBOX`, but the relay does not configure or override it. Plan-first
+for anything risky, then review the plan before a separate act-mode dispatch. Malformed or malicious
+briefs remain dangerous in act mode because commands run as the current user.
 
 ## Authorization model
 

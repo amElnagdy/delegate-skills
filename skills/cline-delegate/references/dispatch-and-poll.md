@@ -133,8 +133,8 @@ Before dispatch the relay runs a
 bounded `cline --version` preflight (10s cap) so a hung or crashing CLI fails fast and explicitly
 instead of hanging the run. In act mode, auto-approval defaults true. With `--plan`, the relay
 forces it false because Cline can otherwise auto-approve a switch to act mode. Cline also exposes
-sandbox through `--data-dir` / `CLINE_SANDBOX` and command policy through
-`CLINE_COMMAND_PERMISSIONS`; the relay leaves those controls to the inherited CLI environment.
+sandbox through `--data-dir` / `CLINE_SANDBOX`; the relay leaves that control to the inherited CLI
+environment.
 
 ## The commit boundary
 
