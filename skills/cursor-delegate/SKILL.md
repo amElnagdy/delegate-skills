@@ -66,6 +66,7 @@ this `SKILL.md`.)
 node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 # read-only (plan mode — review/diagnosis, no edits):  add --read-only
 # write-capable without automatic command approval:   add --no-force
+# explicitly override Cursor's sandbox for this run:  add --sandbox enabled|disabled
 # pin a model from `cursor-agent models`:              add --model <name>
 # resume the most recent session:                      add --resume-last  (delta brief only)
 # resume a specific session:                           add --session <id> (delta brief only)
@@ -119,8 +120,11 @@ headlessly. `--no-force` keeps the run write-capable but withholds automatic com
 commands that require approval are refused because a headless run cannot prompt. `--read-only`
 switches to Cursor's **plan mode** (read-only analysis, no edits, no `--force`). The relay always
 passes `--trust` to keep headless runs from stalling on the workspace-trust prompt, which is why
-`--cd` must only ever point at repositories you trust. The permission mode Cursor actually applied
-is recorded as `permissionMode` in `result.json`; inspect `touchedFiles` and the diff after every run.
+`--cd` must only ever point at repositories you trust. Pass `--sandbox enabled` or `--sandbox
+disabled` only when you need to override Cursor's sandbox for that dispatch. The requested value is
+recorded as `sandbox` in `result.json`; it does not claim what Cursor actually applied. The permission
+mode Cursor reports is recorded as `permissionMode`; inspect `touchedFiles` and the diff after every
+run.
 
 ## Read-only second opinions
 

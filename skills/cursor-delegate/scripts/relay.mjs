@@ -39,6 +39,8 @@
  *                           auto). List names with `cursor-agent models`.
  *   --read-only             Run in Cursor's plan mode: read-only analysis, no
  *                           edits, no --force.
+ *   --sandbox <mode>        Explicitly enable or disable Cursor's sandbox for
+ *                           this dispatch (enabled | disabled).
  *   --no-force              Withhold --force on a write-capable run; commands
  *                           that require approval are refused instead of run.
  *   --session <id>          Resume a specific Cursor chat (`--resume <id>`);
@@ -55,7 +57,8 @@
  *
  * Result: written to <out-dir>/result.json and summarized on stdout —
  *   status, exitCode, signal, cursorAgentVersion, sessionId, resolvedModel,
- *   permissionMode, force, usage, finalMessage (Cursor's own report),
+ *   permissionMode, force, sandbox (requested value or null), usage,
+ *   finalMessage (Cursor's own report),
  *   touchedFiles (git porcelain, null if git cannot report), and paths to
  *   brief.txt, final.txt, events.jsonl, and stderr.txt.
  *
@@ -82,6 +85,7 @@ const MAX_TIMER_MS = 2_147_483_647;
 const VERSION_PROBE_TIMEOUT_MS = 10_000;
 const SAFE_MODEL = /^[A-Za-z0-9][A-Za-z0-9._:@/[\],=-]*$/;
 const SAFE_SESSION = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+const SANDBOX_MODES = new Set(["enabled", "disabled"]);
 
 const IMPLEMENTER_KEY = "cursor";
 
@@ -136,6 +140,7 @@ function parseArgs(argv) {
     model: null,
     readOnly: false,
     force: true,
+    sandbox: null,
     session: null,
     resumeLast: false,
     addDirs: [],
@@ -161,6 +166,7 @@ function parseArgs(argv) {
       case "--lane": opts.lane = next(); break;
       case "--model": opts.model = next(); flagged.add("model"); break;
       case "--read-only": opts.readOnly = true; flagged.add("readOnly"); break;
+      case "--sandbox": opts.sandbox = next(); flagged.add("sandbox"); break;
       case "--no-force": opts.force = false; flagged.add("force"); break;
       case "--session": opts.session = next(); break;
       case "--resume-last": opts.resumeLast = true; break;
@@ -172,6 +178,9 @@ function parseArgs(argv) {
     }
   }
   applyFleetLane(opts, flagged);
+  if (opts.sandbox !== null && !SANDBOX_MODES.has(opts.sandbox)) {
+    fail(`--sandbox "${opts.sandbox}" is invalid; expected enabled or disabled`);
+  }
   if (opts.resumeLast && opts.session) {
     fail("--resume-last and --session are mutually exclusive; pass only one");
   }
@@ -321,6 +330,7 @@ function buildArgv(opts) {
   const argv = ["--print", "--output-format", "stream-json", "--trust"];
   if (opts.readOnly) argv.push("--mode", "plan");
   else if (opts.force) argv.push("--force");
+  if (opts.sandbox) argv.push("--sandbox", opts.sandbox);
   if (opts.model) argv.push("--model", winq(opts.model));
   if (opts.session) argv.push("--resume", winq(opts.session));
   else if (opts.resumeLast) argv.push("--continue");
@@ -400,6 +410,7 @@ function makeResultWriter(opts, version, run) {
       model: opts.model,
       readOnly: opts.readOnly,
       force: opts.force && !opts.readOnly,
+      sandbox: opts.sandbox,
       resumed: Boolean(opts.resumeLast || opts.session),
       cursorAgentVersion: version,
       startedAt: run.startedAt,
