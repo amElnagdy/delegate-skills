@@ -6,10 +6,12 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const RELAYS = ["claude", "codex", "opencode", "agy", "grok", "kimi", "qoder", "vibe", "cursor", "pi"];
 const SYMBOLS = [
-  ["MAX_TIMER_MS", "const"],
-  ["parseDuration", "function"],
-  ["killChild", "function"],
-  ["gitTouchedFiles", "function"],
+  ["MAX_TIMER_MS", "const", RELAYS],
+  ["parseDuration", "function", RELAYS],
+  ["killChild", "function", RELAYS],
+  ["gitTouchedFiles", "function", RELAYS],
+  ["MAX_BUFFERED_CHARS", "const", ["claude", "cursor", "grok", "kimi", "opencode", "pi", "qoder", "vibe"]],
+  ["makeEventScanner", "function", ["claude", "cursor", "grok", "kimi", "opencode", "pi", "qoder"]],
 ];
 let failed = 0;
 const check = (name, condition) => {
@@ -33,9 +35,9 @@ function extract(source, symbol, kind, relay) {
   return source.slice(start, end);
 }
 
-for (const [symbol, kind] of SYMBOLS) {
+for (const [symbol, kind, relays] of SYMBOLS) {
   try {
-    const copies = RELAYS.map((relay) => [
+    const copies = relays.map((relay) => [
       relay,
       extract(readFileSync(join(here, "..", "skills", `${relay}-delegate`, "scripts", "relay.mjs"), "utf8"), symbol, kind, relay),
     ]);

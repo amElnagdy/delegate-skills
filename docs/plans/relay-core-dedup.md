@@ -26,7 +26,9 @@ claude. They match codex. Corrected picture:
 | `parseDuration(duration)` | BigInt variant with in-function `MAX_TIMER_MS` ceiling in **8/10**; agy and pi use the Number variant with call-site-only guards. |
 | `MAX_TIMER_MS` | defined in 9/10; pi inlines `2_147_483_647` instead. |
 | `writeJsonAtomic` | named helper **only in claude** (`${path}.tmp-${pid}`); 9/10 inline temp+rename (`${path}.${pid}.tmp`). |
-| `makeEventScanner(onObject)` | present in 7/10 (claude, cursor, grok, kimi, opencode, pi, qoder); the 7 copies **not yet mutually diffed**. |
+| `makeEventScanner(onObject)` | PR #39 unified and parity-gated the 7 copies. |
+
+PR #39 also inlined and parity-gated `MAX_BUFFERED_CHARS` across all eight relay scripts and directly tested Vibe's `makeLineScanner`.
 
 ## The plan — two commits
 
@@ -73,9 +75,8 @@ New `test/relay-parity.mjs` (~60 lines, Node built-ins, runs in milliseconds):
 - **`writeJsonAtomic` stays inlined** — one call site per relay, no bug, no active
   drift; consolidating just enlarges the behavior batch. Revisit on a second write site
   or a semantics change.
-- **No helper unit tests / no eval-extracted-source harness** — smoke already exercises
-  timeout/kill/parsing paths; add a targeted black-box regression only when a real
-  defect shows a gap.
+- **No additional scanner harness** — `test/event-scanner.mjs` evaluates the parity-gated
+  inline copies; add a targeted black-box regression only when a real defect shows a gap.
 - **No `runRelay(config)` skeleton, no signal-loop extraction** — closes over ~10
   locals, shipped files can't shrink anyway; duplication that can't drift is just disk.
 

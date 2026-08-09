@@ -54,6 +54,7 @@ import { constants, tmpdir } from "node:os";
 import {basename, join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StringDecoder } from "node:string_decoder";
+const MAX_BUFFERED_CHARS = 1_048_576;
 
 const DEFAULT_TIMEOUT = "30m";
 const MAX_TIMER_MS = 2_147_483_647;
@@ -69,6 +70,64 @@ const PERMISSION_MODES = new Set([
 ]);
 
 const IMPLEMENTER_KEY = "qoder";
+
+function makeEventScanner(onObject) {
+  let buf = "";
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escaped = false;
+  return (chunk) => {
+    if (!chunk) return;
+    buf += chunk;
+    for (let i = 0; i < buf.length; i += 1) {
+      const ch = buf[i];
+      // Only track strings inside an object (depth > 0). At depth 0 we are
+      // skipping a junk prefix, and an unmatched `"` there must not swallow the
+      // real `{...}` that follows in the same chunk.
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (ch === "\\") escaped = true;
+        else if (ch === '"') inString = false;
+      } else if (ch === '"') {
+        if (depth > 0) inString = true;
+      } else if (ch === "{") {
+        if (depth === 0) start = i;
+        depth += 1;
+      } else if (ch === "}") {
+        if (depth > 0) {
+          depth -= 1;
+          if (depth === 0 && start !== -1) {
+            const slice = buf.slice(start, i + 1);
+            try { onObject(JSON.parse(slice)); } catch { /* skip malformed */ }
+            start = -1;
+          }
+        }
+      }
+      if (i === buf.length - 1 && depth > 0 && start !== -1 && buf.length - start > MAX_BUFFERED_CHARS) {
+        // A complete object may exceed the retained-input cap within this
+        // chunk. Drop only an oversized partial, then rescan its suffix so a
+        // later concatenated event is not lost.
+        buf = buf.slice(start + MAX_BUFFERED_CHARS);
+        start = -1;
+        depth = 0;
+        inString = false;
+        escaped = false;
+        i = -1;
+      }
+    }
+    // Retain only an in-progress object (if any) so the buffer cannot grow
+    // without bound; everything already emitted or skipped is dropped.  Reset
+    // the scanner state: the next call re-derives depth/string/escape by
+    // scanning the retained prefix (which always begins at an object's `{`)
+    // from scratch.
+    buf = depth > 0 && start !== -1 ? buf.slice(start) : "";
+    start = -1;
+    depth = 0;
+    inString = false;
+    escaped = false;
+  };
+}
 
 function applyFleetLane(opts, flagged) {
   if (!opts.lane) return;
@@ -288,53 +347,6 @@ function buildArgv(opts, brief) {
   for (const dir of opts.addDirs) argv.push("--add-dir", dir);
   argv.push("-p", brief);
   return argv;
-}
-
-function makeEventScanner(onObject) {
-  // Qoder documents stream-json as newline-delimited JSON. This brace-aware
-  // scanner also tolerates chunk-split and concatenated objects plus non-JSON
-  // progress text without depending on undocumented event boundaries.
-  let buffer = "";
-  let cursor = 0;
-  let depth = 0;
-  let start = -1;
-  let inString = false;
-  let escaped = false;
-
-  return (chunk) => {
-    buffer += chunk;
-    for (; cursor < buffer.length; cursor += 1) {
-      const char = buffer[cursor];
-      if (inString) {
-        if (escaped) escaped = false;
-        else if (char === "\\") escaped = true;
-        else if (char === '"') inString = false;
-        continue;
-      }
-      if (char === '"') {
-        if (depth > 0) inString = true;
-      } else if (char === "{") {
-        if (depth === 0) start = cursor;
-        depth += 1;
-      } else if (char === "}" && depth > 0) {
-        depth -= 1;
-        if (depth === 0 && start !== -1) {
-          const slice = buffer.slice(start, cursor + 1);
-          try { onObject(JSON.parse(slice)); } catch { /* Ignore non-event text. */ }
-          buffer = buffer.slice(cursor + 1);
-          cursor = -1;
-          start = -1;
-        }
-      }
-    }
-    if (depth === 0) {
-      buffer = "";
-      cursor = 0;
-      start = -1;
-      inString = false;
-      escaped = false;
-    }
-  };
 }
 
 function prepareRunDir(opts, brief) {

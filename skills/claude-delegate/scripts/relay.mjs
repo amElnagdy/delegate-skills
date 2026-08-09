@@ -106,6 +106,7 @@ import {basename, delimiter, join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { constants as osConstants, tmpdir } from "node:os";
 import { StringDecoder } from "node:string_decoder";
+const MAX_BUFFERED_CHARS = 1_048_576;
 
 const SCHEMA = "delegate-relay.result.v1";
 const MAX_BRIEF_BYTES = 10_000_000;
@@ -115,6 +116,64 @@ const SAFE_MODEL = /^[A-Za-z0-9][A-Za-z0-9._:@\/\[\]-]*$/;
 const SAFE_SESSION = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 
 const IMPLEMENTER_KEY = "claude";
+
+function makeEventScanner(onObject) {
+  let buf = "";
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escaped = false;
+  return (chunk) => {
+    if (!chunk) return;
+    buf += chunk;
+    for (let i = 0; i < buf.length; i += 1) {
+      const ch = buf[i];
+      // Only track strings inside an object (depth > 0). At depth 0 we are
+      // skipping a junk prefix, and an unmatched `"` there must not swallow the
+      // real `{...}` that follows in the same chunk.
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (ch === "\\") escaped = true;
+        else if (ch === '"') inString = false;
+      } else if (ch === '"') {
+        if (depth > 0) inString = true;
+      } else if (ch === "{") {
+        if (depth === 0) start = i;
+        depth += 1;
+      } else if (ch === "}") {
+        if (depth > 0) {
+          depth -= 1;
+          if (depth === 0 && start !== -1) {
+            const slice = buf.slice(start, i + 1);
+            try { onObject(JSON.parse(slice)); } catch { /* skip malformed */ }
+            start = -1;
+          }
+        }
+      }
+      if (i === buf.length - 1 && depth > 0 && start !== -1 && buf.length - start > MAX_BUFFERED_CHARS) {
+        // A complete object may exceed the retained-input cap within this
+        // chunk. Drop only an oversized partial, then rescan its suffix so a
+        // later concatenated event is not lost.
+        buf = buf.slice(start + MAX_BUFFERED_CHARS);
+        start = -1;
+        depth = 0;
+        inString = false;
+        escaped = false;
+        i = -1;
+      }
+    }
+    // Retain only an in-progress object (if any) so the buffer cannot grow
+    // without bound; everything already emitted or skipped is dropped.  Reset
+    // the scanner state: the next call re-derives depth/string/escape by
+    // scanning the retained prefix (which always begins at an object's `{`)
+    // from scratch.
+    buf = depth > 0 && start !== -1 ? buf.slice(start) : "";
+    start = -1;
+    depth = 0;
+    inString = false;
+    escaped = false;
+  };
+}
 
 function applyFleetLane(opts, flagged) {
   if (!opts.lane) return;
@@ -528,69 +587,6 @@ function buildArgv(opts, run) {
   if (opts.maxTurns) argv.push("--max-turns", opts.maxTurns);
   if (opts.maxBudgetUsd) argv.push("--max-budget-usd", opts.maxBudgetUsd);
   return argv;
-}
-
-function makeEventScanner(onObject) {
-  // Claude documents NDJSON. A brace-aware scanner also tolerates a junk prefix,
-  // concatenated objects, and arbitrary chunk boundaries while respecting JSON
-  // strings and escapes.
-  let buffer = "";
-  let index = 0;
-  let depth = 0;
-  let start = -1;
-  let inString = false;
-  let escaped = false;
-
-  return (text) => {
-    if (!text) return;
-    buffer += text;
-    while (index < buffer.length) {
-      const ch = buffer[index];
-      if (inString) {
-        if (escaped) escaped = false;
-        else if (ch === "\\") escaped = true;
-        else if (ch === '"') inString = false;
-        index += 1;
-        continue;
-      }
-      if (ch === '"') {
-        if (depth > 0) inString = true;
-        index += 1;
-        continue;
-      }
-      if (ch === "{") {
-        if (depth === 0) start = index;
-        depth += 1;
-      } else if (ch === "}" && depth > 0) {
-        depth -= 1;
-        if (depth === 0 && start !== -1) {
-          const candidate = buffer.slice(start, index + 1);
-          try {
-            onObject(JSON.parse(candidate));
-          } catch {
-            // Preserve malformed output in events.jsonl, but do not trust it.
-          }
-          buffer = buffer.slice(index + 1);
-          index = 0;
-          start = -1;
-          inString = false;
-          escaped = false;
-          continue;
-        }
-      }
-      index += 1;
-    }
-
-    if (depth === 0) {
-      buffer = "";
-      index = 0;
-      start = -1;
-    } else if (start > 0) {
-      buffer = buffer.slice(start);
-      index -= start;
-      start = 0;
-    }
-  };
 }
 
 function eventSessionId(event) {
