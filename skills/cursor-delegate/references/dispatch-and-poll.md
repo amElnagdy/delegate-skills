@@ -30,6 +30,7 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 | `--lane <name>` | Fleet lane from `delegate-setup` config. Applies that lane's dials; fails if the lane's `implementer` is not this relay. Explicit dial flags win. |
 | `--model <name>` | Cursor model for this run (default: your Cursor default, usually `auto`). Names come from `cursor-agent models`. |
 | `--read-only` | Run in Cursor's plan mode: read-only analysis, no edits, no `--force`. |
+| `--sandbox <mode>` | Override Cursor's sandbox for this dispatch: `enabled` or `disabled`. |
 | `--no-force` | Keep the run write-capable but withhold `--force`; commands requiring approval are refused. |
 | `--session <id>` | Resume a specific Cursor chat (`--resume <id>`); send only the delta brief. |
 | `--resume-last` | Resume the most recent Cursor chat (`--continue`); send only the delta brief. |
@@ -63,7 +64,8 @@ inside the worktree can make the artifacts appear there:
   `cursor_agent_unavailable`), `exitCode`, and `signal` (`null` unless the child died on a signal).
 - `workdir`, `model` (the requested name or `null`), `resolvedModel` (the model Cursor actually
   served, from its init event), `permissionMode` (the mode Cursor reported applying), `readOnly`,
-  `force`, `resumed`, `cursorAgentVersion`, `sessionId`, `startedAt`, and `finishedAt`.
+  `force`, `sandbox` (the requested value or `null`, not a claim about what Cursor applied),
+  `resumed`, `cursorAgentVersion`, `sessionId`, `startedAt`, and `finishedAt`.
 - `briefPath`, `finalPath`, `eventsPath`, and `stderrPath`.
 - `finalMessage` — the `result` field of Cursor's closing event; when the run died before emitting
   one, the assistant text chunks joined with `"\n\n"` instead. Tool calls and tool results are
@@ -141,7 +143,8 @@ The argv is equivalent to:
 
 ```bash
 cursor-agent --print --output-format stream-json --trust \
-  [--force | --mode plan] [--model <name>] [--resume <id> | --continue] \
+  [--force | --mode plan] [--sandbox enabled|disabled] [--model <name>] \
+  [--resume <id> | --continue] \
   [--add-dir <dir> ...]   # brief on stdin
 ```
 
@@ -150,7 +153,8 @@ commands are refused.
 
 The brief rides stdin, so it is not visible in the host process list and has no OS argument-size
 cap. On Windows the launch goes through the shell so the `cursor-agent.cmd` shim resolves; the brief
-still travels on stdin, and model, session, and directory values are validated and quoted.
+still travels on stdin, sandbox, model, session, and directory values are validated, and spaceable
+values are quoted.
 
 ## The commit boundary
 

@@ -211,7 +211,7 @@ export const IMPLEMENTERS = Object.freeze([
       entry: "any",
       match: /^[0-9a-f]{8}-[0-9a-f]{4}-/i,
     },
-    // cursor-agent has no --sandbox; autonomy is --force / --read-only.
+    // Cursor sandbox is explicit per dispatch only; it is intentionally not a fleet dial.
     supports: ["model", "force", "timeout", "readOnly"],
     winShell: true,
   },

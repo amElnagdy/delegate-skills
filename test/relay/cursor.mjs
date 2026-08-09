@@ -37,6 +37,7 @@ export async function runCursor(h) {
     existsSync(join(outDir, "result.json")) &&
     h.result(outDir).status === "completed" &&
     h.result(outDir).force === false &&
+    h.result(outDir).sandbox === null &&
     h.result(outDir).sessionId === "cursor-session-1" &&
     h.result(outDir).resolvedModel === "claude-opus-4-8[context=1m,effort=high,fast=false]" &&
     h.result(outDir).permissionMode === "default" &&
@@ -54,6 +55,7 @@ export async function runCursor(h) {
     "--cd", workDir,
     "--out-dir", outDir,
     "--read-only",
+    "--sandbox", "enabled",
     "--resume-last",
   ], {
     env: { ...h.baseEnv, SMOKE_MODE: "cursor-success", SMOKE_CAPTURE_FILE: captureFile },
@@ -68,13 +70,41 @@ export async function runCursor(h) {
     JSON.stringify(capture.args) === JSON.stringify([
       "--print", "--output-format", "stream-json", "--trust",
       "--mode", "plan",
+      "--sandbox", "enabled",
       "--continue",
     ]) &&
     value.readOnly === true &&
     value.force === false &&
+    value.sandbox === "enabled" &&
     value.permissionMode === "plan");
   h.check("cursor read-only: no unreliable porcelain tripwire is published",
     !Object.prototype.hasOwnProperty.call(value, "readOnlyViolation"));
+}
+{
+  const outDir = join(h.scratch, "out-sandbox-disabled-cursor");
+  const workDir = h.freshRepo("work-sandbox-disabled-cursor");
+  const captureFile = join(h.scratch, "capture-sandbox-disabled-cursor.json");
+  const run = spawnSync(process.execPath, [
+    h.relayPath("cursor"),
+    "--brief", h.briefPath,
+    "--cd", workDir,
+    "--out-dir", outDir,
+    "--sandbox", "disabled",
+  ], {
+    env: { ...h.baseEnv, SMOKE_MODE: "cursor-success", SMOKE_CAPTURE_FILE: captureFile },
+    encoding: "utf8",
+  });
+  const capture = existsSync(captureFile)
+    ? JSON.parse(readFileSync(captureFile, "utf8"))
+    : { args: [] };
+  h.check("cursor sandbox: disabled is forwarded on a fresh run and recorded",
+    run.status === 0 &&
+    JSON.stringify(capture.args) === JSON.stringify([
+      "--print", "--output-format", "stream-json", "--trust",
+      "--force",
+      "--sandbox", "disabled",
+    ]) &&
+    h.result(outDir).sandbox === "disabled");
 }
 const cursorNegativeWorkDir = h.freshRepo("work-negative-cursor");
 for (const [flag, bad] of [
@@ -84,6 +114,8 @@ for (const [flag, bad] of [
   ["--model", ""],
   ["--model", "--help"],
   ["--model", "model & whoami"],
+  ["--sandbox", ""],
+  ["--sandbox", "off"],
 ]) {
   const rejected = spawnSync(process.execPath, [
     h.relayPath("cursor"),
@@ -92,6 +124,16 @@ for (const [flag, bad] of [
     flag, bad,
   ], { env: h.baseEnv, encoding: "utf8", timeout: 5000 });
   h.check(`cursor validation: unsafe ${flag} value is rejected`, rejected.status === 2);
+}
+{
+  const rejected = spawnSync(process.execPath, [
+    h.relayPath("cursor"),
+    "--brief", h.briefPath,
+    "--cd", cursorNegativeWorkDir,
+    "--sandbox",
+  ], { env: { ...h.baseEnv, SMOKE_MODE: "cursor-version-hang" }, encoding: "utf8", timeout: 5000 });
+  h.check("cursor validation: missing --sandbox value is rejected before preflight",
+    rejected.status === 2 && rejected.stderr.includes("--sandbox requires a value"));
 }
 for (const [mode, expectedStatus, expectedExit] of [
   ["cursor-version-hang", "timeout", 124],
@@ -104,11 +146,13 @@ for (const [mode, expectedStatus, expectedExit] of [
     "--cd", cursorNegativeWorkDir,
     "--out-dir", outDir,
     "--timeout", "1s",
+    "--sandbox", "enabled",
   ], { env: { ...h.baseEnv, SMOKE_MODE: mode }, encoding: "utf8", timeout: 5000 });
   const value = existsSync(join(outDir, "result.json")) ? h.result(outDir) : {};
   h.check(`cursor preflight: ${mode} is explicit and prevents dispatch`,
     preflight.status === expectedExit &&
     value.status === expectedStatus &&
+    value.sandbox === "enabled" &&
     value.error?.includes("version preflight") &&
     value.error?.includes("was not dispatched"));
 }
