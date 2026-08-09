@@ -31,6 +31,7 @@ Options:
 | --- | --- |
 | `--brief <file>` | The brief. Omit it to read the brief from stdin (`node relay.mjs … < brief.txt`). |
 | `--cd <dir>` | Working root for OpenCode (default: current directory). |
+| `--lane <name>` | Fleet lane from `delegate-setup` config. Applies that lane's dials; fails if the lane's `implementer` is not this relay. Explicit dial flags win. |
 | `--model <name>` | Model as `provider/model`. **Required on a fresh run** — OpenCode has no safe default (a bare `opencode run` errors); a resumed run inherits its session's model. |
 | `--agent <name>` | OpenCode agent (default: `build`, write-capable). |
 | `--read-only` | Shortcut for `--agent plan` — review/diagnosis with no edits. |
@@ -55,7 +56,7 @@ touched-files report shows only OpenCode's edits and nothing of the helper's own
 - `exitCode` — mirrors OpenCode's exit code; `128` plus the signal number if the child was killed; `127` if `opencode` isn't on PATH; on a `timeout` the relay forces a non-zero code even when the child exited `0` after the watchdog's SIGTERM
 - `signal` — the signal that killed the child, otherwise `null`
 - `opencodeVersion` — the binary that actually ran
-- `agent` — the agent used (`build`, `plan`, …), or a note that it was inherited from a resumed session
+- `agent` — the agent selected for this dispatch (`build`, `plan`, …)
 - `sessionId` — feed this to a later `--session <id>` (or use `--resume-last`)
 - `finalMessage` — OpenCode's assembled final text (the `<structured_output_contract>` you asked for).
   Empty if OpenCode stopped without emitting a closing summary — ask for the report explicitly
@@ -65,7 +66,7 @@ touched-files report shows only OpenCode's edits and nothing of the helper's own
 - `cost` — total run cost in USD, summed from the step events (`null` if none were reported)
 - `briefPath` / `eventsPath` / `finalPath` — the exact brief relay sent, the raw JSON event stream, and
   the final-message file
-- `workdir`, `model`, `auto`, `resumeLast`, `startedAt`, `finishedAt`
+- `workdir`, `model`, `auto`, `resumed`, `resumeLast`, `startedAt`, `finishedAt`
 - `stderrTail` — last ~20 stderr lines; present on every run that did not complete (`failed`, `timeout`, `aborted`), absent on `completed`,
   `opencode_unavailable`, and launch failures
 - `error` — present on a launch failure, and on `timeout` and `aborted` runs
@@ -136,15 +137,15 @@ still holds the work, preserve the tree rather than replaying the log.
 Under the hood the helper runs roughly:
 
 ```bash
-opencode run --format json --agent build -m provider/model < brief.txt       # fresh run (model required)
-opencode run --format json --continue    < delta-brief.txt                   # resume most recent (inherits model)
-opencode run --format json --session ses_… < delta-brief.txt                 # resume a specific session
+opencode run --format json --agent build -m provider/model < brief.txt             # fresh run (model required)
+opencode run --format json --continue --agent build < delta-brief.txt               # resume most recent (inherits model)
+opencode run --format json --session ses_… --agent build < delta-brief.txt           # resume a specific session
 ```
 
 The brief is fed on **stdin**, never as an argument — which is why a multi-line, XML-tagged brief needs
 no quoting. The `--format json` stream is newline-delimited JSON events; the relay assembles
-`finalMessage` from the `text` events and pulls `sessionId` from the event stream. A resumed run inherits
-its original session's agent, so the helper sets `--agent` only on a fresh run.
+`finalMessage` from the `text` events and pulls `sessionId` from the event stream. OpenCode selects an
+agent for each prompt, so the helper passes the requested agent on fresh and resumed runs.
 
 If you ever want it, raw `opencode run` is fine for one-offs — you just give up the captured
 `result.json`, touched-files summary, and session-id extraction the helper does for you.

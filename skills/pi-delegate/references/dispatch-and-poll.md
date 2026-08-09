@@ -27,6 +27,7 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 | --- | --- |
 | `--brief <file>` | Brief path. Omit it to read the brief from stdin. |
 | `--cd <dir>` | Working root and child process cwd (default: current directory). |
+| `--lane <name>` | Fleet lane from `delegate-setup` config. Applies that lane's dials; fails if the lane's `implementer` is not this relay. Explicit dial flags win. |
 | `--provider <name>` | pi provider name (default: pi's own default). Token-validated. |
 | `--model <pattern>` | pi model id or pattern (default: pi's own default). Token-validated: letters, digits, `. _ : / -`. |
 | `--session <id>` | Resume a specific pi session; send only the delta brief. |

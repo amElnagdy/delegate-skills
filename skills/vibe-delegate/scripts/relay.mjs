@@ -37,6 +37,7 @@
  * Options:
  *   --brief <file>           Path to the brief. If omitted, read it from stdin.
  *   --cd <dir>               Working root for Vibe (default: current directory).
+ *   --lane <name>           Fleet lane from delegate-setup config (dials apply; explicit flags win).
  *   --max-turns <n>          Maximum number of Vibe agent turns (--max-turns).
  *   --max-price <usd>        Indicative cost threshold in USD (--max-price);
  *                            not a hard budget.
@@ -70,7 +71,7 @@
  * vibe_unavailable.
  */
 
-import { spawn, execFileSync } from "node:child_process";
+import {spawn, execFileSync, spawnSync } from "node:child_process";
 import {
   appendFileSync,
   existsSync,
@@ -81,7 +82,8 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { join, resolve, basename } from "node:path";
+import {join, resolve, basename, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { constants, tmpdir } from "node:os";
 import { StringDecoder } from "node:string_decoder";
 
@@ -90,13 +92,64 @@ const MAX_TIMER_MS = 2_147_483_647;
 const MAX_BRIEF_BYTES = (process.platform === "win32" ? 12 : 120) * 1024;
 const PROBE_TIMEOUT_MS = 10_000;
 
+const IMPLEMENTER_KEY = "vibe";
+
+function applyFleetLane(opts, flagged) {
+  if (!opts.lane) return;
+  const script = join(dirname(fileURLToPath(import.meta.url)), "../../delegate-setup/scripts/lane.mjs");
+  if (!existsSync(script)) {
+    fail("--lane requires the delegate-setup skill installed beside this relay");
+  }
+  const r = spawnSync(
+    process.execPath,
+    [script, "resolve", "--cwd", opts.cd, "--lane", opts.lane, "--implementer", IMPLEMENTER_KEY],
+    { encoding: "utf8", env: process.env },
+  );
+  if (r.error) fail(`lane resolve failed: ${r.error.message}`);
+  if (r.status !== 0) {
+    fail((r.stderr || "lane resolve failed").trim().replace(/^lane\.mjs:\s*/, ""));
+  }
+  let resolved;
+  try {
+    const lines = (r.stdout || "").trim().split("\n").filter(Boolean);
+    resolved = JSON.parse(lines[lines.length - 1]);
+  } catch {
+    fail("lane resolve returned invalid JSON");
+  }
+  opts.laneSource = resolved.source;
+  for (const [field, value] of Object.entries(resolved.dials || {})) {
+    if (flagged.has(field)) continue;
+    if (field === "autonomy" && (flagged.has("autonomy") || flagged.has("sandbox") || flagged.has("readOnly"))) continue;
+    if (field === "agent" && (flagged.has("agent") || flagged.has("readOnly"))) continue;
+    if (field === "sandbox" && (flagged.has("sandbox") || flagged.has("readOnly"))) continue;
+    if (field === "permissionMode" && (flagged.has("permissionMode") || flagged.has("readOnly"))) continue;
+    if (
+      field === "planOnly" &&
+      (flagged.has("planOnly") || flagged.has("readOnly") || flagged.has("fullAccess"))
+    ) {
+      continue;
+    }
+    if (
+      field === "readOnly" &&
+      (flagged.has("readOnly") || flagged.has("fullAccess"))
+    ) {
+      continue;
+    }
+    if (field === "force" && flagged.has("force")) continue;
+    opts[field] = value;
+  }
+}
+
 function fail(message, code = 2) {
   process.stderr.write(`relay: ${message}\n`);
   process.exit(code);
 }
 
 function parseArgs(argv) {
+  const flagged = new Set();
   const opts = {
+    lane: null,
+    laneSource: null,
     brief: null,
     cd: process.cwd(),
     maxTurns: null,
@@ -127,6 +180,7 @@ function parseArgs(argv) {
         break;
       case "--brief": opts.brief = next(); break;
       case "--cd": opts.cd = resolve(next()); break;
+      case "--lane": opts.lane = next(); break;
       case "--max-turns": {
         const v = next();
         const n = Number(v);
@@ -156,16 +210,22 @@ function parseArgs(argv) {
       }
       case "--session": opts.session = next(); break;
       case "--resume-last": opts.resumeLast = true; break;
-      case "--plan-only": opts.planOnly = true; break;
-      case "--full-access": opts.fullAccess = true; break;
+      case "--plan-only": opts.planOnly = true; flagged.add("planOnly"); flagged.add("readOnly"); break;
+      case "--full-access":
+        opts.fullAccess = true;
+        flagged.add("fullAccess");
+        flagged.add("planOnly");
+        flagged.add("readOnly");
+        break;
       case "--enabled-tools": opts.enabledTools.push(next()); break;
       case "--disabled-tools": opts.disabledTools.push(next()); break;
-      case "--timeout": opts.timeout = next(); break;
+      case "--timeout": opts.timeout = next(); flagged.add("timeout"); break;
       case "--out-dir": opts.outDir = resolve(next()); break;
       default:
         fail(`unknown option: ${arg}`);
     }
   }
+  applyFleetLane(opts, flagged);
   if (opts.resumeLast && opts.session) {
     fail("--resume-last and --session are mutually exclusive; pass only one");
   }
@@ -253,38 +313,41 @@ function parseDuration(duration) {
 }
 
 function gitTouchedFiles(cwd) {
-  // null (not []) when git cannot report — git missing, or a non-repo run — so
-  // the caller can tell "git unavailable" apart from "Vibe changed nothing."
-  // [] means git ran and the working tree is clean.
   try {
-    const out = execFileSync("git", ["status", "--porcelain"], {
+    const output = execFileSync("git", ["status", "--porcelain"], {
       cwd,
       encoding: "utf8",
-      timeout: PROBE_TIMEOUT_MS,
+      timeout: 10_000,
       killSignal: "SIGKILL",
+      stdio: ["ignore", "pipe", "ignore"],
       maxBuffer: 64 * 1024 * 1024,
     });
-    return out.split("\n").map((line) => line.trimEnd()).filter(Boolean);
+    return output.split("\n").map((line) => line.trimEnd()).filter(Boolean);
   } catch {
     return null;
   }
 }
 
 function killChild(child, signal = "SIGTERM") {
-  // A timeout/abort must stop Vibe's tools too, or a descendant could keep
-  // editing after the relay reports that the run ended.
+  if (!child || !child.pid) return;
   if (process.platform === "win32") {
-    if (signal !== "SIGTERM") return; // taskkill /f already felled the tree
+    if (signal !== "SIGTERM") return;
     try {
       execFileSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
         stdio: ["ignore", "ignore", "inherit"],
       });
-    } catch { /* The tree already exited. */ }
-  } else {
-    try {
-      process.kill(-child.pid, signal);
     } catch {
-      try { child.kill(signal); } catch { /* The tree already exited. */ }
+      // The process tree already exited.
+    }
+    return;
+  }
+  try {
+    process.kill(-child.pid, signal);
+  } catch {
+    try {
+      child.kill(signal);
+    } catch {
+      // The process group already exited.
     }
   }
 }
@@ -379,6 +442,8 @@ function makeResultWriter(opts, version, run) {
   return (extra) => {
     const result = {
       schema: "delegate-relay.result.v1",
+      lane: opts.lane,
+      laneSource: opts.laneSource,
       tool: "vibe",
       workdir: opts.cd,
       agent: agentName(opts),

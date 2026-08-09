@@ -29,6 +29,7 @@ Options:
 | --- | --- |
 | `--brief <file>` | The brief. Omit it to read the brief from stdin before passing it to `agy --print`. |
 | `--cd <dir>` | Working root for Antigravity (default: current directory). |
+| `--lane <name>` | Fleet lane from `delegate-setup` config. Applies that lane's dials; fails if the lane's `implementer` is not this relay. Explicit dial flags win. |
 | `--model <name>` | Antigravity model label. Optional; a fresh run can use Antigravity's configured default. |
 | `--project <id>` | Use an existing Antigravity project. |
 | `--new-project` | Force a fresh Antigravity project. This is the default for fresh dispatches. |

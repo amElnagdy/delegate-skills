@@ -16,6 +16,13 @@
         "cursor-delegate",
         "pi-delegate"
       ]
+    },
+    {
+      "title": "Setup",
+      "description": "Configure fleet lanes: which implementer handles which kind of work.",
+      "skills": [
+        "delegate-setup"
+      ]
     }
   ]
 }

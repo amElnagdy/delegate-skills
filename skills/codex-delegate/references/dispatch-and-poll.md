@@ -34,6 +34,7 @@ Options:
 | --- | --- |
 | `--brief <file>` | The brief. Omit it to read the brief from stdin (`node relay.mjs … < brief.txt`). |
 | `--cd <dir>` | Working root for Codex (default: current directory). |
+| `--lane <name>` | Fleet lane from `delegate-setup` config. Applies that lane's dials; fails if the lane's `implementer` is not this relay. Explicit dial flags win. |
 | `--model <name>` | Codex model (default: Codex's own configured default). |
 | `--effort <level>` | Reasoning effort, passed to Codex as `-c model_reasoning_effort=<level>` (default: Codex's own configured default). The relay accepts a bare token; Codex and the model own the supported levels. Applies to fresh and resumed runs. |
 | `--sandbox <mode>` | `read-only` \| `workspace-write` \| `danger-full-access` (default: `workspace-write`). |
@@ -60,7 +61,7 @@ touched-files report shows only Codex's edits and nothing of the helper's own.
 - `finalMessage` — Codex's own final report (the `<structured_output_contract>` you asked for)
 - `touchedFiles` — `git status --porcelain` lines in the working root: your review starting point. `null` (not `[]`) when git can't report — `git` missing, or a non-repo run under `--skip-git-repo-check`; `[]` means git ran and the tree is clean
 - `briefPath` / `eventsPath` / `finalPath` — the exact brief relay sent, the raw JSONL event stream, and the final-message file
-- `workdir`, `sandbox`, `model`, `effort`, `resumeLast`, `session`, `startedAt`, `finishedAt` — `session` is the explicit session id, or `null` for fresh and `--resume-last` runs
+- `workdir`, `sandbox`, `model`, `effort`, `resumeLast`, `session`, `startedAt`, `finishedAt` — `sandbox` is the applied mode, or a note that Codex used its active config on an unqualified resume; `session` is the explicit session id, or `null` for fresh and `--resume-last` runs
 - `stderrTail` — last ~20 stderr lines; present on every run that did not complete (`failed`, `timeout`, `aborted`), absent on `completed`, `codex_unavailable`, and launch failures
 - `error` — present on a launch failure, and on `timeout` and `aborted` runs
 
@@ -126,11 +127,12 @@ Under the hood the helper runs roughly:
 
 ```bash
 codex exec --json -o <final.txt> -s workspace-write [-m model] [-c model_reasoning_effort=<level>] - < brief.txt   # fresh run
-codex exec resume --last --json -o <final.txt> [-m model] [-c model_reasoning_effort=<level>] - < delta-brief.txt  # resume (no -s/-C)
+codex exec [-s mode] resume --last --json -o <final.txt> [-m model] [-c model_reasoning_effort=<level>] - < delta-brief.txt  # resume
 ```
 
-`resume` deliberately gets no `-s`/`-C` — it inherits the original session's sandbox and working root —
-which is why the helper sets the child process's working directory instead.
+On resume, the helper places an explicit `--sandbox`/`--read-only` or fleet-lane sandbox before the
+`resume` subcommand so Codex applies it to the resumed turn. Without one, Codex uses its active config.
+The helper sets the child process's working directory instead of forwarding `-C`.
 
 Two alternatives exist if you ever want them, but the helper is the recommended path:
 

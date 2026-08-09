@@ -27,6 +27,7 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 | --- | --- |
 | `--brief <file>` | Brief path. Omit it to read the brief from stdin. |
 | `--cd <dir>` | Working root and child process cwd (default: current directory). |
+| `--lane <name>` | Fleet lane from `delegate-setup` config. Applies that lane's dials; fails if the lane's `implementer` is not this relay. Explicit dial flags win. |
 | `--model <name>` | Cursor model for this run (default: your Cursor default, usually `auto`). Names come from `cursor-agent models`. |
 | `--read-only` | Run in Cursor's plan mode: read-only analysis, no edits, no `--force`. |
 | `--no-force` | Keep the run write-capable but withhold `--force`; commands requiring approval are refused. |

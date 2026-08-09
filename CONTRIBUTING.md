@@ -30,7 +30,7 @@ Four invariants hold for every skill here, and they are the bar for a new one:
       report, `touchedFiles` (`null` when git cannot report, `[]` when the tree is clean), and a
       session id where the CLI exposes one.
 - [ ] Usage errors exit 2 before writing a result file; a missing binary exits 127 **with** one.
-- [ ] Registered in `test/relay-smoke.mjs` — the new relay enters the timeout and abort matrix like
+- [ ] Registered in `test/harness/constants.mjs` — the new relay enters the timeout and abort matrix like
       every sibling. The suite fails if a skill directory is missing from that matrix, is short a
       reference, or is absent from `skills.sh.json`, so this one checks itself.
 - [ ] A row in the README table, and a vocabulary row in `AGENTS.md` using that CLI's own terms.
@@ -38,12 +38,48 @@ Four invariants hold for every skill here, and they are the bar for a new one:
 - [ ] A verification line in the README's **Verification status** list. Claim only what you ran —
       "contract-tested, live run pending" is a mergeable answer. "Verified" without a run is not.
 
+## Utility skills (exception)
+
+`delegate-setup` is a **utility** skill: it configures fleet **lanes** (discover → propose → approve →
+write). It is not an implementer skill.
+
+Utility checklist (instead of the four-references + `relay.mjs` bar above):
+
+- [ ] `skills/<name>/SKILL.md` with a `description` that triggers on setup/configure — **not** on
+      ordinary delegation.
+- [ ] Scripts under `scripts/` stay Node built-ins only (same trust line as relays).
+- [ ] No `relay.mjs`; the skill must not dispatch coding work to an implementer.
+- [ ] Registered in `skills.sh.json` (Setup grouping is fine).
+- [ ] Listed in the smoke suite's **utility** carve-out (not the `*-delegate` timeout/abort matrix).
+- [ ] A short README mention and vocabulary in `AGENTS.md` (`lane`, `fleet`, setup skill).
+
+Do not invent a second utility that duplicates lane setup. Extend `delegate-setup` instead.
+
+## Releases
+
+Install pinning uses **git tags**, not `metadata.version` alone:
+
+1. Land the release on `master`.
+2. Set every skill's `metadata.version` to the release semver (e.g. `0.2.0`).
+3. Create an annotated tag: `git tag -a v0.2.0 -m "v0.2.0"` and `git push origin v0.2.0`.
+4. Users install with `npx skills add amElnagdy/delegate-skills@v0.2.0`.
+
+Bump the tag for user-visible skill or relay contract changes. Docs-only or smoke-only may be a
+patch. Schema ids (`delegate-fleet.v1`, …) bump independently when the JSON shape breaks.
+
 ## Everything else
 
 Fixes to a relay, a reference, or the README need no claim. Keep the diff to one concern, run
 `node test/relay-smoke.mjs` and `npx skills add . --list`, and say in the pull request what you ran.
+For a single relay or concern during development, `node test/relay-smoke.mjs --only codex` (comma-separated
+module names — see `test/relay/index.mjs`) skips the rest of the matrix.
 A changed relay also wants a direct run — `--help` plus a read-only or no-write run against a
 throwaway repo. The full pre-publish list is in [AGENTS.md](AGENTS.md).
+
+## Shared relay helpers
+
+Shared relay helpers are byte-identical by CI contract. Edit one relay, run
+`node test/relay-parity.mjs`, then paste its helper into the copies the test names.
 
 ## Review
 

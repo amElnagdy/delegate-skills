@@ -4,24 +4,63 @@
 [![skills.sh](https://www.skills.sh/b/amElnagdy/delegate-skills)](https://www.skills.sh/amElnagdy/delegate-skills)
 [![License](https://img.shields.io/github/license/amElnagdy/delegate-skills)](LICENSE)
 
-**Delegate the implementation. Keep the review, and the commit.**
+**Create your fleet of lanes. One orchestrator, the right implementer for every job.**
 
-Your agent writes a self-contained brief, hands it to a separate implementer CLI, waits for a
-structured result, then reviews the diff and commits it itself. No relay in this repo ever commits.
+Discover the implementer CLIs already installed on your machine, organize them into lanes like
+`feature`, `tests`, and `ui`, then delegate by lane — or choose one implementer directly. Either way,
+you keep the review and the commit.
 
 ```bash
 npx skills add amElnagdy/delegate-skills
 ```
 
-Then, in your orchestrating agent:
+Then ask your orchestrating agent to create the fleet:
+
+```text
+Use $delegate-setup to discover my installed implementer CLIs and create a fleet for feature, tests, and UI work.
+```
+
+Or delegate directly:
 
 ```text
 Use $codex-delegate to have Codex implement the refactor in services/billing/, then review and commit it.
 ```
 
-## The skills
+```mermaid
+flowchart LR
+  S["$delegate-setup<br/>discover → propose → approve"] --> F["Example fleet"]
+  O["Your orchestrator"] --> F
+  F -->|"feature"| A["OpenCode"]
+  F -->|"tests"| B["Codex"]
+  F -->|"ui"| C["Cursor"]
+  A --> R["Review the diff<br/>Run the gates"]
+  B --> R
+  C --> R
+  R --> L["You land the commit"]
+```
 
-Same loop, one implementer per skill. Pick the row you have a CLI for:
+## Choose how you delegate
+
+### Create a fleet
+
+| Skill | Job |
+| --- | --- |
+| [`delegate-setup`](skills/delegate-setup/SKILL.md) | Discover installed CLIs, propose **fleet lanes**, and write global or project config after you approve. Never dispatches work. |
+
+A **fleet** is your set of named lanes. Each **lane** binds a kind of work to one implementer and
+optional dials such as model, effort, or variant. Setup discovers what is available, proposes a compact
+fleet, shows you the complete configuration, and writes only after explicit approval.
+
+Configuration can apply globally or to one repository. Once it is ready, dispatch with the matching
+`*-delegate` skill and `--lane <name>`. Explicit flags override lane dials, and the wrong implementer
+skill for a lane fails loud. Project config is content-bound to explicit setup approval, so cloned or
+edited project lanes fail closed until re-approved. See the
+[`delegate-fleet.v1` schema](skills/delegate-setup/references/schema.md) for paths, supported dials,
+and overlay behavior.
+
+### Delegate directly
+
+Skip setup when you want one implementer or one-off dials. Pick the skill for a CLI you have:
 
 | Skill | Implementer CLI | Write access (default) | Read-only run | Resume |
 | --- | --- | --- | --- | --- |
@@ -53,12 +92,16 @@ Browse first:
 npx skills add amElnagdy/delegate-skills --list
 ```
 
-Install the package, or just one skill (any name from the table above):
+Install the package, the setup skill, or one implementer skill:
 
 ```bash
 npx skills add amElnagdy/delegate-skills
+npx skills add amElnagdy/delegate-skills --skill delegate-setup
 npx skills add amElnagdy/delegate-skills --skill codex-delegate
 ```
+
+To pin an installation, append an existing release tag as `@vMAJOR.MINOR.PATCH`. The Skills CLI
+installs by git ref, not by `metadata.version` in `SKILL.md`.
 
 Install for a specific agent, or globally:
 
@@ -69,23 +112,10 @@ npx skills add amElnagdy/delegate-skills --global
 
 Works with any orchestrating agent the [Skills CLI](https://github.com/vercel-labs/skills) supports.
 
-## What it does
+## How delegation works
 
-```mermaid
-flowchart LR
-  subgraph orch["Orchestrator — you"]
-    A["Write the brief"]
-    D["Review the diff<br/>Re-run the gates"]
-    E["Land the commit"]
-  end
-  subgraph impl["Implementer CLI"]
-    C["Edits files in your repo"]
-  end
-  A -->|"dispatch via relay.mjs"| C
-  C -->|"result.json"| D
-  D -->|"gates pass"| E
-  D -->|"needs another pass"| A
-```
+Whether you choose the implementer directly or through a fleet lane, every dispatch follows the same
+review-first loop:
 
 1. **Write a brief** — self-contained task context; the implementer has no orchestrator chat history.
 2. **Dispatch** it with the bundled `relay.mjs`.
@@ -95,6 +125,7 @@ flowchart LR
 
 ```text
 Use $claude-delegate to have a separate Claude Code session implement the parser fix, then review and commit it.
+Use $opencode-delegate with --lane feature to implement the billing workflow, then review and commit it.
 Use $codex-delegate to run this queue of migration tasks through Codex while I review each one.
 ```
 
@@ -107,9 +138,9 @@ You feel it when a bounded task — a migration, a mechanical refactor, a remova
 a clean diff with a structured report, and you land it after re-running the gates yourself instead of
 typing it all by hand.
 
-## What counts as a delegate skill
+## What counts as an implementer skill
 
-Four invariants hold for every skill here. They are also the bar for a new one:
+Four invariants hold for every `*-delegate` skill. They are also the bar for a new implementer:
 
 - **A separate CLI edits a real working tree, and the diff is the deliverable.** Not an API wrapper,
   not a gateway — an implementer whose work you can read with `git diff`.
@@ -125,12 +156,16 @@ dispatch, poll, review, and land, across one task or a queue. It stays complemen
 plugin or subagents — those coordinate inside one agent; this keeps the contract portable across
 orchestrators, with the commit on the reviewer.
 
+`delegate-setup` is the setup-skill exception: it discovers CLIs and writes an approved fleet map, but
+never dispatches coding work.
+
 Full checklist: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Requirements
 
-- The implementer CLI for the skill you install, authenticated as you would at the terminal. Each
-  skill's `SKILL.md` carries its own install and login commands.
+- For a `*-delegate` skill, its implementer CLI authenticated as you would at the terminal. Each
+  implementer skill's `SKILL.md` carries its own install and login commands.
+- `delegate-setup` requires no implementer CLI; it discovers whichever ones are available.
 - Node 18+ and `git`.
 - An orchestrating agent that can run shell commands and read files.
 - Shell examples assume bash/zsh (macOS/Linux, or Git Bash/WSL on Windows).
@@ -139,11 +174,14 @@ Full checklist: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 This package is intentionally inspectable:
 
-- All skill content is Markdown, plus exactly **one** executable per skill — each a `scripts/relay.mjs`.
-- Each `relay.mjs` makes no network calls, reads or writes no credentials, sends no telemetry, and has
-  no dependencies (Node built-ins only). It launches its implementer CLI and `git`, plus the platform
-  process launcher/termination utility where a Windows shim or process-tree kill requires one. The
-  implementer CLI authenticates exactly as you do at the terminal. Read the script before you run it.
+- All skill content is Markdown, plus small Node scripts. Each `*-delegate` skill has exactly one
+  `scripts/relay.mjs`. The `delegate-setup` utility ships `discover.mjs` / `config.mjs` / `lane.mjs`
+  (and a shared implementer table) instead of a relay — it never dispatches coding work.
+- Those scripts make no network calls of their own, read or write no credentials, send no telemetry, and
+  have no dependencies (Node built-ins only). Relays launch an implementer CLI and `git`, plus the
+  platform process launcher/termination utility where a Windows shim or process-tree kill requires one.
+  Discover may invoke installed CLIs for `--version` / model list probes (those CLIs may contact their
+  own services). Read the script before you run it.
 - None of the relays ever commit — committing is always the orchestrator's job, after review.
 
 **Verification status** — claims here are backed by runs, not assumptions.
@@ -177,6 +215,10 @@ Per skill — platform, CLI version, and what the run exercised:
 - `codex-delegate`, `opencode-delegate`, `vibe-delegate` — contract-tested only: argument validation,
   bounded version preflight, missing binary, result parsing, and whole-process-tree timeout/abort
   cleanup. No end-to-end run is recorded here.
+- `delegate-setup` — contract-tested: discover JSON shape, config validate/write/load, whole-lane
+  project overlay, global write without creating `.delegate/`, and `--lane` resolve / wrong-skill /
+  flag-override against relays. The smoke suite runs live discovery against installed CLIs
+  (versions vary by machine). Native Windows discover smoke not yet claimed.
 
 Not yet verified: native Windows launches for `agy`, `claude`, `grok`, `kimi`, `pi`, `qoder`, and
 `vibe` (the `codex`/`opencode`/`grok` `.cmd` shim handling is in place and quoted; Cursor serializes a
@@ -188,19 +230,28 @@ but unproven.
 
 ## Repository shape
 
-Every skill has the same shape — a lean `SKILL.md`, four references that load only when needed, and
-one inspectable script:
+Implementer skills share one shape; the setup utility has a different one:
 
 ```text
 skills/
-└── <name>-delegate/
+├── <name>-delegate/
+│   ├── SKILL.md
+│   ├── scripts/relay.mjs
+│   └── references/
+│       ├── writing-the-brief.md
+│       ├── dispatch-and-poll.md
+│       ├── review-and-land.md
+│       └── multi-task-queues.md
+└── delegate-setup/
     ├── SKILL.md
-    ├── scripts/relay.mjs
+    ├── scripts/
+    │   ├── discover.mjs
+    │   ├── config.mjs
+    │   ├── lane.mjs
+    │   └── implementers.mjs
     └── references/
-        ├── writing-the-brief.md
-        ├── dispatch-and-poll.md
-        ├── review-and-land.md
-        └── multi-task-queues.md
+        ├── schema.md
+        └── setup-dialogue.md
 ```
 
 Adding an implementer is a new directory plus two lines here: a table row, and a verification line once

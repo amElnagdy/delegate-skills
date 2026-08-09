@@ -42,6 +42,7 @@
  * Options:
  *   --brief <file>          Path to the brief. If omitted, the brief is read from stdin.
  *   --cd <dir>              Working root for Grok (default: current directory).
+ *   --lane <name>           Fleet lane from delegate-setup config (dials apply; explicit flags win).
  *   --model <name>          Grok model (default: Grok's own configured default).
  *   --effort <level>        Reasoning effort for this run (passed as `--effort`).
  *   --max-turns <n>         Maximum number of agent turns for this run.
@@ -76,10 +77,11 @@
  * file must therefore also treat a non-zero exit with no file as a usage error.
  */
 
-import { spawn, execFileSync } from "node:child_process";
+import { spawn, execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync, renameSync, readFileSync, existsSync, appendFileSync, lstatSync, readlinkSync, openSync, readSync, closeSync } from "node:fs";
-import { join, resolve, basename } from "node:path";
+import { join, resolve, basename, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { constants, tmpdir } from "node:os";
 import { StringDecoder } from "node:string_decoder";
 
@@ -87,13 +89,54 @@ const VERSION_PROBE_TIMEOUT_MS = 10_000;
 const MAX_TIMER_MS = 2_147_483_647;
 const AUTONOMY_MODES = new Set(["workspace-write", "read-only", "full-access"]);
 
+const IMPLEMENTER_KEY = "grok";
+
+function applyFleetLane(opts, flagged) {
+  if (!opts.lane) return;
+  const script = join(dirname(fileURLToPath(import.meta.url)), "../../delegate-setup/scripts/lane.mjs");
+  if (!existsSync(script)) {
+    fail("--lane requires the delegate-setup skill installed beside this relay");
+  }
+  const r = spawnSync(
+    process.execPath,
+    [script, "resolve", "--cwd", opts.cd, "--lane", opts.lane, "--implementer", IMPLEMENTER_KEY],
+    { encoding: "utf8", env: process.env },
+  );
+  if (r.error) fail(`lane resolve failed: ${r.error.message}`);
+  if (r.status !== 0) {
+    fail((r.stderr || "lane resolve failed").trim().replace(/^lane\.mjs:\s*/, ""));
+  }
+  let resolved;
+  try {
+    const lines = (r.stdout || "").trim().split("\n").filter(Boolean);
+    resolved = JSON.parse(lines[lines.length - 1]);
+  } catch {
+    fail("lane resolve returned invalid JSON");
+  }
+  opts.laneSource = resolved.source;
+  for (const [field, value] of Object.entries(resolved.dials || {})) {
+    if (flagged.has(field)) continue;
+    if (field === "autonomy" && (flagged.has("autonomy") || flagged.has("sandbox") || flagged.has("readOnly"))) continue;
+    if (field === "agent" && (flagged.has("agent") || flagged.has("readOnly"))) continue;
+    if (field === "sandbox" && (flagged.has("sandbox") || flagged.has("readOnly"))) continue;
+    if (field === "permissionMode" && (flagged.has("permissionMode") || flagged.has("readOnly"))) continue;
+    if (field === "planOnly" && (flagged.has("planOnly") || flagged.has("readOnly"))) continue;
+    if (field === "readOnly" && flagged.has("readOnly")) continue;
+    if (field === "force" && flagged.has("force")) continue;
+    opts[field] = value;
+  }
+}
+
 function fail(message, code = 2) {
   process.stderr.write(`relay: ${message}\n`);
   process.exit(code);
 }
 
 function parseArgs(argv) {
+  const flagged = new Set();
   const opts = {
+    lane: null,
+    laneSource: null,
     brief: null,
     cd: process.cwd(),
     model: null,
@@ -121,19 +164,21 @@ function parseArgs(argv) {
         break;
       case "--brief": opts.brief = next(); break;
       case "--cd": opts.cd = resolve(next()); break;
-      case "--model": opts.model = next(); break;
-      case "--effort": opts.effort = next(); break;
+      case "--lane": opts.lane = next(); break;
+      case "--model": opts.model = next(); flagged.add("model"); break;
+      case "--effort": opts.effort = next(); flagged.add("effort"); break;
       case "--max-turns": opts.maxTurns = next(); break;
-      case "--read-only": opts.autonomy = "read-only"; break;
-      case "--full-access": opts.autonomy = "full-access"; break;
+      case "--read-only": opts.autonomy = "read-only"; flagged.add("autonomy"); flagged.add("readOnly"); break;
+      case "--full-access": opts.autonomy = "full-access"; flagged.add("autonomy"); break;
       case "--resume-last": opts.resumeLast = true; break;
       case "--session": opts.session = next(); break;
-      case "--timeout": opts.timeout = next(); break;
+      case "--timeout": opts.timeout = next(); flagged.add("timeout"); break;
       case "--out-dir": opts.outDir = resolve(next()); break;
       default:
         fail(`unknown option: ${arg}`);
     }
   }
+  applyFleetLane(opts, flagged);
   // The watchdog is relay-only (the grok launch has no timeout flag), so a malformed
   // --timeout must fail loudly here - a silent no-watchdog fallback would be wrong.
   if (opts.timeout !== null && parseDuration(opts.timeout) === null) {
@@ -160,7 +205,6 @@ function parseArgs(argv) {
 }
 
 function parseDuration(duration) {
-  // Whole-string match: "1mtypo" must be rejected, not read as one minute.
   const match = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/.exec(duration);
   if (!match || (!match[1] && !match[2] && !match[3])) return null;
   try {
@@ -177,22 +221,26 @@ function parseDuration(duration) {
 }
 
 function killChild(child, signal = "SIGTERM") {
-  // The kill must reach the whole process family, not just the immediate child — a tool
-  // subprocess left running would keep editing after the relay reports timeout/aborted.
-  // On Windows the child is the .cmd shim (the shell:true launch above), Windows has no
-  // process-group signals, and Node can't kill a process family without a Job Object, so
-  // kill the tree by pid with the OS tool: /t includes descendants, /f forces it — the
-  // same idiom tree-kill and npm/pnpm use.
+  if (!child || !child.pid) return;
   if (process.platform === "win32") {
-    if (signal !== "SIGTERM") return; // the first taskkill /f already felled the whole tree
-    // stderr is inherited so a real taskkill failure (e.g. access denied) is visible to the operator;
-    // its non-zero exit when the tree is already gone is the expected race and carries nothing to do.
-    try { execFileSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: ["ignore", "ignore", "inherit"] }); }
-    catch { /* already gone — nothing left to kill */ }
-  } else {
-    // On POSIX the child leads its own process group (the detached launch), so the negative-pid
-    // signal reaches every descendant; fall back to the lone pid if the group is already gone.
-    try { process.kill(-child.pid, signal); } catch { try { child.kill(signal); } catch { /* already gone */ } }
+    if (signal !== "SIGTERM") return;
+    try {
+      execFileSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
+        stdio: ["ignore", "ignore", "inherit"],
+      });
+    } catch {
+      // The process tree already exited.
+    }
+    return;
+  }
+  try {
+    process.kill(-child.pid, signal);
+  } catch {
+    try {
+      child.kill(signal);
+    } catch {
+      // The process group already exited.
+    }
   }
 }
 
@@ -420,12 +468,16 @@ function readOnlyVerdict(beforeTree, afterTree, beforeFingerprints) {
 }
 
 function gitTouchedFiles(cwd) {
-  // null (not []) when git can't report — git missing, or a non-repo run —
-  // so the caller can tell "git unavailable" apart from "Grok changed nothing."
-  // [] means git ran and the working tree is clean.
   try {
-    const out = execFileSync("git", ["status", "--porcelain"], { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
-    return out.split("\n").map((line) => line.trimEnd()).filter(Boolean);
+    const output = execFileSync("git", ["status", "--porcelain"], {
+      cwd,
+      encoding: "utf8",
+      timeout: 10_000,
+      killSignal: "SIGKILL",
+      stdio: ["ignore", "pipe", "ignore"],
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    return output.split("\n").map((line) => line.trimEnd()).filter(Boolean);
   } catch {
     return null;
   }
@@ -577,6 +629,8 @@ function makeResultWriter(opts, version, run) {
   return (extra) => {
     const result = {
       schema: "delegate-relay.result.v1",
+      lane: opts.lane,
+      laneSource: opts.laneSource,
       tool: "grok",
       workdir: opts.cd,
       autonomy: opts.autonomy,

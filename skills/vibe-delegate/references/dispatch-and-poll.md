@@ -34,6 +34,7 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 | --- | --- |
 | `--brief <file>` | Brief path. Omit it to read the brief from stdin. |
 | `--cd <dir>` | Working root and child process cwd (default: current directory). |
+| `--lane <name>` | Fleet lane from `delegate-setup` config. Applies that lane's dials; fails if the lane's `implementer` is not this relay. Explicit dial flags win. |
 | `--max-turns <n>` | Maximum number of Vibe agent turns (`--max-turns`). Useful for cost control. |
 | `--max-price <usd>` | Positive, indicative cost threshold in USD; not a hard budget (`--max-price`). |
 | `--max-tokens <n>` | Positive maximum cumulative session tokens (`--max-tokens`). |

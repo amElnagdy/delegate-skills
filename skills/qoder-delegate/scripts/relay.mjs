@@ -19,6 +19,7 @@
  * Options:
  *   --brief <file>          Brief path. If omitted, read stdin.
  *   --cd <dir>              Qoder working root (default: current directory).
+ *   --lane <name>           Fleet lane from delegate-setup config (dials apply; explicit flags win).
  *   --model <name>          Model from `qodercli --list-models`.
  *   --context-window <n>    Positive integer; supported models only.
  *   --resume <id>           Resume one Qoder session; send a delta brief.
@@ -38,7 +39,7 @@
  * aborted, or qoder_unavailable.
  */
 
-import { execFileSync, spawn } from "node:child_process";
+import {execFileSync, spawn, spawnSync } from "node:child_process";
 import {
   appendFileSync,
   existsSync,
@@ -50,7 +51,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { constants, tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import {basename, join, resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { StringDecoder } from "node:string_decoder";
 
 const DEFAULT_TIMEOUT = "30m";
@@ -65,6 +67,44 @@ const PERMISSION_MODES = new Set([
   "auto",
   "plan",
 ]);
+
+const IMPLEMENTER_KEY = "qoder";
+
+function applyFleetLane(opts, flagged) {
+  if (!opts.lane) return;
+  const script = join(dirname(fileURLToPath(import.meta.url)), "../../delegate-setup/scripts/lane.mjs");
+  if (!existsSync(script)) {
+    fail("--lane requires the delegate-setup skill installed beside this relay");
+  }
+  const r = spawnSync(
+    process.execPath,
+    [script, "resolve", "--cwd", opts.cd, "--lane", opts.lane, "--implementer", IMPLEMENTER_KEY],
+    { encoding: "utf8", env: process.env },
+  );
+  if (r.error) fail(`lane resolve failed: ${r.error.message}`);
+  if (r.status !== 0) {
+    fail((r.stderr || "lane resolve failed").trim().replace(/^lane\.mjs:\s*/, ""));
+  }
+  let resolved;
+  try {
+    const lines = (r.stdout || "").trim().split("\n").filter(Boolean);
+    resolved = JSON.parse(lines[lines.length - 1]);
+  } catch {
+    fail("lane resolve returned invalid JSON");
+  }
+  opts.laneSource = resolved.source;
+  for (const [field, value] of Object.entries(resolved.dials || {})) {
+    if (flagged.has(field)) continue;
+    if (field === "autonomy" && (flagged.has("autonomy") || flagged.has("sandbox") || flagged.has("readOnly"))) continue;
+    if (field === "agent" && (flagged.has("agent") || flagged.has("readOnly"))) continue;
+    if (field === "sandbox" && (flagged.has("sandbox") || flagged.has("readOnly"))) continue;
+    if (field === "permissionMode" && (flagged.has("permissionMode") || flagged.has("readOnly"))) continue;
+    if (field === "planOnly" && (flagged.has("planOnly") || flagged.has("readOnly"))) continue;
+    if (field === "readOnly" && flagged.has("readOnly")) continue;
+    if (field === "force" && flagged.has("force")) continue;
+    opts[field] = value;
+  }
+}
 
 function fail(message, code = 2) {
   process.stderr.write(`relay: ${message}\n`);
@@ -88,7 +128,10 @@ function parseDuration(duration) {
 }
 
 function parseArgs(argv) {
+  const flagged = new Set();
   const opts = {
+    lane: null,
+    laneSource: null,
     brief: null,
     cd: process.cwd(),
     model: null,
@@ -117,17 +160,19 @@ function parseArgs(argv) {
         break;
       case "--brief": opts.brief = next(); break;
       case "--cd": opts.cd = resolve(next()); break;
-      case "--model": opts.model = next(); break;
+      case "--lane": opts.lane = next(); break;
+      case "--model": opts.model = next(); flagged.add("model"); break;
       case "--context-window": opts.contextWindow = next(); break;
       case "--resume": opts.resume = next(); break;
       case "--resume-last": opts.resumeLast = true; break;
       case "--add-dir": opts.addDirs.push(next()); break;
-      case "--permission-mode": opts.permissionMode = next(); break;
-      case "--timeout": opts.timeout = next(); break;
+      case "--permission-mode": opts.permissionMode = next(); flagged.add("permissionMode"); break;
+      case "--timeout": opts.timeout = next(); flagged.add("timeout"); break;
       case "--out-dir": opts.outDir = resolve(next()); break;
       default: fail(`unknown option: ${arg}`);
     }
   }
+  applyFleetLane(opts, flagged);
 
   if (opts.resumeLast && opts.resume) {
     fail("--resume-last and --resume are mutually exclusive; pass only one");
@@ -174,20 +219,25 @@ function readBrief(opts) {
 }
 
 function killChild(child, signal = "SIGTERM") {
-  // A timeout/abort must stop Qoder's tools too, or a descendant could keep
-  // editing after the relay reports that the run ended.
+  if (!child || !child.pid) return;
   if (process.platform === "win32") {
-    if (signal !== "SIGTERM") return; // taskkill /f already felled the tree
+    if (signal !== "SIGTERM") return;
     try {
       execFileSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
         stdio: ["ignore", "ignore", "inherit"],
       });
-    } catch { /* The tree already exited. */ }
-  } else {
-    try {
-      process.kill(-child.pid, signal);
     } catch {
-      try { child.kill(signal); } catch { /* The tree already exited. */ }
+      // The process tree already exited.
+    }
+    return;
+  }
+  try {
+    process.kill(-child.pid, signal);
+  } catch {
+    try {
+      child.kill(signal);
+    } catch {
+      // The process group already exited.
     }
   }
 }
@@ -214,6 +264,9 @@ function gitTouchedFiles(cwd) {
     const output = execFileSync("git", ["status", "--porcelain"], {
       cwd,
       encoding: "utf8",
+      timeout: 10_000,
+      killSignal: "SIGKILL",
+      stdio: ["ignore", "pipe", "ignore"],
       maxBuffer: 64 * 1024 * 1024,
     });
     return output.split("\n").map((line) => line.trimEnd()).filter(Boolean);
@@ -308,6 +361,8 @@ function makeResultWriter(opts, version, run) {
   return (extra) => {
     const result = {
       schema: "delegate-relay.result.v1",
+      lane: opts.lane,
+      laneSource: opts.laneSource,
       tool: "qoder",
       workdir: opts.cd,
       model: opts.model,
