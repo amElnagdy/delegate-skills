@@ -2,6 +2,7 @@ name: relays
 
 on:
   push:
+    branches: [master]
   pull_request:
 
 permissions:
@@ -23,6 +24,7 @@ jobs:
           node-version: 22
       - run: node test/relay-parity.mjs
       - run: node test/relay-isolated.mjs
+      - run: node test/event-scanner.mjs
       - run: node test/relay-smoke.mjs
       - name: validate the skills package
         if: runner.os == 'Linux'

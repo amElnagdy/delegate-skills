@@ -1,8 +1,24 @@
 const fs = require("node:fs");
 const args = process.argv.slice(2);
+const capturedEnv = () => Object.fromEntries(
+  ["PATH", "HOME", "SMOKE_PROVIDER_TOKEN", "SMOKE_SECRET_TOKEN"]
+    .filter((key) => process.env[key] !== undefined)
+    .map((key) => [key, process.env[key]]),
+);
+// Environment-isolation tests cannot pass their control variables through the
+// environment. Load their fixture beside the fake before handling --version so
+// the preflight and dispatch can be captured independently.
+if (!process.env.SMOKE_MODE) {
+  try {
+    Object.assign(process.env, JSON.parse(fs.readFileSync(require("node:path").join(__dirname, "smoke-fallback.json"), "utf8")));
+  } catch { /* no environment-isolation fixture */ }
+}
 // Every probe form one relay or another uses: --version, grok's \`version\` subcommand, and
 // agy's \`changelog\`. Treating them alike lets any relay's hang/fail mode be driven by name.
 const versionProbe = args.includes("--version") || args[0] === "version" || args[0] === "changelog";
+if (versionProbe && process.env.SMOKE_PREFLIGHT_ENV_FILE) {
+  fs.writeFileSync(process.env.SMOKE_PREFLIGHT_ENV_FILE, JSON.stringify(capturedEnv()));
+}
 if (versionProbe && process.env.SMOKE_MODE === "grok-spawn-error" && process.platform !== "win32") {
   fs.renameSync(require("node:path").join(__dirname, "grok"), require("node:path").join(__dirname, "grok.removed"));
   console.log("fake-cli 0.0.0-smoke");
@@ -28,6 +44,7 @@ if (versionProbe && process.env.SMOKE_MODE === "grok-spawn-error" && process.pla
 }
 if (process.env.SMOKE_MODE === "capture") {
   fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify(args));
+  if (process.env.SMOKE_ENV_FILE) fs.writeFileSync(process.env.SMOKE_ENV_FILE, JSON.stringify(capturedEnv()));
   process.exit(0);
 }
 if (process.env.SMOKE_WRITE_FILE) {
@@ -53,6 +70,19 @@ if (process.env.SMOKE_GIT_RENAME_FROM && process.env.SMOKE_GIT_RENAME_TO) {
     "mv", "-f", process.env.SMOKE_GIT_RENAME_FROM, process.env.SMOKE_GIT_RENAME_TO,
   ]);
 }
+if (process.env.SMOKE_MODE === "agy-permission-denied") {
+  console.error('jetski: no output produced — a tool required the "write_file" permission that headless\nmode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow\nin settings.json (e.g. write_file(<target>)). Alternatively, re-run with\n--dangerously-skip-permissions to auto-approve all tools.');
+  process.exit(0);
+}
+if (process.env.SMOKE_MODE === "agy-analysis") {
+  console.log("fake agy analysis completed");
+  process.exit(0);
+}
+if (process.env.SMOKE_MODE === "agy-silent-edit") {
+  fs.appendFileSync(process.env.SMOKE_EDIT_FILE, "dispatch edit\n");
+  process.exit(0);
+}
+if (process.env.SMOKE_MODE === "agy-silent-noop") process.exit(0);
 if (process.env.SMOKE_MODE === "qoder-success") {
   fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify(args));
   console.log(JSON.stringify({
@@ -80,7 +110,7 @@ if (process.env.SMOKE_MODE === "qoder-success") {
 if (process.env.SMOKE_MODE === "vibe-success") {
   fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify(args));
   console.log(JSON.stringify({ role: "assistant", content: "working" }));
-  console.log(JSON.stringify({ role: "assistant", content: "fake vibe completed" }));
+  fs.writeSync(1, JSON.stringify({ role: "assistant", content: "fake vibe completed" }));
   process.exit(0);
 }
 if (process.env.SMOKE_MODE === "grok-read-only") {

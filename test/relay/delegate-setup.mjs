@@ -53,6 +53,77 @@ export function runDelegateSetup(h) {
     agyReport?.discovered.find(({ key }) => key === "agy")?.version === "1.2.3",
   );
 
+  const grokProbeDir = join(h.scratch, "discover-grok");
+  mkdirSync(grokProbeDir);
+  const grokProbeSource = `
+const fs = require("node:fs");
+const [command] = process.argv.slice(2);
+if (command === "version" || command === "--version") {
+  console.log("fake-grok 1.0.0");
+  process.exit(0);
+}
+if (command !== "models") process.exit(2);
+let count = 0;
+try { count = Number(fs.readFileSync(process.env.GROK_PROBE_COUNT, "utf8")) || 0; } catch {}
+count += 1;
+fs.writeFileSync(process.env.GROK_PROBE_COUNT, String(count));
+const first = process.env.GROK_PROBE_FIRST;
+const observation = count === 1
+  ? first
+  : first === "models" ? "unauthenticated" : first === "unauthenticated" ? "models" : "ambiguous";
+if (observation === "models") {
+  console.log("Available models");
+  console.log("* grok-code-fast-1 (default)");
+} else if (observation === "unauthenticated") {
+  console.error("You are not authenticated.");
+  process.exit(1);
+} else {
+  console.error("Temporary service failure.");
+  process.exit(1);
+}
+`;
+  if (h.WIN) {
+    writeFileSync(join(grokProbeDir, "fake-grok.cjs"), grokProbeSource);
+    writeFileSync(
+      join(grokProbeDir, "grok.cmd"),
+      `@"${process.execPath}" "%~dp0fake-grok.cjs" %*\r\n`,
+    );
+  } else {
+    const grokProbePath = join(grokProbeDir, "grok");
+    writeFileSync(grokProbePath, `#!${process.execPath}\n${grokProbeSource}`);
+    chmodSync(grokProbePath, 0o755);
+  }
+  for (const [first, authenticated, modelStatus] of [
+    ["models", true, "reported"],
+    ["unauthenticated", false, "failed"],
+    ["ambiguous", null, "failed"],
+  ]) {
+    const countPath = join(grokProbeDir, `${first}.count`);
+    const grokDiscover = spawnSync(process.execPath, [join(setupDir, "discover.mjs")], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: grokProbeDir,
+        GROK_PROBE_COUNT: countPath,
+        GROK_PROBE_FIRST: first,
+      },
+    });
+    let grokReport = null;
+    try {
+      if (grokDiscover.status === 0) grokReport = JSON.parse(grokDiscover.stdout);
+    } catch {
+      grokReport = null;
+    }
+    const grok = grokReport?.discovered.find(({ key }) => key === "grok");
+    h.check(
+      `Grok shares one ${first} observation across auth and model discovery`,
+      readFileSync(countPath, "utf8") === "1" &&
+        grok?.authenticated === authenticated &&
+        grok?.models?.status === modelStatus &&
+        (first !== "models" || grok.models.values[0] === "grok-code-fast-1"),
+    );
+  }
+
   // Keep fixtures inside the repo tree so sandboxed CI/dev runs can write; seed a
   // minimal .git without `git init` (hooks/config writes are often blocked).
   const fleetRoot = mkdtempSync(join(h.testDir, "..", ".tmp-fleet-smoke-"));

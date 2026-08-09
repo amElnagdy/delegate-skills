@@ -27,6 +27,8 @@ const SYMBOLS = [
   ["fingerprintDirtyPaths", "function", READ_ONLY_TRIPWIRE_RELAYS],
   ["changedDirtyPaths", "function", READ_ONLY_TRIPWIRE_RELAYS],
   ["readOnlyVerdict", "function", READ_ONLY_TRIPWIRE_RELAYS],
+  ["MAX_BUFFERED_CHARS", "const", ["claude", "cursor", "grok", "kimi", "opencode", "pi", "qoder", "vibe"]],
+  ["makeEventScanner", "function", ["claude", "cursor", "grok", "kimi", "opencode", "pi", "qoder"]],
 ];
 let failed = 0;
 const check = (name, condition) => {

@@ -39,6 +39,8 @@
  *                           auto). List names with `cursor-agent models`.
  *   --read-only             Run in Cursor's plan mode: read-only analysis, no
  *                           edits, no --force.
+ *   --sandbox <mode>        Explicitly enable or disable Cursor's sandbox for
+ *                           this dispatch (enabled | disabled).
  *   --no-force              Withhold --force on a write-capable run; commands
  *                           that require approval are refused instead of run.
  *   --session <id>          Resume a specific Cursor chat (`--resume <id>`);
@@ -55,7 +57,8 @@
  *
  * Result: written to <out-dir>/result.json and summarized on stdout —
  *   status, exitCode, signal, cursorAgentVersion, sessionId, resolvedModel,
- *   permissionMode, force, usage, finalMessage (Cursor's own report),
+ *   permissionMode, force, sandbox (requested value or null), usage,
+ *   finalMessage (Cursor's own report),
  *   touchedFiles (git porcelain, null if git cannot report), and paths to
  *   brief.txt, final.txt, events.jsonl, and stderr.txt.
  *
@@ -76,14 +79,74 @@ import {join, resolve, basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { constants, tmpdir } from "node:os";
 import { StringDecoder } from "node:string_decoder";
+const MAX_BUFFERED_CHARS = 1_048_576;
 
 const DEFAULT_TIMEOUT = "30m";
 const MAX_TIMER_MS = 2_147_483_647;
 const VERSION_PROBE_TIMEOUT_MS = 10_000;
 const SAFE_MODEL = /^[A-Za-z0-9][A-Za-z0-9._:@/[\],=-]*$/;
 const SAFE_SESSION = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+const SANDBOX_MODES = new Set(["enabled", "disabled"]);
 
 const IMPLEMENTER_KEY = "cursor";
+
+function makeEventScanner(onObject) {
+  let buf = "";
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escaped = false;
+  return (chunk) => {
+    if (!chunk) return;
+    buf += chunk;
+    for (let i = 0; i < buf.length; i += 1) {
+      const ch = buf[i];
+      // Only track strings inside an object (depth > 0). At depth 0 we are
+      // skipping a junk prefix, and an unmatched `"` there must not swallow the
+      // real `{...}` that follows in the same chunk.
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (ch === "\\") escaped = true;
+        else if (ch === '"') inString = false;
+      } else if (ch === '"') {
+        if (depth > 0) inString = true;
+      } else if (ch === "{") {
+        if (depth === 0) start = i;
+        depth += 1;
+      } else if (ch === "}") {
+        if (depth > 0) {
+          depth -= 1;
+          if (depth === 0 && start !== -1) {
+            const slice = buf.slice(start, i + 1);
+            try { onObject(JSON.parse(slice)); } catch { /* skip malformed */ }
+            start = -1;
+          }
+        }
+      }
+      if (i === buf.length - 1 && depth > 0 && start !== -1 && buf.length - start > MAX_BUFFERED_CHARS) {
+        // A complete object may exceed the retained-input cap within this
+        // chunk. Drop only an oversized partial, then rescan its suffix so a
+        // later concatenated event is not lost.
+        buf = buf.slice(start + MAX_BUFFERED_CHARS);
+        start = -1;
+        depth = 0;
+        inString = false;
+        escaped = false;
+        i = -1;
+      }
+    }
+    // Retain only an in-progress object (if any) so the buffer cannot grow
+    // without bound; everything already emitted or skipped is dropped.  Reset
+    // the scanner state: the next call re-derives depth/string/escape by
+    // scanning the retained prefix (which always begins at an object's `{`)
+    // from scratch.
+    buf = depth > 0 && start !== -1 ? buf.slice(start) : "";
+    start = -1;
+    depth = 0;
+    inString = false;
+    escaped = false;
+  };
+}
 
 function applyFleetLane(opts, flagged) {
   if (!opts.lane) return;
@@ -136,6 +199,7 @@ function parseArgs(argv) {
     model: null,
     readOnly: false,
     force: true,
+    sandbox: null,
     session: null,
     resumeLast: false,
     addDirs: [],
@@ -161,6 +225,7 @@ function parseArgs(argv) {
       case "--lane": opts.lane = next(); break;
       case "--model": opts.model = next(); flagged.add("model"); break;
       case "--read-only": opts.readOnly = true; flagged.add("readOnly"); break;
+      case "--sandbox": opts.sandbox = next(); flagged.add("sandbox"); break;
       case "--no-force": opts.force = false; flagged.add("force"); break;
       case "--session": opts.session = next(); break;
       case "--resume-last": opts.resumeLast = true; break;
@@ -172,6 +237,9 @@ function parseArgs(argv) {
     }
   }
   applyFleetLane(opts, flagged);
+  if (opts.sandbox !== null && !SANDBOX_MODES.has(opts.sandbox)) {
+    fail(`--sandbox "${opts.sandbox}" is invalid; expected enabled or disabled`);
+  }
   if (opts.resumeLast && opts.session) {
     fail("--resume-last and --session are mutually exclusive; pass only one");
   }
@@ -321,52 +389,12 @@ function buildArgv(opts) {
   const argv = ["--print", "--output-format", "stream-json", "--trust"];
   if (opts.readOnly) argv.push("--mode", "plan");
   else if (opts.force) argv.push("--force");
+  if (opts.sandbox) argv.push("--sandbox", opts.sandbox);
   if (opts.model) argv.push("--model", winq(opts.model));
   if (opts.session) argv.push("--resume", winq(opts.session));
   else if (opts.resumeLast) argv.push("--continue");
   for (const dir of opts.addDirs) argv.push("--add-dir", winq(dir));
   return argv;
-}
-
-function makeEventScanner(onObject) {
-  // stream-json is newline-delimited JSON, but this brace-aware scan also
-  // tolerates junk prefixes and concatenated objects if the format drifts.
-  let buf = "";
-  let depth = 0;
-  let start = -1;
-  let inString = false;
-  let escaped = false;
-  return (chunk) => {
-    buf += chunk;
-    for (let i = 0; i < buf.length; i += 1) {
-      const ch = buf[i];
-      if (inString) {
-        if (escaped) escaped = false;
-        else if (ch === "\\") escaped = true;
-        else if (ch === '"') inString = false;
-        continue;
-      }
-      if (ch === '"') { if (depth > 0) inString = true; continue; }
-      if (ch === "{") {
-        if (depth === 0) start = i;
-        depth += 1;
-      } else if (ch === "}") {
-        if (depth > 0) {
-          depth -= 1;
-          if (depth === 0 && start !== -1) {
-            const slice = buf.slice(start, i + 1);
-            try { onObject(JSON.parse(slice)); } catch { /* ignore non-objects */ }
-            start = -1;
-          }
-        }
-      }
-    }
-    buf = depth > 0 && start !== -1 ? buf.slice(start) : "";
-    start = -1;
-    depth = 0;
-    inString = false;
-    escaped = false;
-  };
 }
 
 function prepareRunDir(opts, brief) {
@@ -400,6 +428,7 @@ function makeResultWriter(opts, version, run) {
       model: opts.model,
       readOnly: opts.readOnly,
       force: opts.force && !opts.readOnly,
+      sandbox: opts.sandbox,
       resumed: Boolean(opts.resumeLast || opts.session),
       cursorAgentVersion: version,
       startedAt: run.startedAt,
