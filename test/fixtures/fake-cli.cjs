@@ -26,6 +26,19 @@ if (process.env.SMOKE_MODE === "capture") {
   fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify(args));
   process.exit(0);
 }
+if (process.env.SMOKE_MODE === "agy-permission-denied") {
+  console.error('jetski: no output produced — a tool required the "write_file" permission that headless\nmode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow\nin settings.json (e.g. write_file(<target>)). Alternatively, re-run with\n--dangerously-skip-permissions to auto-approve all tools.');
+  process.exit(0);
+}
+if (process.env.SMOKE_MODE === "agy-analysis") {
+  console.log("fake agy analysis completed");
+  process.exit(0);
+}
+if (process.env.SMOKE_MODE === "agy-silent-edit") {
+  fs.appendFileSync(process.env.SMOKE_EDIT_FILE, "dispatch edit\n");
+  process.exit(0);
+}
+if (process.env.SMOKE_MODE === "agy-silent-noop") process.exit(0);
 if (process.env.SMOKE_MODE === "qoder-success") {
   fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify(args));
   console.log(JSON.stringify({

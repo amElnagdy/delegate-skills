@@ -38,6 +38,10 @@ Code; treat other orchestrators as designed-for, not yet proven.
 2. `agy models` succeeds. That proves the CLI can authenticate and list the available model labels.
 3. You are in (or will point `--cd` at) the target git repository.
 
+These checks do not prove that a headless write will be approved. In `--print` mode, Antigravity
+cannot prompt for a write permission and may auto-deny it. The relay detects that denial instead of
+reporting completion.
+
 ## Choose the implementer model
 
 `agy` has a configured default model, so `--model` is optional. Use it when the human has a preferred
@@ -116,6 +120,9 @@ auto-approve tool permission requests. Use `--sandbox` when you want Antigravity
 enabled for the run. Antigravity's own help says `--dangerously-skip-permissions` auto-approves all
 tool permission requests without prompting, including a request to act outside the sandbox. Do not
 treat `--sandbox` as an enforced boundary when the flags are combined; treat the run as full access.
+If headless `--print` auto-denies a write, the relay reports `status: "failed"` and exits non-zero.
+Settings allow-rules are not documented here as a fix because they have not been demonstrated to
+apply to this headless path. Do not add the bypass flag without explicit human approval.
 
 ## Authorization model
 
