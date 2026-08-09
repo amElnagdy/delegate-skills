@@ -41,6 +41,10 @@ async function runScenario(h, skill, scenario) {
   if (scenario.repo === false) mkdirSync(workDir);
   if (scenario.unknown) addDirtySubmodule(workDir);
   if (scenario.dirty) writeFileSync(join(workDir, "already-dirty.txt"), "pre-existing\n");
+  if (scenario.untrackedDirectory) {
+    mkdirSync(join(workDir, "loose"));
+    writeFileSync(join(workDir, "loose", "existing.txt"), "pre-existing\n");
+  }
   const outDir = scenario.artifactsInside
     ? workDir
     : join(h.scratch, `out-${skill}-${scenario.name}`);
@@ -49,6 +53,7 @@ async function runScenario(h, skill, scenario) {
       ? "grok-read-only"
       : scenario.dirty ? "claude-read-only-append" : "claude-read-only-clean",
     ...(skill === "grok" && scenario.dirty ? { SMOKE_APPEND_FILE: "already-dirty.txt" } : {}),
+    ...(scenario.untrackedDirectory ? { SMOKE_WRITE_FILE: join("loose", "new.txt") } : {}),
   });
   const outcome = await waitFor(child);
   h.check(`${skill} ${scenario.name}: relay close wait did not time out`, outcome.exited);
@@ -68,6 +73,7 @@ export async function runReadOnlyTripwire(h) {
     { name: "unknown", repo: false, expected: null },
     { name: "already-dirty", dirty: true, expected: true },
     { name: "proof-over-unknown", dirty: true, unknown: true, expected: true },
+    { name: "new-file-in-untracked-directory", untrackedDirectory: true, expected: true },
     { name: "relay-artifacts", artifactsInside: true, expected: false },
     { name: "relay-artifacts-plus-write", artifactsInside: true, dirty: true, expected: true },
   ];
@@ -76,8 +82,35 @@ export async function runReadOnlyTripwire(h) {
   }
 
   if (h.WIN) {
+    console.log("  skip  grok abort/result artifacts: Windows delivers no catchable SIGTERM");
     console.log("  skip  grok spawn error: shell:true reports a shell exit, not a spawn error, on Windows");
     return;
+  }
+  {
+    const workDir = h.freshRepo("work-grok-abort-artifacts");
+    const pidFile = join(h.scratch, "pid-grok-abort-artifacts");
+    const grandPidFile = join(h.scratch, "grandpid-grok-abort-artifacts");
+    const child = h.runRelay("grok", workDir, workDir, ["--read-only"], {
+      SMOKE_MODE: "abort",
+      SMOKE_PID_FILE: pidFile,
+      SMOKE_GRAND_PID_FILE: grandPidFile,
+      SMOKE_LATE_FILE: join(h.scratch, "late-grok-abort-artifacts.txt"),
+    });
+    h.check("grok abort/result artifacts: fake implementer came up",
+      await h.until(() => existsSync(pidFile), 10_000));
+    const grandPid = existsSync(grandPidFile) ? Number(readFileSync(grandPidFile, "utf8")) : null;
+    child.kill("SIGTERM");
+    const outcome = await waitFor(child);
+    h.check("grok abort/result artifacts: relay exits after grace window", outcome.exited);
+    h.check("grok abort/result artifacts: result.json exists", existsSync(join(workDir, "result.json")));
+    if (existsSync(join(workDir, "result.json"))) {
+      const result = h.result(workDir);
+      h.check("grok abort/result artifacts: status is aborted", result.status === "aborted");
+      h.check("grok abort/result artifacts: relay files do not prove a violation",
+        result.readOnlyViolation === false);
+    }
+    h.check("grok abort/result artifacts: implementer subprocess is dead",
+      grandPid !== null && await h.until(() => !h.alive(grandPid), 10_000));
   }
   const workDir = join(h.scratch, "work-grok-spawn-error");
   const outDir = join(h.scratch, "out-grok-spawn-error");
