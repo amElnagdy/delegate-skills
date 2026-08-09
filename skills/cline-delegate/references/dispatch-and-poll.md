@@ -29,7 +29,7 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 | `--cd <dir>` | Working root and child process cwd (default: current directory). |
 | `--lane <name>` | Fleet lane from `delegate-setup` config. Applies that lane's dials; fails if the lane's `implementer` is not this relay. Explicit dial flags win. |
 | `--provider <name>` | Cline provider name (default: cline's own default). Token-validated. |
-| `--model <id>` | Cline model id, must be vendor-qualified (`provider/model`, e.g. `deepseek/deepseek-v4-flash`) - cline 3.0.52+ rejects a bare id; relay fails fast on bare ids (default: cline's own default). Token-validated: letters, digits, `. _ : / -`. |
+| `--model <id>` | Cline model id, must be vendor-qualified (`provider/model`, e.g. `deepseek/deepseek-v4-flash`) - cline rejects a bare id; relay fails fast on bare ids (default: cline's own default). Token-validated: letters, digits, `. _ : / -`. |
 | `--session <id>` | Resume a specific cline session; send only the delta brief. |
 | `--plan` | Restrict cline to plan mode: analysis only, no edits. |
 | `--timeout <dur>` | Relay watchdog (default: `30m`; h/m/s strings). Independent of cline's own CLI-side timeout. |
@@ -122,8 +122,9 @@ cline --json -v [--provider <name>] [--model <id>] \
   [--id <session-id>] [--plan] [--cwd <dir>] "<brief as one positional argument>"
 ```
 
-The brief rides argv as the trailing `[prompt]` positional - cline's `--json` output mode rejects
-a pipe-only invocation, so stdin is never used for payloads. The relay quotes the single argument
+The brief rides argv as the trailing `[prompt]` positional - the transport this relay uses for
+cline's prompt (cline's `--json` output mode accepts a prompt argument or piped stdin; the
+relay always uses argv, so stdin is never used for payloads). The relay quotes the single argument
 and token-validates every flag value ahead of dispatch, which keeps the `shell:true` launch on
 native Windows (where cline is a `.cmd` shim) safe - a brief is one quoted token, never an
 unvalidated embedded command. `-v` (verbose) is required so the `run_start` event carries the

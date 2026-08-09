@@ -16,7 +16,7 @@ pick a provider. The relay forwards ids and provider names made of letters, digi
 only.
 
 When you do pass `--model <id>`, the id must be **vendor-qualified** (`provider/model`, e.g.
-`deepseek/deepseek-v4-flash`) — cline 3.0.52+ rejects a bare id like `deepseek-v4-flash` with
+`deepseek/deepseek-v4-flash`) — cline rejects a bare id like `deepseek-v4-flash` with
 "invalid model format, expected modelType/model". The relay validates the shape before dispatch
 and fails fast with exit 2 instead of letting the run die after startup.
 
@@ -127,10 +127,11 @@ Report: (1) the root cause and fix, (2) files touched, (3) pytest and ruff outco
 
 ## Brief delivery
 
-The relay passes the brief as cline's `[prompt]` argument - the only transport cline's `--json`
-output mode accepts (it rejects a pipe-only invocation with "requires a prompt argument or piped
-stdin"). Keep the brief focused so it stays well under OS command-line limits; large context
-should be pointed at workspace files cline reads itself. Keep secrets out of the brief anyway on
+The relay passes the brief as cline's `[prompt]` positional argument - the transport this
+relay uses for cline's prompt. (Cline's `--json` output mode accepts a prompt argument or
+piped stdin; the relay always uses the positional, so stdin is never used.) Keep the brief
+focused so it stays well under OS command-line limits; large context should be pointed at
+workspace files cline reads itself. Keep secrets out of the brief anyway on
 shared machines - reference environment variables or files with tight permissions.
 
 **On Windows the brief must be a single line**, without `%`, `!`, `"`, or newlines: the relay

@@ -31,7 +31,7 @@ The loop needs only a shell command and file access, so any comparable orchestra
 ## Prerequisites (check once)
 
 1. Install `cline` (npm or bundled binary; the relay probes `cline --version`).
-2. Authenticate: run `cline ul` inside Cline's first-run panel, or configure
+2. Authenticate: run `cline auth` (interactive sign-in), or configure
    `ANTHROPIC_API_KEY` / an OpenAI-compatible base URL.
 3. Confirm `cline --version` succeeds.
 4. Work in, or point `--cd` at, the target git repository.
@@ -39,11 +39,11 @@ The loop needs only a shell command and file access, so any comparable orchestra
 ## Choose the model (optional)
 
 Cline picks a default model. To choose another, pass `--model <id>` or `--provider <name>`
-(e.g. `claude`, `openai`, `openrouter`). The relay accepts letters, digits,
+(e.g. `anthropic`, `openai-native`, `openrouter`). The relay accepts letters, digits,
 and `. _ : / -` only (the value reaches a shell on Windows).
 
 `--model` ids must be **vendor-qualified** (`provider/model`, e.g.
-`deepseek/deepseek-v4-flash`): cline 3.0.52+ rejects a bare id like `deepseek-v4-flash`
+`deepseek/deepseek-v4-flash`): cline rejects a bare id like `deepseek-v4-flash`
 with "invalid model format, expected modelType/model", and the relay fails fast on a
 bare id instead of dispatching a doomed run.
 
@@ -60,7 +60,7 @@ the relay's `--brief`. See [references/writing-the-brief.md](references/writing-
 
 ### 2. Dispatch
 
-Use the bundled relay. It runs `cline --json -v` with the brief as cline's `[prompt]` argument (the only transport cline's JSON output mode accepts), captures the JSON event
+Use the bundled relay. It runs `cline --json -v` with the brief as cline's `[prompt]` positional argument (the transport this relay uses for cline's prompt; cline also accepts piped stdin, but the relay never uses it), captures the JSON event
 stream, and writes `result.json`.
 
 On Windows the brief must be a single line without `%`, `!`, `"`, or newlines, and
@@ -107,9 +107,13 @@ incomplete, send a delta brief to the same session with `--session <id>` and rev
 ## Autonomy and permissions
 
 Run as a CLI subprocess with `--json -v`, cline has no UI prompts: it executes tool calls
-and shell commands immediately, without confirmation. This is not a sandbox - malformed or
-malicious briefs are dangerous. `--plan` restricts cline to plan mode (analysis only, no
-edits). There is no second agent.
+and shell commands immediately, without confirmation. There is no sandbox and no
+permission-mode enforcement in headless runs - cline evaluates each tool call and runs
+`bash`/`powershell` as the current user, so malformed or malicious briefs are dangerous.
+The headless read-only gate is `--plan`, which restricts cline to plan mode (analysis
+only, no edits). Plan-first for anything risky: dispatch the brief with `--plan`, review
+the plan output, then re-dispatch to the same session without `--plan` to implement. There
+is no second agent.
 
 ## Authorization model
 
