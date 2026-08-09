@@ -35,6 +35,16 @@ export function runPackageShape(h) {
     h.check(`${dir}: listed in skills.sh.json`, registered.has(dir));
     h.check(`${dir}: in the utility carve-out`, onDiskUtility.includes(dir));
   }
+  const metadataVersions = [...onDiskDelegate, ...onDiskUtility].map((dir) => {
+    const skillFile = join(skillsDir, dir, "SKILL.md");
+    return existsSync(skillFile)
+      ? readFileSync(skillFile, "utf8").match(/^metadata:\r?\n  version:\s*(\S+)\s*$/m)?.[1] ?? "(missing)"
+      : "(missing)";
+  });
+  h.check(
+    "all skill metadata.version values are present and in lockstep",
+    !metadataVersions.includes("(missing)") && new Set(metadataVersions).size === 1,
+  );
   h.check("smoke matrix has no entry without a directory", h.SKILLS.every((s) => onDiskDelegate.includes(`${s}-delegate`)));
   h.check(
     "skills.sh.json has no entry without a directory",

@@ -76,15 +76,24 @@ module names — see `test/relay/index.mjs`) skips the rest of the matrix.
 A changed relay also wants a direct run — `--help` plus a read-only or no-write run against a
 throwaway repo. The full pre-publish list is in [AGENTS.md](AGENTS.md).
 
+Before changing completion detection or `touchedFiles`, read the relevant skill's result contract.
+Exercise clean, pre-dirty, same-dirty-path, dirty-submodule, and git-unavailable worktrees, and assert
+the exact `delegate-relay.result.v1` fields instead of generic success or failure.
+
 ## Shared relay helpers
 
-Shared relay helpers are byte-identical by CI contract. Edit one relay, run
-`node test/relay-parity.mjs`, then paste its helper into the copies the test names.
+Shared relay helpers are byte-identical by contract. Before making them identical, inspect every
+divergent sibling and carry the strongest behavior forward, including bounds and timeouts. Then run
+`node test/relay-parity.mjs` and `node test/relay-smoke.mjs`.
 
 ## Review
 
 One maintainer reviews these and reads the relay line by line. Expect questions about anything the
 verification line claims.
+
+Automated reviewers such as CodeRabbit, Codex, and Greptile are advisory. If one is unavailable,
+rate-limited, or silent, record that and continue; do not wait or retry. Required project gates plus
+maintainer review determine readiness.
 
 Where two pull requests cover the same implementer, this checklist decides — the one that satisfies
 more of it merges. Ties break on verification evidence, then on the earlier claim. The other pull
