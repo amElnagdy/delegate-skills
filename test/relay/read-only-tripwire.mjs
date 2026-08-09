@@ -45,10 +45,12 @@ async function runScenario(h, skill, scenario) {
     mkdirSync(join(workDir, "loose"));
     writeFileSync(join(workDir, "loose", "existing.txt"), "pre-existing\n");
   }
-  if (scenario.artifactEndpointRename) {
-    writeFileSync(join(workDir, "source.txt"), "tracked source\n");
+  if (scenario.artifactEndpointRename || scenario.preexistingArtifactRename) {
+    writeFileSync(join(workDir, "source.txt"),
+      scenario.preexistingArtifactRename ? `fake ${skill} completed` : "tracked source\n");
     runGit(workDir, ["add", "source.txt"]);
     runGit(workDir, ["-c", "user.name=Smoke", "-c", "user.email=smoke@example.invalid", "commit", "-qm", "fixture"]);
+    if (scenario.preexistingArtifactRename) runGit(workDir, ["mv", "source.txt", "final.txt"]);
   }
   const outDir = scenario.artifactsInside
     ? workDir
@@ -84,6 +86,7 @@ export async function runReadOnlyTripwire(h) {
     { name: "proof-over-unknown", dirty: true, unknown: true, expected: true },
     { name: "new-file-in-untracked-directory", untrackedDirectory: true, expected: true },
     { name: "relay-artifacts", artifactsInside: true, expected: false },
+    { name: "preexisting-artifact-rename", artifactsInside: true, preexistingArtifactRename: true, expected: false },
     { name: "artifact-endpoint-rename", artifactsInside: true, artifactEndpointRename: true, expected: true },
     { name: "relay-artifacts-plus-write", artifactsInside: true, dirty: true, expected: true },
   ];

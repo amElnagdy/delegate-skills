@@ -406,11 +406,10 @@ function gitTripwireState(cwd, excludedPaths) {
   if (entries === null) return null;
   const excluded = new Set(excludedPaths.map(canonicalFilePath));
   return entries.flatMap((entry) => [
-    ["path", entry.path],
-    ...(entry.origin === null ? [] : [["origin", entry.origin]]),
+    [entry.status, "path", entry.path],
+    ...(entry.origin === null ? [] : [[entry.status.replace(/[^RC]/g, " "), "origin", entry.origin]]),
   ]
-    .filter(([, path]) => !excluded.has(canonicalFilePath(resolve(root, path))))
-    .map(([role, path]) => [entry.status, role, path]));
+    .filter(([, , path]) => !excluded.has(canonicalFilePath(resolve(root, path)))));
 }
 
 function pathFingerprint(absolutePath) {
