@@ -233,6 +233,23 @@ export const IMPLEMENTERS = Object.freeze([
     supports: ["provider", "model", "timeout", "readOnly"],
     winShell: true,
   },
+  {
+    key: "aider",
+    skill: "aider-delegate",
+    binary: "aider",
+    versionArgs: ["--version"],
+    // Aider has no auth subcommand; it reads provider keys from the environment
+    // and its own config, and reports a failure only once a run reaches the model.
+    authProbe: null,
+    // `aider --list-models` needs a partial-name argument, so there is no listing
+    // that covers the catalog; leaving this null beats probing with a guessed query.
+    modelProbe: null,
+    // No global session store: Aider keeps its chat history in the repo itself
+    // (.aider.chat.history.md), so there is nothing per-user to count.
+    usageProbe: null,
+    supports: ["model", "timeout", "readOnly"],
+    winShell: false,
+  },
 ]);
 
 /** Prototype-free map so names like "toString" cannot pass as implementers. */
