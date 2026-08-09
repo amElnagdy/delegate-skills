@@ -30,6 +30,10 @@
  * agent's own edit tool, and headless `plan` mode is advisory — a determined run
  * can still write the working tree. Always confirm `touchedFiles` after a
  * read-only run; don't rely on the flag alone.
+ * The relay reports `readOnlyViolation` as true when git porcelain or an
+ * already-dirty Git-visible path proves a change, false when coverage is
+ * complete and detects none, and null when coverage is incomplete. It cannot
+ * attribute a concurrent change to Grok and does not cover ignored paths.
  *
  * The brief is handed to grok via `--prompt-file`, never argv: it stays out of
  * the host process list, isn't bounded by the OS arg-length cap, and a brief
@@ -77,18 +81,84 @@
  * file must therefore also treat a non-zero exit with no file as a usage error.
  */
 
-import {spawn, execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync, renameSync, readFileSync, existsSync, appendFileSync } from "node:fs";
-import {join, resolve, basename, dirname } from "node:path";
+import { spawn, execFileSync, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { mkdirSync, writeFileSync, renameSync, readFileSync, readdirSync, existsSync, appendFileSync, lstatSync, readlinkSync, openSync, readSync, closeSync, realpathSync } from "node:fs";
+import { join, relative, resolve, basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { constants, tmpdir } from "node:os";
 import { StringDecoder } from "node:string_decoder";
+import { TextDecoder } from "node:util";
+
+const MAX_BUFFERED_CHARS = 1_048_576;
 
 const VERSION_PROBE_TIMEOUT_MS = 10_000;
 const MAX_TIMER_MS = 2_147_483_647;
 const AUTONOMY_MODES = new Set(["workspace-write", "read-only", "full-access"]);
 
 const IMPLEMENTER_KEY = "grok";
+
+function makeEventScanner(onObject) {
+  let buf = "";
+  let index = 0;
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escaped = false;
+  return (chunk) => {
+    if (!chunk) return;
+    buf += chunk;
+    for (;;) {
+      while (index < buf.length) {
+        const ch = buf[index];
+        // Only track strings inside an object (depth > 0). At depth 0 we are
+        // skipping a junk prefix, and an unmatched `"` there must not swallow the
+        // real `{...}` that follows in the same chunk.
+        if (inString) {
+          if (escaped) escaped = false;
+          else if (ch === "\\") escaped = true;
+          else if (ch === '"') inString = false;
+        } else if (ch === '"') {
+          if (depth > 0) inString = true;
+        } else if (ch === "{") {
+          if (depth === 0) start = index;
+          depth += 1;
+        } else if (ch === "}") {
+          if (depth > 0) {
+            depth -= 1;
+            if (depth === 0 && start !== -1) {
+              const slice = buf.slice(start, index + 1);
+              try { onObject(JSON.parse(slice)); } catch { /* skip malformed */ }
+              start = -1;
+            }
+          }
+        }
+        index += 1;
+      }
+      if (depth === 0 || start === -1 || buf.length - start <= MAX_BUFFERED_CHARS) break;
+      // A complete object may exceed the retained-input cap within this chunk.
+      // Drop only an oversized partial, then rescan its suffix so a later
+      // concatenated event is not lost.
+      buf = buf.slice(start + MAX_BUFFERED_CHARS);
+      index = 0;
+      start = -1;
+      depth = 0;
+      inString = false;
+      escaped = false;
+    }
+    if (depth > 0 && start !== -1) {
+      if (start > 0) {
+        buf = buf.slice(start);
+        index -= start;
+        start = 0;
+      }
+    } else {
+      buf = "";
+      index = 0;
+      start = -1;
+    }
+  };
+}
 
 function applyFleetLane(opts, flagged) {
   if (!opts.lane) return;
@@ -316,6 +386,257 @@ function grokVersion(probeTimeoutMs) {
   return probe(["--version"], remainingMs);
 }
 
+// Porcelain status alone cannot see every write. A path that is " M file" before a run and
+// " M file" after it produces an identical line, so comparing status lines proves nothing about
+// its contents — which is why the read-only tripwire below fingerprints the already-dirty paths
+// as well. Two sentinels stand for "could not fingerprint"; they are never treated as unchanged.
+const FINGERPRINT_UNREADABLE = "<unreadable>";
+const FINGERPRINT_DIRECTORY = "<directory>";
+
+function gitRepoRoot(cwd) {
+  // Porcelain paths are relative to the repository ROOT, not to the directory git ran in
+  // (--porcelain forces status.relativePaths off). Joining them against a --cd that is a
+  // subdirectory would look for <repo>/src/src/file and find nothing at either end.
+  try {
+    return execFileSync("git", ["rev-parse", "--show-toplevel"], {
+      cwd,
+      encoding: "utf8",
+      timeout: 10_000,
+      killSignal: "SIGKILL",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).replace(/\n$/, "") || null;
+  } catch {
+    return null;
+  }
+}
+
+function gitStatusEntries(cwd) {
+  // -z so a path containing a space, a quote, or a newline stays one field rather than being
+  // quoted and escaped; -uall so an untracked directory is expanded into its files, because a
+  // collapsed "?? dir/" line never changes when a file inside it does.
+  try {
+    const output = execFileSync("git", ["status", "--porcelain", "-z", "-uall"], {
+      cwd,
+      timeout: 10_000,
+      killSignal: "SIGKILL",
+      stdio: ["ignore", "pipe", "ignore"],
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    const fields = new TextDecoder("utf-8", { fatal: true }).decode(output)
+      .split("\0").filter((field) => field.length > 0);
+    const entries = [];
+    for (let i = 0; i < fields.length; i += 1) {
+      const entry = fields[i];
+      const status = entry.slice(0, 2);
+      const path = entry.slice(3);
+      // R and C can sit in EITHER status column, and under -z such an entry is followed by its
+      // origin path as its own unprefixed field. Consume that field in both cases. A rename
+      // origin belongs in the dirty set (the file moved away from it); a copy origin does not,
+      // since a copy source can be a perfectly clean file.
+      const renamed = status.includes("R");
+      const copied = status.includes("C");
+      let origin = null;
+      if (renamed || copied) {
+        i += 1;
+        origin = fields[i] ?? null;
+      }
+      entries.push({ status, path, origin });
+    }
+    return entries;
+  } catch {
+    return null;
+  }
+}
+
+function dirtyPaths(cwd) {
+  const entries = gitStatusEntries(cwd);
+  if (entries === null) return null;
+  const paths = [];
+  for (const entry of entries) {
+    paths.push(entry.path);
+    if (entry.status.includes("R") && entry.origin !== null) paths.push(entry.origin);
+  }
+  return paths;
+}
+
+function asciiFold(value) {
+  return value.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
+}
+
+function canonicalFilePath(path) {
+  const absolute = resolve(path);
+  let parent;
+  try { parent = realpathSync.native(dirname(absolute)); } catch { return absolute; }
+  const leaf = basename(absolute);
+  const canonical = join(parent, leaf);
+  try { lstatSync(canonical); } catch { return canonical; }
+  try {
+    const entries = readdirSync(parent);
+    if (entries.includes(leaf)) return canonical;
+    const matches = entries.filter((entry) => asciiFold(entry) === asciiFold(leaf));
+    return join(parent, matches.length === 1 ? matches[0] : leaf);
+  } catch {
+    return canonical;
+  }
+}
+
+function gitPathKey(root, path) {
+  let canonicalRoot;
+  try { canonicalRoot = realpathSync.native(root); } catch { canonicalRoot = resolve(root); }
+  const key = relative(canonicalRoot, canonicalFilePath(path));
+  return process.platform === "win32" ? key.replaceAll("\\", "/") : key;
+}
+
+function gitPathIsExcluded(root, path, excluded, foldedExcluded) {
+  return excluded.has(path) ||
+    (foldedExcluded.has(asciiFold(path)) && excluded.has(gitPathKey(root, join(root, path))));
+}
+
+function gitTripwireState(cwd, excludedPaths) {
+  const root = gitRepoRoot(cwd);
+  if (root === null) return null;
+  const entries = gitStatusEntries(cwd);
+  if (entries === null) return null;
+  const excluded = new Set(excludedPaths.map((path) => gitPathKey(root, path)));
+  const foldedExcluded = new Set([...excluded].map(asciiFold));
+  return entries.flatMap((entry) => [
+    [entry.status, "path", entry.path],
+    ...(entry.origin === null ? [] : [[entry.status.replace(/[^RC]/g, " "), "origin", entry.origin]]),
+  ]
+    .filter(([, , path]) => !gitPathIsExcluded(root, path, excluded, foldedExcluded)));
+}
+
+function pathFingerprint(absolutePath) {
+  // Identity, not just bytes: a retargeted symlink, a flipped mode bit, or a file replaced by a
+  // directory are all writes, and none of them change file contents.
+  let stats;
+  try {
+    stats = lstatSync(absolutePath);
+  } catch (error) {
+    // Absence is a state, not a failure - it differs from every real fingerprint, so a deletion
+    // or a re-creation still registers. Any other errno means we genuinely cannot tell.
+    return error && error.code === "ENOENT" ? "absent" : FINGERPRINT_UNREADABLE;
+  }
+  if (stats.isSymbolicLink()) {
+    try {
+      return `symlink:${readlinkSync(absolutePath, { encoding: "buffer" }).toString("hex")}`;
+    } catch {
+      return FINGERPRINT_UNREADABLE;
+    }
+  }
+  // A directory in the dirty set is a submodule, whose contents belong to another repository.
+  // Reported as unknown coverage rather than silently passed off as unchanged.
+  if (stats.isDirectory()) return FINGERPRINT_DIRECTORY;
+  if (!stats.isFile()) return FINGERPRINT_UNREADABLE;
+  let fd;
+  try {
+    // Streamed rather than read whole: an unignored multi-gigabyte artifact must not be pulled
+    // into memory just to answer whether it changed.
+    const hash = createHash("sha256");
+    fd = openSync(absolutePath, "r");
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    for (;;) {
+      const read = readSync(fd, buffer, 0, buffer.length, null);
+      if (read <= 0) break;
+      hash.update(buffer.subarray(0, read));
+    }
+    return `file:${(stats.mode & 0o7777).toString(8)}:${hash.digest("hex")}`;
+  } catch {
+    return FINGERPRINT_UNREADABLE;
+  } finally {
+    if (fd !== undefined) {
+      try { closeSync(fd); } catch { /* already closed */ }
+    }
+  }
+}
+
+function gitIndexFingerprints(root, paths) {
+  if (paths.length === 0) return new Map();
+  try {
+    const output = execFileSync("git", ["ls-files", "--stage", "-z"], {
+      cwd: root,
+      timeout: 10_000,
+      killSignal: "SIGKILL",
+      stdio: ["ignore", "pipe", "ignore"],
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    const wanted = new Set(paths);
+    const prints = new Map(paths.map((path) => [path, []]));
+    for (const field of new TextDecoder("utf-8", { fatal: true }).decode(output).split("\0")) {
+      if (!field) continue;
+      const separator = field.indexOf("\t");
+      if (separator === -1) return null;
+      const path = field.slice(separator + 1);
+      if (wanted.has(path)) prints.get(path).push(field.slice(0, separator));
+    }
+    return prints;
+  } catch {
+    return null;
+  }
+}
+
+function fingerprintPaths(root, paths) {
+  // `complete` goes false the moment one path cannot be fingerprinted, so the caller reports
+  // "unknown" instead of an unearned clean bill of health.
+  const indexPrints = gitIndexFingerprints(root, paths);
+  const prints = new Map();
+  let complete = indexPrints !== null;
+  for (const path of paths) {
+    const file = pathFingerprint(join(root, path));
+    if (file === FINGERPRINT_UNREADABLE || file === FINGERPRINT_DIRECTORY) complete = false;
+    prints.set(path, { file, index: indexPrints?.get(path) ?? null });
+  }
+  return { prints, complete };
+}
+
+function fingerprintDirtyPaths(cwd, excludedPaths) {
+  // Only the already-dirty set is covered. A path that is clean at dispatch and gets written
+  // surfaces as a brand-new porcelain line anyway, and fingerprinting a whole repository per run
+  // would cost far more than the case it covers.
+  const root = gitRepoRoot(cwd);
+  if (root === null) return null;
+  const paths = dirtyPaths(cwd);
+  if (paths === null) return null;
+  const excluded = new Set(excludedPaths.map((path) => gitPathKey(root, path)));
+  const foldedExcluded = new Set([...excluded].map(asciiFold));
+  return {
+    root,
+    ...fingerprintPaths(root, paths.filter((path) => !gitPathIsExcluded(root, path, excluded, foldedExcluded))),
+  };
+}
+
+function changedDirtyPaths(before) {
+  // Re-fingerprint exactly the baseline paths, not whatever happens to be dirty now: a path the
+  // run newly dirtied is already reported by the porcelain comparison, and letting an unreadable
+  // one of those blind this signal would be a regression, not caution.
+  if (!before) return { changed: [], complete: false };
+  const now = fingerprintPaths(before.root, [...before.prints.keys()]);
+  const changed = [];
+  for (const [path, print] of before.prints) {
+    const current = now.prints.get(path);
+    const fileKnown = print.file !== FINGERPRINT_UNREADABLE && current.file !== FINGERPRINT_UNREADABLE;
+    const fileChanged = fileKnown &&
+      !(print.file === FINGERPRINT_DIRECTORY && current.file === FINGERPRINT_DIRECTORY) &&
+      current.file !== print.file;
+    const indexChanged = print.index !== null && current.index !== null &&
+      JSON.stringify(current.index) !== JSON.stringify(print.index);
+    if (fileChanged || indexChanged) changed.push(path);
+  }
+  return { changed: changed.sort(), complete: before.complete && now.complete };
+}
+
+function readOnlyVerdict(beforeTree, afterTree, beforeFingerprints) {
+  // Three-valued on purpose. Proof of a write settles it even when the other signal is unknown;
+  // only when nothing is proven AND coverage is incomplete is the answer genuinely unknown.
+  // Collapsing that last case to false is the false assurance a tripwire must never give.
+  const changed = changedDirtyPaths(beforeFingerprints);
+  const porcelainMoved =
+    beforeTree !== null && afterTree !== null && JSON.stringify(beforeTree) !== JSON.stringify(afterTree);
+  if (porcelainMoved || changed.changed.length > 0) return true;
+  if (beforeTree === null || afterTree === null || !changed.complete) return null;
+  return false;
+}
+
 function gitTouchedFiles(cwd) {
   try {
     const output = execFileSync("git", ["status", "--porcelain"], {
@@ -390,48 +711,6 @@ function buildArgv(opts, run) {
   return argv;
 }
 
-function makeEventScanner(onObject) {
-  // streaming-json is documented as newline-delimited JSON, but be defensive:
-  // brace-aware scan (same approach as opencode-delegate) tolerates junk prefixes
-  // and concatenated objects if the format drifts.
-  let buf = "";
-  let depth = 0;
-  let start = -1;
-  let inString = false;
-  let escaped = false;
-  return (chunk) => {
-    buf += chunk;
-    for (let i = 0; i < buf.length; i += 1) {
-      const ch = buf[i];
-      if (inString) {
-        if (escaped) escaped = false;
-        else if (ch === "\\") escaped = true;
-        else if (ch === '"') inString = false;
-        continue;
-      }
-      if (ch === '"') { if (depth > 0) inString = true; continue; }
-      if (ch === "{") {
-        if (depth === 0) start = i;
-        depth += 1;
-      } else if (ch === "}") {
-        if (depth > 0) {
-          depth -= 1;
-          if (depth === 0 && start !== -1) {
-            const slice = buf.slice(start, i + 1);
-            try { onObject(JSON.parse(slice)); } catch { /* ignore non-objects */ }
-            start = -1;
-          }
-        }
-      }
-    }
-    buf = depth > 0 && start !== -1 ? buf.slice(start) : "";
-    start = -1;
-    depth = 0;
-    inString = false;
-    escaped = false;
-  };
-}
-
 function extractSessionId(event) {
   // grok's streaming-json carries sessionId (camelCase) on the end event; the
   // extra fallbacks tolerate a shape drift across versions.
@@ -468,6 +747,7 @@ function prepareRunDir(opts, brief) {
   };
   writeFileSync(run.briefPath, brief, "utf8");
   writeFileSync(run.eventsPath, "", "utf8");
+  writeFileSync(run.finalPath, "", "utf8");
   return run;
 }
 
@@ -536,12 +816,16 @@ function dispatchToGrok(opts, run, writeResult) {
   // grok cannot be prevented from writing headlessly (the read-only sandbox and
   // plan mode are advisory), so a --read-only run snapshots the tree up front
   // and flags a violation in the result instead of pretending to enforce.
-  const beforeTree = opts.autonomy === "read-only" ? gitTouchedFiles(opts.cd) : null;
-  // every result that reports touchedFiles carries the verdict, aborted runs included -
+  const relayArtifacts = [run.briefPath, run.eventsPath, run.finalPath, run.resultPath];
+  const beforeTree = opts.autonomy === "read-only" ? gitTripwireState(opts.cd, relayArtifacts) : null;
+  // Working-tree and index state for paths that are ALREADY dirty. Their porcelain lines will not
+  // move if the run edits them, so the line comparison alone cannot see those writes.
+  const beforeFingerprints = opts.autonomy === "read-only" ? fingerprintDirtyPaths(opts.cd, relayArtifacts) : null;
+  // every dispatched result that reports touchedFiles carries the verdict, aborted runs included -
   // an aborted --read-only review can still have modified the tree
-  const readOnlyFlag = (touched) =>
+  const readOnlyFlag = () =>
     opts.autonomy === "read-only"
-      ? { readOnlyViolation: beforeTree !== null && touched !== null && JSON.stringify(beforeTree) !== JSON.stringify(touched) }
+      ? { readOnlyViolation: readOnlyVerdict(beforeTree, gitTripwireState(opts.cd, relayArtifacts), beforeFingerprints) }
       : {};
   const argv = buildArgv(opts, run);
   // shell:true on Windows so the grok.cmd shim resolves (see grokVersion). Safe:
@@ -636,7 +920,7 @@ function dispatchToGrok(opts, run, writeResult) {
         finalMessage: assembleFinal(),
         usage,
         touchedFiles: touchedAtAbort,
-        ...readOnlyFlag(touchedAtAbort),
+        ...readOnlyFlag(),
         stderrTail: stderrTail.slice(-20),
         error: `the relay was killed by ${sig}; grok was terminated with it — inspect the working tree before re-dispatching`,
       };
@@ -648,7 +932,7 @@ function dispatchToGrok(opts, run, writeResult) {
         // the child may flush files during the grace window; refresh the snapshot so the
         // artifact matches the tree the orchestrator will actually find
         const touchedAfterGrace = gitTouchedFiles(opts.cd);
-        writeResult({ ...abortedFields, touchedFiles: touchedAfterGrace, ...readOnlyFlag(touchedAfterGrace) });
+        writeResult({ ...abortedFields, touchedFiles: touchedAfterGrace, ...readOnlyFlag() });
         process.exit(result.exitCode);
       }, 2000);
     });
@@ -658,6 +942,7 @@ function dispatchToGrok(opts, run, writeResult) {
     if (settled) return;
     settled = true;
     clearWatchdog();
+    const touchedFiles = gitTouchedFiles(opts.cd);
     const result = writeResult({
       status: "failed",
       exitCode: 1,
@@ -665,7 +950,8 @@ function dispatchToGrok(opts, run, writeResult) {
       sessionId,
       finalMessage: assembleFinal(),
       usage,
-      touchedFiles: gitTouchedFiles(opts.cd),
+      touchedFiles,
+      ...readOnlyFlag(),
       error: String(err && err.message ? err.message : err),
     });
     printSummary(result, run.resultPath);
@@ -693,7 +979,7 @@ function dispatchToGrok(opts, run, writeResult) {
       finalMessage,
       usage,
       touchedFiles,
-      ...readOnlyFlag(touchedFiles),
+      ...readOnlyFlag(),
       ...(succeeded ? {} : { stderrTail: stderrTail.slice(-20) }),
       ...(watchdogFired ? { error: `grok did not finish within --timeout ${opts.timeout}; killed by the relay watchdog` } : {}),
     });
@@ -732,7 +1018,8 @@ function printSummary(result, resultPath) {
   lines.push(`relay: ${result.status} (exit ${result.exitCode}${result.signal ? `, killed by ${result.signal}` : ""})  ·  grok ${result.grokVersion ?? "?"}`);
   if (result.signal === "SIGKILL" && result.status === "failed") lines.push("hint: the host killed the process (commonly the OOM killer or a supervisor timeout) — this is not a grok error; check host memory and re-dispatch, or split the task into smaller briefs.");
   if (result.signal === "SIGTERM" && result.status === "failed") lines.push("hint: something outside the relay terminated grok (a supervisor, the session ending, or a manual kill) — when the relay itself does the killing it reports status \"timeout\" or \"aborted\" instead; inspect the working tree before re-dispatching.");
-  if (result.readOnlyViolation) lines.push("warning: this --read-only run modified the working tree — grok's read-only is best-effort; review the diff before trusting the run.");
+  if (result.readOnlyViolation === null) lines.push("warning: this --read-only run could not be verified - git could not report, or a submodule or unreadable path left coverage incomplete; inspect the working tree directly.");
+  if (result.readOnlyViolation === true) lines.push("warning: a git-visible change was detected during this --read-only run — grok's read-only is best-effort; review the diff before trusting the run.");
   lines.push(`autonomy: ${result.autonomy}`);
   if (result.resumeLast) lines.push("mode: resumed most recent session (--continue)");
   else if (result.sessionId && result.status !== "grok_unavailable") {

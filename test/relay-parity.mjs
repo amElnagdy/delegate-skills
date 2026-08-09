@@ -5,11 +5,30 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const RELAYS = ["claude", "cline", "codex", "opencode", "agy", "grok", "kimi", "qoder", "vibe", "cursor", "pi"];
+const READ_ONLY_TRIPWIRE_RELAYS = ["claude", "grok"];
 const SYMBOLS = [
-  ["MAX_TIMER_MS", "const"],
-  ["parseDuration", "function"],
-  ["killChild", "function"],
-  ["gitTouchedFiles", "function"],
+  ["MAX_TIMER_MS", "const", RELAYS],
+  ["parseDuration", "function", RELAYS],
+  ["killChild", "function", RELAYS],
+  ["gitTouchedFiles", "function", RELAYS],
+  ["FINGERPRINT_UNREADABLE", "const", READ_ONLY_TRIPWIRE_RELAYS],
+  ["FINGERPRINT_DIRECTORY", "const", READ_ONLY_TRIPWIRE_RELAYS],
+  ["gitRepoRoot", "function", READ_ONLY_TRIPWIRE_RELAYS],
+  ["gitStatusEntries", "function", READ_ONLY_TRIPWIRE_RELAYS],
+  ["dirtyPaths", "function", READ_ONLY_TRIPWIRE_RELAYS],
+  ["canonicalFilePath", "function", READ_ONLY_TRIPWIRE_RELAYS],
+  ["asciiFold", "function", READ_ONLY_TRIPWIRE_RELAYS],
+  ["gitPathKey", "function", READ_ONLY_TRIPWIRE_RELAYS],
+  ["gitPathIsExcluded", "function", READ_ONLY_TRIPWIRE_RELAYS],
+  ["gitTripwireState", "function", READ_ONLY_TRIPWIRE_RELAYS],
+  ["pathFingerprint", "function", READ_ONLY_TRIPWIRE_RELAYS],
+  ["gitIndexFingerprints", "function", READ_ONLY_TRIPWIRE_RELAYS],
+  ["fingerprintPaths", "function", READ_ONLY_TRIPWIRE_RELAYS],
+  ["fingerprintDirtyPaths", "function", READ_ONLY_TRIPWIRE_RELAYS],
+  ["changedDirtyPaths", "function", READ_ONLY_TRIPWIRE_RELAYS],
+  ["readOnlyVerdict", "function", READ_ONLY_TRIPWIRE_RELAYS],
+  ["MAX_BUFFERED_CHARS", "const", ["claude", "cline", "cursor", "grok", "kimi", "opencode", "pi", "qoder", "vibe"]],
+  ["makeEventScanner", "function", ["claude", "cline", "cursor", "grok", "kimi", "opencode", "pi", "qoder"]],
 ];
 let failed = 0;
 const check = (name, condition) => {
@@ -33,9 +52,9 @@ function extract(source, symbol, kind, relay) {
   return source.slice(start, end);
 }
 
-for (const [symbol, kind] of SYMBOLS) {
+for (const [symbol, kind, relays] of SYMBOLS) {
   try {
-    const copies = RELAYS.map((relay) => [
+    const copies = relays.map((relay) => [
       relay,
       extract(readFileSync(join(here, "..", "skills", `${relay}-delegate`, "scripts", "relay.mjs"), "utf8"), symbol, kind, relay),
     ]);

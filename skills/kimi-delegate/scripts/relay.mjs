@@ -71,12 +71,75 @@ import {join, resolve, basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { constants, tmpdir } from "node:os";
 import { StringDecoder } from "node:string_decoder";
+const MAX_BUFFERED_CHARS = 1_048_576;
 
 const DEFAULT_TIMEOUT = "30m";
 const VERSION_PROBE_TIMEOUT_MS = 10_000;
 const MAX_TIMER_MS = 2_147_483_647;
 
 const IMPLEMENTER_KEY = "kimi";
+
+function makeEventScanner(onObject) {
+  let buf = "";
+  let index = 0;
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escaped = false;
+  return (chunk) => {
+    if (!chunk) return;
+    buf += chunk;
+    for (;;) {
+      while (index < buf.length) {
+        const ch = buf[index];
+        // Only track strings inside an object (depth > 0). At depth 0 we are
+        // skipping a junk prefix, and an unmatched `"` there must not swallow the
+        // real `{...}` that follows in the same chunk.
+        if (inString) {
+          if (escaped) escaped = false;
+          else if (ch === "\\") escaped = true;
+          else if (ch === '"') inString = false;
+        } else if (ch === '"') {
+          if (depth > 0) inString = true;
+        } else if (ch === "{") {
+          if (depth === 0) start = index;
+          depth += 1;
+        } else if (ch === "}") {
+          if (depth > 0) {
+            depth -= 1;
+            if (depth === 0 && start !== -1) {
+              const slice = buf.slice(start, index + 1);
+              try { onObject(JSON.parse(slice)); } catch { /* skip malformed */ }
+              start = -1;
+            }
+          }
+        }
+        index += 1;
+      }
+      if (depth === 0 || start === -1 || buf.length - start <= MAX_BUFFERED_CHARS) break;
+      // A complete object may exceed the retained-input cap within this chunk.
+      // Drop only an oversized partial, then rescan its suffix so a later
+      // concatenated event is not lost.
+      buf = buf.slice(start + MAX_BUFFERED_CHARS);
+      index = 0;
+      start = -1;
+      depth = 0;
+      inString = false;
+      escaped = false;
+    }
+    if (depth > 0 && start !== -1) {
+      if (start > 0) {
+        buf = buf.slice(start);
+        index -= start;
+        start = 0;
+      }
+    } else {
+      buf = "";
+      index = 0;
+      start = -1;
+    }
+  };
+}
 
 function applyFleetLane(opts, flagged) {
   if (!opts.lane) return;
@@ -296,47 +359,6 @@ function buildArgv(opts, brief) {
   // form binds a brief that starts with "-" instead of letting it parse as a flag.
   argv.push(`--prompt=${brief}`);
   return argv;
-}
-
-function makeEventScanner(onObject) {
-  // stream-json is newline-delimited JSON, but this brace-aware scan also
-  // tolerates junk prefixes and concatenated objects if the format drifts.
-  let buf = "";
-  let depth = 0;
-  let start = -1;
-  let inString = false;
-  let escaped = false;
-  return (chunk) => {
-    buf += chunk;
-    for (let i = 0; i < buf.length; i += 1) {
-      const ch = buf[i];
-      if (inString) {
-        if (escaped) escaped = false;
-        else if (ch === "\\") escaped = true;
-        else if (ch === '"') inString = false;
-        continue;
-      }
-      if (ch === '"') { if (depth > 0) inString = true; continue; }
-      if (ch === "{") {
-        if (depth === 0) start = i;
-        depth += 1;
-      } else if (ch === "}") {
-        if (depth > 0) {
-          depth -= 1;
-          if (depth === 0 && start !== -1) {
-            const slice = buf.slice(start, i + 1);
-            try { onObject(JSON.parse(slice)); } catch { /* ignore non-objects */ }
-            start = -1;
-          }
-        }
-      }
-    }
-    buf = depth > 0 && start !== -1 ? buf.slice(start) : "";
-    start = -1;
-    depth = 0;
-    inString = false;
-    escaped = false;
-  };
 }
 
 function prepareRunDir(opts, brief) {

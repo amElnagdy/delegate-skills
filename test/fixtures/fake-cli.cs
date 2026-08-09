@@ -28,6 +28,19 @@ class FakeCli {
       File.WriteAllLines(Environment.GetEnvironmentVariable("SMOKE_ARGS_FILE"), args);
       return 0;
     }
+    if (mode == "agy-permission-denied") {
+      Console.Error.WriteLine("jetski: no output produced — a tool required the \"write_file\" permission that headless\nmode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow\nin settings.json (e.g. write_file(<target>)). Alternatively, re-run with\n--dangerously-skip-permissions to auto-approve all tools.");
+      return 0;
+    }
+    if (mode == "agy-analysis") {
+      Console.WriteLine("fake agy analysis completed");
+      return 0;
+    }
+    if (mode == "agy-silent-edit") {
+      File.AppendAllText(Environment.GetEnvironmentVariable("SMOKE_EDIT_FILE"), "dispatch edit\n");
+      return 0;
+    }
+    if (mode == "agy-silent-noop") return 0;
     if (Environment.GetEnvironmentVariable("SMOKE_MODE") == "qoder-success") {
       File.WriteAllLines(Environment.GetEnvironmentVariable("SMOKE_ARGS_FILE"), args);
       Console.WriteLine("{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"qoder-session-1\",\"model\":\"performance\",\"permissionMode\":\"auto\"}");

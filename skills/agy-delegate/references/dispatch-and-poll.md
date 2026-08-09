@@ -13,7 +13,8 @@ agy models
 ```
 
 `agy models` proves the CLI can authenticate and list available model labels. The relay records the
-version it can infer from `agy changelog` into `result.json`.
+version it can infer from `agy changelog` into `result.json`. Neither command proves that a headless
+write will be approved.
 
 ## Dispatching
 
@@ -64,11 +65,12 @@ touched-files report shows only Antigravity's edits and nothing of the helper's 
 - `workdir`, `model`, `project` (the `--project` you passed, vs `projectId` parsed from the log),
   `sandbox`, `dangerouslySkipPermissions`, `resumed` (true for a `--resume-last` or `--conversation`
   run), `startedAt`, `finishedAt`
-- `stderrTail` - last ~20 stderr lines; present on every run that did not complete (`failed`, `timeout`, `aborted`), except a launch failure, which reports `failed` with no `stderrTail`
-- `error` - present on a launch failure, and on `timeout` and `aborted` runs
+- `stderrTail` - last ~20 stderr lines; present on every run that did not complete (`failed`, `timeout`, `aborted`), except a launch failure, which reports `failed` with no `stderrTail`; also present when `finalMessage` is empty so diagnostics are not discarded
+- `error` - present on a launch failure, `timeout`, `aborted`, headless permission denial, or silent no-op
 
-The helper also prints a summary to stdout and exits with Antigravity's exit code, so a wrapping script
-can branch on success/failure directly.
+The helper also prints a summary to stdout and normally exits with Antigravity's exit code. It forces
+exit 1 when Antigravity exits 0 after a detected headless permission denial or with neither a final
+message nor observable working-tree changes, so a wrapping script can branch on success/failure directly.
 
 ## Waiting for completion
 
@@ -102,12 +104,15 @@ process has exited and `result.json` is written.
   smaller briefs, then re-dispatch.
 - **`status: failed`:** read `result.json`'s `stderrTail`, `stderrPath`, and `logPath` for the cause.
   Common causes: auth lapse, an unknown model label, timeout, or a permission the run needed.
-- **A run stalls on permissions:** either configure Antigravity permissions for the actions the task
-  needs, or ask the human whether to re-run with `--dangerously-skip-permissions`. Pair risky runs with
-  `--sandbox` when terminal restrictions are appropriate.
-- **Empty `finalMessage`:** Antigravity finished without emitting a closing text summary. The edits may
-  still be correct - check `touchedFiles` and the diff. To get a report next time, add a
-  `<structured_output_contract>` block (see [writing-the-brief.md](writing-the-brief.md)).
+- **Headless write permission denied:** the relay detects Antigravity's `no output produced ...
+  auto-denied` stderr sentinel, reports `status: failed`, preserves `stderrTail`, and exits 1. Settings
+  allow-rules are not recommended here because they have not been demonstrated to apply in
+  `--print` mode. Ask the human before re-dispatching with `--dangerously-skip-permissions`; that flag
+  auto-approves every tool permission request and the run must be treated as full access.
+- **Empty `finalMessage`:** a run with edits may still be correct - check `touchedFiles`, the diff, and
+  the preserved `stderrTail`. With no observable edits, the relay reports `status: failed` rather than
+  claiming completion. To get a report next time, add a `<structured_output_contract>` block (see
+  [writing-the-brief.md](writing-the-brief.md)).
 
 ## What the helper is doing
 

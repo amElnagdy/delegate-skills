@@ -98,9 +98,11 @@ export async function runClaude(h) {
 for (const scenario of [
   { name: "violation", mode: "claude-read-only-write", expectedViolation: true },
   { name: "clean", mode: "claude-read-only-clean", expectedViolation: false },
+  { name: "already-dirty", mode: "claude-read-only-append", expectedViolation: true, dirtyFirst: true },
 ]) {
   const outDir = join(h.scratch, `out read-only ${scenario.name} claude`);
   const workDir = h.freshRepo(`work read-only ${scenario.name} claude`);
+  if (scenario.dirtyFirst) writeFileSync(join(workDir, "already-dirty.txt"), "pre-existing\n");
   const captureFile = join(h.scratch, `capture-read-only-${scenario.name}-claude.json`);
   const child = h.runRelay("claude", workDir, outDir, ["--read-only"], {
     SMOKE_CAPTURE_FILE: captureFile,

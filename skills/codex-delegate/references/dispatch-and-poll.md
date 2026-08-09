@@ -41,12 +41,22 @@ Options:
 | `--read-only` | Shortcut for `--sandbox read-only` — review/diagnosis with no edits. |
 | `--resume-last` | Continue the most recent Codex session; send only the delta brief (see review-and-land). "Most recent" is global, so an unrelated Codex run can steal it — prefer `--session`. |
 | `--session <id>` | Continue one specific thread by id (the `threadId` from a prior `result.json`); send only the delta brief. Mutually exclusive with `--resume-last`; an empty id is rejected. |
+| `--clean-env` | Pass only runtime basics (`PATH`, home, locale, temp, `CODEX_HOME`, and Windows equivalents) to Codex and its version preflight. This changes inherited variables only; it does not protect files or other same-user secrets. |
+| `--keep-env <name>` | Keep one additional variable under `--clean-env`; repeat for each required environment-backed auth, custom-provider credential, proxy, certificate, or MCP variable. The name must be set and use portable environment-variable syntax. |
 | `--skip-git-repo-check` | Allow running outside a git repo. |
 | `--timeout <dur>` | Relay-side watchdog (e.g. `30m`, `2h`); on expiry the child is killed and `result.json` gets `status: "timeout"`. Off by default. |
 | `--out-dir <dir>` | Where artifacts go (default: a fresh dir under the system temp dir). |
 
 Artifacts default to the system temp dir on purpose: the repo under review stays clean, so the
 touched-files report shows only Codex's edits and nothing of the helper's own.
+
+`--clean-env` is not a broader security boundary: Codex can still access files and other same-user
+secrets available through `HOME`, `CODEX_HOME`, OS facilities, and the selected sandbox. File- or
+OS-backed auth and normal configuration still load, but direct environment-backed auth
+(`CODEX_API_KEY` or `CODEX_ACCESS_TOKEN`) needs that variable named with `--keep-env`.
+`OPENAI_API_KEY` can still matter as a custom-provider credential; provider, proxy, certificate, or
+MCP settings that reference any stripped variable likewise need it named with `--keep-env`. The same
+filtered environment is used for preflight and dispatch.
 
 ## The result
 
@@ -61,7 +71,7 @@ touched-files report shows only Codex's edits and nothing of the helper's own.
 - `finalMessage` — Codex's own final report (the `<structured_output_contract>` you asked for)
 - `touchedFiles` — `git status --porcelain` lines in the working root: your review starting point. `null` (not `[]`) when git can't report — `git` missing, or a non-repo run under `--skip-git-repo-check`; `[]` means git ran and the tree is clean
 - `briefPath` / `eventsPath` / `finalPath` — the exact brief relay sent, the raw JSONL event stream, and the final-message file
-- `workdir`, `sandbox`, `model`, `effort`, `resumeLast`, `session`, `startedAt`, `finishedAt` — `sandbox` is the applied mode, or a note that Codex used its active config on an unqualified resume; `session` is the explicit session id, or `null` for fresh and `--resume-last` runs
+- `workdir`, `sandbox`, `model`, `effort`, `resumeLast`, `session`, `cleanEnv`, `keepEnv`, `startedAt`, `finishedAt` — `sandbox` is the applied mode, or a note that Codex used its active config on an unqualified resume; `session` is the explicit session id, or `null` for fresh and `--resume-last` runs; `keepEnv` records names only, never values
 - `stderrTail` — last ~20 stderr lines; present on every run that did not complete (`failed`, `timeout`, `aborted`), absent on `completed`, `codex_unavailable`, and launch failures
 - `error` — present on a launch failure, and on `timeout` and `aborted` runs
 

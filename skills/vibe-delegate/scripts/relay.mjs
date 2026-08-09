@@ -86,6 +86,7 @@ import {join, resolve, basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { constants, tmpdir } from "node:os";
 import { StringDecoder } from "node:string_decoder";
+const MAX_BUFFERED_CHARS = 1_048_576;
 
 const DEFAULT_TIMEOUT = "30m";
 const MAX_TIMER_MS = 2_147_483_647;
@@ -93,6 +94,27 @@ const MAX_BRIEF_BYTES = (process.platform === "win32" ? 12 : 120) * 1024;
 const PROBE_TIMEOUT_MS = 10_000;
 
 const IMPLEMENTER_KEY = "vibe";
+
+function makeLineScanner(onObject) {
+  let buf = "";
+  return (chunk) => {
+    if (!chunk) return;
+    let start = 0;
+    for (;;) {
+      const end = chunk.indexOf("\n", start);
+      if (end === -1) break;
+      const line = buf + chunk.slice(start, end);
+      buf = "";
+      const trimmed = line.trim();
+      if (trimmed) {
+        try { onObject(JSON.parse(trimmed)); } catch { /* skip non-JSON lines */ }
+      }
+      start = end + 1;
+    }
+    buf += chunk.slice(start);
+    if (buf.length > MAX_BUFFERED_CHARS) buf = "";
+  };
+}
 
 function applyFleetLane(opts, flagged) {
   if (!opts.lane) return;
@@ -381,22 +403,6 @@ function buildArgv(opts, brief) {
   return argv;
 }
 
-function makeLineScanner(onObject) {
-  // Vibe's --output streaming emits newline-delimited JSON: one JSON object per
-  // line. Parse line by line; skip blank lines and non-JSON gracefully.
-  let buf = "";
-  return (chunk) => {
-    buf += chunk;
-    const lines = buf.split("\n");
-    buf = lines.pop() ?? "";
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      try { onObject(JSON.parse(trimmed)); } catch { /* skip non-JSON lines */ }
-    }
-  };
-}
-
 function extractFromEvent(obj, textChunks) {
   if (!obj || typeof obj !== "object") return;
 
@@ -644,7 +650,9 @@ function dispatchToVibe(opts, brief, run, writeResult, onReady) {
     settled = true;
     clearWatchdog();
     if (watchdogFired) killChild(child, "SIGKILL");
-    scan(stdoutDecoder.end());
+    // Force a delimiter so a final event without a trailing newline still parses:
+    // the line scanner retains an un-newlined tail, and end() alone can hand it "".
+    scan(`${stdoutDecoder.end()}\n`);
     const stderrEnd = stderrDecoder.end();
     if (stderrEnd.trim()) stderrTail.push(stderrEnd.trimEnd());
     const succeeded = code === 0 && !watchdogFired;

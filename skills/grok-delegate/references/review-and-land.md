@@ -37,6 +37,10 @@ For changes with their own verification shape, go further:
 Open the diff (`touchedFiles` in the result is your starting list) and hold it against what you asked
 for:
 
+For `--read-only`, treat `readOnlyViolation: true` as proof of a detected Git-visible change and
+`null` as incomplete coverage. `false` does not cover ignored paths, submodule internals, perfect
+restores, or attribution; inspect the actual diff.
+
 - **Scope creep** — did Grok change things the brief said to leave untouched? Unasked refactors,
   renames, "while I was here" edits. These are the most common quality problem in delegated work.
 - **Scope shortfall** — did it do the whole task, including the edge cases and cleanup, or stop at the

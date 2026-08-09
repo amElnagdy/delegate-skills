@@ -123,12 +123,14 @@ function captureProbe(binaryPath, args, useShell) {
       stdio: ["pipe", "pipe", "pipe"],
       shell: useShell,
     });
+    const stdout = result.stdout || "";
     return {
       ok: !result.error && result.status === 0,
-      output: stripAnsi(`${result.stdout || ""}${result.stderr || ""}`),
+      stdout,
+      output: stripAnsi(`${stdout}${result.stderr || ""}`),
     };
   } catch {
-    return { ok: false, output: "" };
+    return { ok: false, stdout: "", output: "" };
   }
 }
 
@@ -161,7 +163,7 @@ function readAuthField(raw, jsonField) {
   }
 }
 
-function probeAuth(impl, binaryPath) {
+function probeAuth(impl, binaryPath, captured = null) {
   if (!impl.authProbe) return null;
   const { args, jsonField, successPattern, failPattern, missMeansFalse } = impl.authProbe;
   const useShell = needsWindowsShell(impl, binaryPath);
@@ -179,7 +181,7 @@ function probeAuth(impl, binaryPath) {
     }
   }
 
-  const { ok, output } = captureProbe(binaryPath, args, useShell);
+  const { ok, output } = captured || captureProbe(binaryPath, args, useShell);
   // failPattern first: "not logged in" also contains "logged in".
   if (failPattern && failPattern.test(output)) return false;
   if (successPattern) {
@@ -247,7 +249,7 @@ function modelFilePath(probe) {
   return join(base, probe.file);
 }
 
-function probeModels(impl, binaryPath) {
+function probeModels(impl, binaryPath, captured = null) {
   const probe = impl.modelProbe;
   if (!probe) {
     return { status: "unsupported", values: [], truncated: false };
@@ -262,6 +264,9 @@ function probeModels(impl, binaryPath) {
       // No cache until the CLI has run once; that is not a discovery failure worth throwing on.
       return failedModels();
     }
+  }
+  if (captured) {
+    return captured.ok ? parseModelLines(captured.stdout, probe.format) : failedModels();
   }
   try {
     const raw = runProbe(binaryPath, probe.args, needsWindowsShell(impl, binaryPath));
@@ -356,15 +361,25 @@ function main(argv) {
       missing.push({ key: impl.key, binary: impl.binary, skill: impl.skill });
       continue;
     }
+    const version = probeVersion(impl, binaryPath);
+    const authArgs = impl.authProbe && !impl.authProbe.jsonField ? impl.authProbe.args : null;
+    const modelArgs = impl.modelProbe?.args;
+    const sharedCapture =
+      authArgs &&
+      modelArgs &&
+      authArgs.length === modelArgs.length &&
+      authArgs.every((arg, index) => arg === modelArgs[index])
+        ? captureProbe(binaryPath, authArgs, needsWindowsShell(impl, binaryPath))
+        : null;
     const entry = {
       key: impl.key,
       skill: impl.skill,
       binary: impl.binary,
-      version: probeVersion(impl, binaryPath),
+      version,
       path: binaryPath,
-      authenticated: probeAuth(impl, binaryPath),
+      authenticated: probeAuth(impl, binaryPath, sharedCapture),
       supports: [...impl.supports],
-      models: probeModels(impl, binaryPath),
+      models: probeModels(impl, binaryPath, sharedCapture),
     };
     if (withUsage) entry.usage = probeUsage(impl);
     discovered.push(entry);
