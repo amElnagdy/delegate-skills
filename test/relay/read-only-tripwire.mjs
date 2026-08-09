@@ -49,7 +49,6 @@ async function runScenario(h, skill, scenario) {
       ? "grok-read-only"
       : scenario.dirty ? "claude-read-only-append" : "claude-read-only-clean",
     ...(skill === "grok" && scenario.dirty ? { SMOKE_APPEND_FILE: "already-dirty.txt" } : {}),
-    ...(skill === "grok" && scenario.artifactsInside ? { SMOKE_EMPTY_FINAL: "1" } : {}),
   });
   const outcome = await waitFor(child);
   h.check(`${skill} ${scenario.name}: relay close wait did not time out`, outcome.exited);
@@ -104,4 +103,5 @@ export async function runReadOnlyTripwire(h) {
     h.check("grok spawn error: unknown verdict is present", result.readOnlyViolation === null);
   }
   h.check("grok spawn error: summary warns about incomplete coverage", stdout.includes("incomplete"));
+  h.check("grok spawn error: summary is printed once", stdout.split("relay: failed").length === 2);
 }

@@ -663,7 +663,7 @@ function gitRepoRoot(cwd) {
   }
 }
 
-function dirtyPaths(cwd) {
+function gitStatusEntries(cwd) {
   // -z so a path containing a space, a quote, or a newline stays one field rather than being
   // quoted and escaped; -uall so an untracked directory is expanded into its files, because a
   // collapsed "?? dir/" line never changes when a file inside it does.
@@ -677,26 +677,57 @@ function dirtyPaths(cwd) {
       maxBuffer: 64 * 1024 * 1024,
     });
     const fields = output.split("\0").filter((field) => field.length > 0);
-    const paths = [];
+    const entries = [];
     for (let i = 0; i < fields.length; i += 1) {
       const entry = fields[i];
-      paths.push(entry.slice(3));
+      const status = entry.slice(0, 2);
+      const path = entry.slice(3);
       // R and C can sit in EITHER status column, and under -z such an entry is followed by its
       // origin path as its own unprefixed field. Consume that field in both cases. A rename
       // origin belongs in the dirty set (the file moved away from it); a copy origin does not,
       // since a copy source can be a perfectly clean file.
-      const renamed = entry[0] === "R" || entry[1] === "R";
-      const copied = entry[0] === "C" || entry[1] === "C";
+      const renamed = status.includes("R");
+      const copied = status.includes("C");
+      let origin = null;
       if (renamed || copied) {
         i += 1;
-        const origin = fields[i];
-        if (origin !== undefined && renamed) paths.push(origin);
+        origin = fields[i] ?? null;
       }
+      entries.push({ status, path, origin });
     }
-    return paths;
+    return entries;
   } catch {
     return null;
   }
+}
+
+function dirtyPaths(cwd) {
+  const entries = gitStatusEntries(cwd);
+  if (entries === null) return null;
+  const paths = [];
+  for (const entry of entries) {
+    paths.push(entry.path);
+    if (entry.status.includes("R") && entry.origin !== null) paths.push(entry.origin);
+  }
+  return paths;
+}
+
+function canonicalFilePath(path) {
+  const absolute = resolve(path);
+  try { return join(realpathSync(dirname(absolute)), basename(absolute)); } catch { return absolute; }
+}
+
+function gitTripwireState(cwd, excludedPaths) {
+  const root = gitRepoRoot(cwd);
+  if (root === null) return null;
+  const entries = gitStatusEntries(cwd);
+  if (entries === null) return null;
+  const excluded = new Set(excludedPaths.map(canonicalFilePath));
+  return entries
+    .filter((entry) => ![entry.path, entry.origin]
+      .filter(Boolean)
+      .some((path) => excluded.has(canonicalFilePath(resolve(root, path)))))
+    .map((entry) => [entry.status, entry.path, entry.origin]);
 }
 
 function pathFingerprint(absolutePath) {
@@ -764,14 +795,10 @@ function fingerprintDirtyPaths(cwd, excludedPaths) {
   if (root === null) return null;
   const paths = dirtyPaths(cwd);
   if (paths === null) return null;
-  const canonical = (path) => {
-    const absolute = resolve(path);
-    try { return join(realpathSync(dirname(absolute)), basename(absolute)); } catch { return absolute; }
-  };
-  const excluded = new Set(excludedPaths.map(canonical));
+  const excluded = new Set(excludedPaths.map(canonicalFilePath));
   return {
     root,
-    ...fingerprintPaths(root, paths.filter((path) => !excluded.has(canonical(resolve(root, path))))),
+    ...fingerprintPaths(root, paths.filter((path) => !excluded.has(canonicalFilePath(resolve(root, path))))),
   };
 }
 
@@ -877,7 +904,11 @@ function makeResultWriter(opts, version, run, state, beforeTree, beforeFingerpri
       ...extra,
     };
     if (opts.readOnly) {
-      result.readOnlyViolation = readOnlyVerdict(beforeTree, result.touchedFiles, beforeFingerprints);
+      result.readOnlyViolation = readOnlyVerdict(
+        beforeTree,
+        gitTripwireState(opts.cd, [run.briefPath, run.eventsPath, run.finalPath, run.stderrPath, run.settingsPath, run.resultPath]),
+        beforeFingerprints,
+      );
     }
     writeJsonAtomic(run.resultPath, result);
     return result;
@@ -1146,10 +1177,10 @@ function main() {
   }
   // Capture after relay artifacts exist so an --out-dir inside the worktree does
   // not make the relay itself look like a read-only violation.
-  const beforeTree = opts.readOnly ? gitTouchedFiles(opts.cd) : null;
+  const relayArtifacts = [run.briefPath, run.eventsPath, run.finalPath, run.stderrPath, run.settingsPath, run.resultPath];
+  const beforeTree = opts.readOnly ? gitTripwireState(opts.cd, relayArtifacts) : null;
   // Contents of the paths that are ALREADY dirty. Their porcelain lines will not move if the
   // run edits them, so the line comparison above cannot see those writes on its own.
-  const relayArtifacts = [run.briefPath, run.eventsPath, run.finalPath, run.stderrPath, run.settingsPath, run.resultPath];
   const beforeFingerprints = opts.readOnly ? fingerprintDirtyPaths(opts.cd, relayArtifacts) : null;
   const version = launcher ? preflightVersion(launcher, env, opts.cd) : null;
   const state = {

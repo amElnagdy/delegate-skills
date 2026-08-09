@@ -64,9 +64,7 @@ if (process.env.SMOKE_MODE === "grok-read-only") {
   if (process.env.SMOKE_APPEND_FILE) {
     fs.appendFileSync(process.env.SMOKE_APPEND_FILE, "appended by fake grok\n");
   }
-  if (!process.env.SMOKE_EMPTY_FINAL) {
-    console.log(JSON.stringify({ type: "text", data: "fake grok completed" }));
-  }
+  console.log(JSON.stringify({ type: "text", data: "fake grok completed" }));
   console.log(JSON.stringify({ type: "end", sessionId: "grok-session-1" }));
   process.exit(0);
 }

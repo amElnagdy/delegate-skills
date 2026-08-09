@@ -345,7 +345,7 @@ function gitRepoRoot(cwd) {
   }
 }
 
-function dirtyPaths(cwd) {
+function gitStatusEntries(cwd) {
   // -z so a path containing a space, a quote, or a newline stays one field rather than being
   // quoted and escaped; -uall so an untracked directory is expanded into its files, because a
   // collapsed "?? dir/" line never changes when a file inside it does.
@@ -359,26 +359,57 @@ function dirtyPaths(cwd) {
       maxBuffer: 64 * 1024 * 1024,
     });
     const fields = output.split("\0").filter((field) => field.length > 0);
-    const paths = [];
+    const entries = [];
     for (let i = 0; i < fields.length; i += 1) {
       const entry = fields[i];
-      paths.push(entry.slice(3));
+      const status = entry.slice(0, 2);
+      const path = entry.slice(3);
       // R and C can sit in EITHER status column, and under -z such an entry is followed by its
       // origin path as its own unprefixed field. Consume that field in both cases. A rename
       // origin belongs in the dirty set (the file moved away from it); a copy origin does not,
       // since a copy source can be a perfectly clean file.
-      const renamed = entry[0] === "R" || entry[1] === "R";
-      const copied = entry[0] === "C" || entry[1] === "C";
+      const renamed = status.includes("R");
+      const copied = status.includes("C");
+      let origin = null;
       if (renamed || copied) {
         i += 1;
-        const origin = fields[i];
-        if (origin !== undefined && renamed) paths.push(origin);
+        origin = fields[i] ?? null;
       }
+      entries.push({ status, path, origin });
     }
-    return paths;
+    return entries;
   } catch {
     return null;
   }
+}
+
+function dirtyPaths(cwd) {
+  const entries = gitStatusEntries(cwd);
+  if (entries === null) return null;
+  const paths = [];
+  for (const entry of entries) {
+    paths.push(entry.path);
+    if (entry.status.includes("R") && entry.origin !== null) paths.push(entry.origin);
+  }
+  return paths;
+}
+
+function canonicalFilePath(path) {
+  const absolute = resolve(path);
+  try { return join(realpathSync(dirname(absolute)), basename(absolute)); } catch { return absolute; }
+}
+
+function gitTripwireState(cwd, excludedPaths) {
+  const root = gitRepoRoot(cwd);
+  if (root === null) return null;
+  const entries = gitStatusEntries(cwd);
+  if (entries === null) return null;
+  const excluded = new Set(excludedPaths.map(canonicalFilePath));
+  return entries
+    .filter((entry) => ![entry.path, entry.origin]
+      .filter(Boolean)
+      .some((path) => excluded.has(canonicalFilePath(resolve(root, path)))))
+    .map((entry) => [entry.status, entry.path, entry.origin]);
 }
 
 function pathFingerprint(absolutePath) {
@@ -446,14 +477,10 @@ function fingerprintDirtyPaths(cwd, excludedPaths) {
   if (root === null) return null;
   const paths = dirtyPaths(cwd);
   if (paths === null) return null;
-  const canonical = (path) => {
-    const absolute = resolve(path);
-    try { return join(realpathSync(dirname(absolute)), basename(absolute)); } catch { return absolute; }
-  };
-  const excluded = new Set(excludedPaths.map(canonical));
+  const excluded = new Set(excludedPaths.map(canonicalFilePath));
   return {
     root,
-    ...fingerprintPaths(root, paths.filter((path) => !excluded.has(canonical(resolve(root, path))))),
+    ...fingerprintPaths(root, paths.filter((path) => !excluded.has(canonicalFilePath(resolve(root, path))))),
   };
 }
 
@@ -637,6 +664,7 @@ function prepareRunDir(opts, brief) {
   };
   writeFileSync(run.briefPath, brief, "utf8");
   writeFileSync(run.eventsPath, "", "utf8");
+  writeFileSync(run.finalPath, "", "utf8");
   return run;
 }
 
@@ -705,16 +733,16 @@ function dispatchToGrok(opts, run, writeResult) {
   // grok cannot be prevented from writing headlessly (the read-only sandbox and
   // plan mode are advisory), so a --read-only run snapshots the tree up front
   // and flags a violation in the result instead of pretending to enforce.
-  const beforeTree = opts.autonomy === "read-only" ? gitTouchedFiles(opts.cd) : null;
+  const relayArtifacts = [run.briefPath, run.eventsPath, run.finalPath, run.resultPath];
+  const beforeTree = opts.autonomy === "read-only" ? gitTripwireState(opts.cd, relayArtifacts) : null;
   // Contents of the paths that are ALREADY dirty. Their porcelain lines will not move if the
   // run edits them, so the line comparison alone cannot see those writes.
-  const relayArtifacts = [run.briefPath, run.eventsPath, run.finalPath, run.resultPath];
   const beforeFingerprints = opts.autonomy === "read-only" ? fingerprintDirtyPaths(opts.cd, relayArtifacts) : null;
   // every dispatched result that reports touchedFiles carries the verdict, aborted runs included -
   // an aborted --read-only review can still have modified the tree
-  const readOnlyFlag = (touched) =>
+  const readOnlyFlag = () =>
     opts.autonomy === "read-only"
-      ? { readOnlyViolation: readOnlyVerdict(beforeTree, touched, beforeFingerprints) }
+      ? { readOnlyViolation: readOnlyVerdict(beforeTree, gitTripwireState(opts.cd, relayArtifacts), beforeFingerprints) }
       : {};
   const argv = buildArgv(opts, run);
   // shell:true on Windows so the grok.cmd shim resolves (see grokVersion). Safe:
@@ -809,7 +837,7 @@ function dispatchToGrok(opts, run, writeResult) {
         finalMessage: assembleFinal(),
         usage,
         touchedFiles: touchedAtAbort,
-        ...readOnlyFlag(touchedAtAbort),
+        ...readOnlyFlag(),
         stderrTail: stderrTail.slice(-20),
         error: `the relay was killed by ${sig}; grok was terminated with it — inspect the working tree before re-dispatching`,
       };
@@ -821,7 +849,7 @@ function dispatchToGrok(opts, run, writeResult) {
         // the child may flush files during the grace window; refresh the snapshot so the
         // artifact matches the tree the orchestrator will actually find
         const touchedAfterGrace = gitTouchedFiles(opts.cd);
-        writeResult({ ...abortedFields, touchedFiles: touchedAfterGrace, ...readOnlyFlag(touchedAfterGrace) });
+        writeResult({ ...abortedFields, touchedFiles: touchedAfterGrace, ...readOnlyFlag() });
         process.exit(result.exitCode);
       }, 2000);
     });
@@ -840,7 +868,7 @@ function dispatchToGrok(opts, run, writeResult) {
       finalMessage: assembleFinal(),
       usage,
       touchedFiles,
-      ...readOnlyFlag(touchedFiles),
+      ...readOnlyFlag(),
       error: String(err && err.message ? err.message : err),
     });
     printSummary(result, run.resultPath);
@@ -868,7 +896,7 @@ function dispatchToGrok(opts, run, writeResult) {
       finalMessage,
       usage,
       touchedFiles,
-      ...readOnlyFlag(touchedFiles),
+      ...readOnlyFlag(),
       ...(succeeded ? {} : { stderrTail: stderrTail.slice(-20) }),
       ...(watchdogFired ? { error: `grok did not finish within --timeout ${opts.timeout}; killed by the relay watchdog` } : {}),
     });
