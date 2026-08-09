@@ -42,6 +42,7 @@
  * Options:
  *   --brief <file>          Path to the brief. If omitted, the brief is read from stdin.
  *   --cd <dir>              Working root for Grok (default: current directory).
+ *   --lane <name>           Fleet lane from delegate-setup config (dials apply; explicit flags win).
  *   --model <name>          Grok model (default: Grok's own configured default).
  *   --effort <level>        Reasoning effort for this run (passed as `--effort`).
  *   --max-turns <n>         Maximum number of agent turns for this run.
@@ -76,13 +77,54 @@
  * file must therefore also treat a non-zero exit with no file as a usage error.
  */
 
-import { spawn, execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync, readFileSync, existsSync, appendFileSync } from "node:fs";
-import { join, resolve, basename } from "node:path";
+import {spawn, execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, writeFileSync, renameSync, readFileSync, existsSync, appendFileSync } from "node:fs";
+import {join, resolve, basename, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { constants, tmpdir } from "node:os";
 import { StringDecoder } from "node:string_decoder";
 
+const VERSION_PROBE_TIMEOUT_MS = 10_000;
+const MAX_TIMER_MS = 2_147_483_647;
 const AUTONOMY_MODES = new Set(["workspace-write", "read-only", "full-access"]);
+
+const IMPLEMENTER_KEY = "grok";
+
+function applyFleetLane(opts, flagged) {
+  if (!opts.lane) return;
+  const script = join(dirname(fileURLToPath(import.meta.url)), "../../delegate-setup/scripts/lane.mjs");
+  if (!existsSync(script)) {
+    fail("--lane requires the delegate-setup skill installed beside this relay");
+  }
+  const r = spawnSync(
+    process.execPath,
+    [script, "resolve", "--cwd", opts.cd, "--lane", opts.lane, "--implementer", IMPLEMENTER_KEY],
+    { encoding: "utf8", env: process.env },
+  );
+  if (r.error) fail(`lane resolve failed: ${r.error.message}`);
+  if (r.status !== 0) {
+    fail((r.stderr || "lane resolve failed").trim().replace(/^lane\.mjs:\s*/, ""));
+  }
+  let resolved;
+  try {
+    const lines = (r.stdout || "").trim().split("\n").filter(Boolean);
+    resolved = JSON.parse(lines[lines.length - 1]);
+  } catch {
+    fail("lane resolve returned invalid JSON");
+  }
+  opts.laneSource = resolved.source;
+  for (const [field, value] of Object.entries(resolved.dials || {})) {
+    if (flagged.has(field)) continue;
+    if (field === "autonomy" && (flagged.has("autonomy") || flagged.has("sandbox") || flagged.has("readOnly"))) continue;
+    if (field === "agent" && (flagged.has("agent") || flagged.has("readOnly"))) continue;
+    if (field === "sandbox" && (flagged.has("sandbox") || flagged.has("readOnly"))) continue;
+    if (field === "permissionMode" && (flagged.has("permissionMode") || flagged.has("readOnly"))) continue;
+    if (field === "planOnly" && (flagged.has("planOnly") || flagged.has("readOnly"))) continue;
+    if (field === "readOnly" && flagged.has("readOnly")) continue;
+    if (field === "force" && flagged.has("force")) continue;
+    opts[field] = value;
+  }
+}
 
 function fail(message, code = 2) {
   process.stderr.write(`relay: ${message}\n`);
@@ -90,7 +132,10 @@ function fail(message, code = 2) {
 }
 
 function parseArgs(argv) {
+  const flagged = new Set();
   const opts = {
+    lane: null,
+    laneSource: null,
     brief: null,
     cd: process.cwd(),
     model: null,
@@ -118,23 +163,25 @@ function parseArgs(argv) {
         break;
       case "--brief": opts.brief = next(); break;
       case "--cd": opts.cd = resolve(next()); break;
-      case "--model": opts.model = next(); break;
-      case "--effort": opts.effort = next(); break;
+      case "--lane": opts.lane = next(); break;
+      case "--model": opts.model = next(); flagged.add("model"); break;
+      case "--effort": opts.effort = next(); flagged.add("effort"); break;
       case "--max-turns": opts.maxTurns = next(); break;
-      case "--read-only": opts.autonomy = "read-only"; break;
-      case "--full-access": opts.autonomy = "full-access"; break;
+      case "--read-only": opts.autonomy = "read-only"; flagged.add("autonomy"); flagged.add("readOnly"); break;
+      case "--full-access": opts.autonomy = "full-access"; flagged.add("autonomy"); break;
       case "--resume-last": opts.resumeLast = true; break;
       case "--session": opts.session = next(); break;
-      case "--timeout": opts.timeout = next(); break;
+      case "--timeout": opts.timeout = next(); flagged.add("timeout"); break;
       case "--out-dir": opts.outDir = resolve(next()); break;
       default:
         fail(`unknown option: ${arg}`);
     }
   }
+  applyFleetLane(opts, flagged);
   // The watchdog is relay-only (the grok launch has no timeout flag), so a malformed
   // --timeout must fail loudly here - a silent no-watchdog fallback would be wrong.
   if (opts.timeout !== null && parseDuration(opts.timeout) === null) {
-    fail(`--timeout "${opts.timeout}" is not a duration; use h/m/s strings like 30m, 90s, or 1h30m`);
+    fail(`--timeout "${opts.timeout}" is invalid or too long; use a positive h/m/s duration no longer than about 24 days`);
   }
   if (!AUTONOMY_MODES.has(opts.autonomy)) {
     fail(`invalid autonomy "${opts.autonomy}"`);
@@ -157,29 +204,42 @@ function parseArgs(argv) {
 }
 
 function parseDuration(duration) {
-  // Whole-string match: "1mtypo" must be rejected, not read as one minute.
   const match = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/.exec(duration);
   if (!match || (!match[1] && !match[2] && !match[3])) return null;
-  return (Number(match[1] || 0) * 3600 + Number(match[2] || 0) * 60 + Number(match[3] || 0)) * 1000;
+  try {
+    const seconds =
+      BigInt(match[1] || 0) * 3600n +
+      BigInt(match[2] || 0) * 60n +
+      BigInt(match[3] || 0);
+    const milliseconds = seconds * 1000n;
+    if (milliseconds <= 0n || milliseconds > BigInt(MAX_TIMER_MS)) return null;
+    return Number(milliseconds);
+  } catch {
+    return null;
+  }
 }
 
 function killChild(child, signal = "SIGTERM") {
-  // The kill must reach the whole process family, not just the immediate child — a tool
-  // subprocess left running would keep editing after the relay reports timeout/aborted.
-  // On Windows the child is the .cmd shim (the shell:true launch above), Windows has no
-  // process-group signals, and Node can't kill a process family without a Job Object, so
-  // kill the tree by pid with the OS tool: /t includes descendants, /f forces it — the
-  // same idiom tree-kill and npm/pnpm use.
+  if (!child || !child.pid) return;
   if (process.platform === "win32") {
-    if (signal !== "SIGTERM") return; // the first taskkill /f already felled the whole tree
-    // stderr is inherited so a real taskkill failure (e.g. access denied) is visible to the operator;
-    // its non-zero exit when the tree is already gone is the expected race and carries nothing to do.
-    try { execFileSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: ["ignore", "ignore", "inherit"] }); }
-    catch { /* already gone — nothing left to kill */ }
-  } else {
-    // On POSIX the child leads its own process group (the detached launch), so the negative-pid
-    // signal reaches every descendant; fall back to the lone pid if the group is already gone.
-    try { process.kill(-child.pid, signal); } catch { try { child.kill(signal); } catch { /* already gone */ } }
+    if (signal !== "SIGTERM") return;
+    try {
+      execFileSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
+        stdio: ["ignore", "ignore", "inherit"],
+      });
+    } catch {
+      // The process tree already exited.
+    }
+    return;
+  }
+  try {
+    process.kill(-child.pid, signal);
+  } catch {
+    try {
+      child.kill(signal);
+    } catch {
+      // The process group already exited.
+    }
   }
 }
 
@@ -209,30 +269,64 @@ function readBrief(opts) {
   return stdin;
 }
 
-function grokVersion() {
-  try {
-    // On Windows, npm installs `grok` as a .cmd shim; Node's CreateProcess only
-    // auto-appends .exe, never .cmd, so launching it needs shell:true there or it
-    // ENOENTs on a working install. POSIX is unaffected. (git installs a real
-    // git.exe and must NOT get this flag — see gitTouchedFiles.)
-    // Prefer `grok version` (documented subcommand); fall back to `--version`.
+function versionProbeTimeout(opts) {
+  // The watchdog is only armed once grok is running, so the preflight needs a bound of its
+  // own: a version probe that never returns would wedge the relay here, before any
+  // result.json exists, and --timeout could not reach it.
+  const timeoutMs = opts.timeout === null ? null : parseDuration(opts.timeout);
+  return timeoutMs === null ? VERSION_PROBE_TIMEOUT_MS : Math.min(timeoutMs, VERSION_PROBE_TIMEOUT_MS);
+}
+
+function grokVersion(probeTimeoutMs) {
+  // On Windows, npm installs `grok` as a .cmd shim; Node's CreateProcess only
+  // auto-appends .exe, never .cmd, so launching it needs shell:true there or it
+  // ENOENTs on a working install. POSIX is unaffected. (git installs a real
+  // git.exe and must NOT get this flag — see gitTouchedFiles.)
+  const probe = (argv, timeout = probeTimeoutMs) => {
     try {
-      return execFileSync("grok", ["version"], { encoding: "utf8", shell: process.platform === "win32" }).trim();
-    } catch {
-      return execFileSync("grok", ["--version"], { encoding: "utf8", shell: process.platform === "win32" }).trim();
+      const version = execFileSync("grok", argv, {
+        encoding: "utf8",
+        shell: process.platform === "win32",
+        timeout,
+        killSignal: "SIGKILL",
+      }).trim();
+      return { version: version || "unknown", error: null };
+    } catch (error) {
+      if (error?.code === "ENOENT") return { version: null, error: null };
+      // shell:true routes a missing binary through cmd.exe, which reports it as a non-zero
+      // exit rather than ENOENT; that is still "not installed", not a broken install.
+      if (process.platform === "win32" &&
+          /not recognized as an internal or external command/i.test(String(error?.stderr || ""))) {
+        return { version: null, error: null };
+      }
+      // Anything else — a hung probe we killed, or a real non-zero exit — means grok is
+      // installed but not usable. Reporting that as "unavailable" would send the caller
+      // off to reinstall a binary that is already there.
+      return { version: null, error };
     }
-  } catch {
-    return null;
-  }
+  };
+  // Prefer `grok version` (documented subcommand); fall back to `--version` for builds that
+  // only answer the flag. A missing binary and a hung probe are both conclusive, though:
+  // retrying either would only spend the bound a second time.
+  const startedAt = performance.now();
+  const documented = probe(["version"]);
+  if (documented.version || !documented.error || documented.error.code === "ETIMEDOUT") return documented;
+  const remainingMs = Math.floor(probeTimeoutMs - (performance.now() - startedAt));
+  if (remainingMs <= 0) return { version: null, error: { code: "ETIMEDOUT" } };
+  return probe(["--version"], remainingMs);
 }
 
 function gitTouchedFiles(cwd) {
-  // null (not []) when git can't report — git missing, or a non-repo run —
-  // so the caller can tell "git unavailable" apart from "Grok changed nothing."
-  // [] means git ran and the working tree is clean.
   try {
-    const out = execFileSync("git", ["status", "--porcelain"], { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
-    return out.split("\n").map((line) => line.trimEnd()).filter(Boolean);
+    const output = execFileSync("git", ["status", "--porcelain"], {
+      cwd,
+      encoding: "utf8",
+      timeout: 10_000,
+      killSignal: "SIGKILL",
+      stdio: ["ignore", "pipe", "ignore"],
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    return output.split("\n").map((line) => line.trimEnd()).filter(Boolean);
   } catch {
     return null;
   }
@@ -384,6 +478,8 @@ function makeResultWriter(opts, version, run) {
   return (extra) => {
     const result = {
       schema: "delegate-relay.result.v1",
+      lane: opts.lane,
+      laneSource: opts.laneSource,
       tool: "grok",
       workdir: opts.cd,
       autonomy: opts.autonomy,
@@ -398,7 +494,11 @@ function makeResultWriter(opts, version, run) {
       finalPath: existsSync(run.finalPath) ? run.finalPath : null,
       ...extra,
     };
-    writeFileSync(run.resultPath, `${JSON.stringify(result, null, 2)}\n`, "utf8");
+    // Publish atomically so a polling orchestrator never reads a half-written file
+    // (same idiom as claude-delegate's writeJsonAtomic and qoder-delegate).
+    const temporary = `${run.resultPath}.${process.pid}.tmp`;
+    writeFileSync(temporary, `${JSON.stringify(result, null, 2)}\n`, "utf8");
+    renameSync(temporary, run.resultPath);
     return result;
   };
 }
@@ -408,6 +508,28 @@ function reportUnavailable(writeResult, resultPath) {
   printSummary(result, resultPath);
   process.stderr.write("relay: `grok` not found on PATH. Install it with `npm i -g @xai-official/grok` and run `grok login`.\n");
   process.exit(127);
+}
+
+function reportVersionFailure(opts, writeResult, run, error, probeTimeoutMs) {
+  const timedOut = error?.code === "ETIMEDOUT";
+  const stderr = String(error?.stderr || "").trim();
+  const message = timedOut
+    ? `grok version preflight timed out after ${probeTimeoutMs}ms; Grok was not dispatched`
+    : `grok version preflight failed${Number.isInteger(error?.status) ? ` with exit ${error.status}` : ""}; Grok was not dispatched`;
+  const result = writeResult({
+    status: timedOut ? "timeout" : "failed",
+    exitCode: timedOut ? 124 : Number.isInteger(error?.status) ? error.status : 1,
+    signal: null,
+    sessionId: null,
+    finalMessage: "",
+    usage: null,
+    touchedFiles: gitTouchedFiles(opts.cd),
+    stderrTail: stderr ? stderr.split("\n").slice(-20) : [],
+    error: message,
+  });
+  printSummary(result, run.resultPath);
+  process.stderr.write(`relay: ${message}\n`);
+  process.exit(result.exitCode);
 }
 
 function dispatchToGrok(opts, run, writeResult) {
@@ -585,12 +707,19 @@ function main() {
   const brief = readBrief(opts);
   if (!brief.trim()) fail("empty brief (pass --brief <file> or pipe the brief on stdin)");
 
-  const version = grokVersion();
+  // Prepare the run dir before probing, so a preflight that times out or fails still has
+  // somewhere to publish result.json rather than exiting silently.
   const run = prepareRunDir(opts, brief);
-  const writeResult = makeResultWriter(opts, version, run);
+  const probeTimeoutMs = versionProbeTimeout(opts);
+  const probe = grokVersion(probeTimeoutMs);
+  const writeResult = makeResultWriter(opts, probe.version, run);
 
-  if (!version) {
+  if (!probe.version && !probe.error) {
     reportUnavailable(writeResult, run.resultPath);
+    return;
+  }
+  if (probe.error) {
+    reportVersionFailure(opts, writeResult, run, probe.error, probeTimeoutMs);
     return;
   }
 

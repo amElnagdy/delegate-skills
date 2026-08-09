@@ -34,6 +34,7 @@
  * Options:
  *   --brief <file>          Path to the brief. If omitted, the brief is read from stdin.
  *   --cd <dir>              Working root for Antigravity (default: current directory).
+ *   --lane <name>           Fleet lane from delegate-setup config (dials apply; explicit flags win).
  *   --model <name>          Antigravity model label (default: agy's configured default).
  *   --project <id>          Use an existing Antigravity project.
  *   --new-project           Force a fresh Antigravity project (default for fresh runs).
@@ -42,7 +43,11 @@
  *   --sandbox               Enable Antigravity's terminal sandbox for this run.
  *   --dangerously-skip-permissions
  *                           Auto-approve Antigravity tool permission requests. Use only with human approval.
- *   --print-timeout <dur>   Timeout for print mode (default: 30m).
+ *   --print-timeout <dur>   Timeout agy itself applies to print mode (default: 30m).
+ *   --timeout <dur>         Relay-side watchdog, h/m/s like 30m (default: --print-timeout
+ *                           plus a 60s grace). On expiry the agy process tree is killed and
+ *                           result.json gets status "timeout". Set it explicitly when agy
+ *                           may hang past its own print timeout.
  *   --add-dir <dir>         Add an extra workspace directory. Repeatable.
  *   --out-dir <dir>         Where to write run artifacts (default: a fresh dir under
  *                           the system temp dir, so the repo under review stays clean).
@@ -59,19 +64,61 @@
  * If the child dies on a signal, the exit code is 128 plus the signal number and
  * `result.json` records the signal.
  * Once the brief validates, `result.json` is written on every outcome -
- * completed, failed, timeout (the relay watchdog fired after --print-timeout
- * plus 60s grace), aborted (the relay itself was killed and forwarded the kill
- * to agy), or agy_unavailable. An orchestrator that polls for the
+ * completed, failed, timeout (the relay watchdog fired after explicit --timeout,
+ * or after --print-timeout plus 60s grace), aborted (the relay itself was killed
+ * and forwarded the kill to agy), or agy_unavailable. An orchestrator that polls for the
  * file must therefore also treat a non-zero exit with no file as a usage error.
  */
 
-import { spawn, execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync, readFileSync, existsSync, appendFileSync } from "node:fs";
-import { join, resolve, basename } from "node:path";
+import {spawn, execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, writeFileSync, renameSync, readFileSync, existsSync, appendFileSync } from "node:fs";
+import {join, resolve, basename, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { constants, tmpdir } from "node:os";
 import { StringDecoder } from "node:string_decoder";
 
 const DEFAULT_PRINT_TIMEOUT = "30m";
+const MAX_TIMER_MS = 2_147_483_647;
+const MAX_TIMER_DURATION = "596h31m23s";
+const VERSION_PROBE_TIMEOUT_MS = 10_000;
+
+const IMPLEMENTER_KEY = "agy";
+
+function applyFleetLane(opts, flagged) {
+  if (!opts.lane) return;
+  const script = join(dirname(fileURLToPath(import.meta.url)), "../../delegate-setup/scripts/lane.mjs");
+  if (!existsSync(script)) {
+    fail("--lane requires the delegate-setup skill installed beside this relay");
+  }
+  const r = spawnSync(
+    process.execPath,
+    [script, "resolve", "--cwd", opts.cd, "--lane", opts.lane, "--implementer", IMPLEMENTER_KEY],
+    { encoding: "utf8", env: process.env },
+  );
+  if (r.error) fail(`lane resolve failed: ${r.error.message}`);
+  if (r.status !== 0) {
+    fail((r.stderr || "lane resolve failed").trim().replace(/^lane\.mjs:\s*/, ""));
+  }
+  let resolved;
+  try {
+    const lines = (r.stdout || "").trim().split("\n").filter(Boolean);
+    resolved = JSON.parse(lines[lines.length - 1]);
+  } catch {
+    fail("lane resolve returned invalid JSON");
+  }
+  opts.laneSource = resolved.source;
+  for (const [field, value] of Object.entries(resolved.dials || {})) {
+    if (flagged.has(field)) continue;
+    if (field === "autonomy" && (flagged.has("autonomy") || flagged.has("sandbox") || flagged.has("readOnly"))) continue;
+    if (field === "agent" && (flagged.has("agent") || flagged.has("readOnly"))) continue;
+    if (field === "sandbox" && (flagged.has("sandbox") || flagged.has("readOnly"))) continue;
+    if (field === "permissionMode" && (flagged.has("permissionMode") || flagged.has("readOnly"))) continue;
+    if (field === "planOnly" && (flagged.has("planOnly") || flagged.has("readOnly"))) continue;
+    if (field === "readOnly" && flagged.has("readOnly")) continue;
+    if (field === "force" && flagged.has("force")) continue;
+    opts[field] = value;
+  }
+}
 
 function fail(message, code = 2) {
   process.stderr.write(`relay: ${message}\n`);
@@ -79,7 +126,10 @@ function fail(message, code = 2) {
 }
 
 function parseArgs(argv) {
+  const flagged = new Set();
   const opts = {
+    lane: null,
+    laneSource: null,
     brief: null,
     cd: process.cwd(),
     model: null,
@@ -90,6 +140,7 @@ function parseArgs(argv) {
     sandbox: false,
     dangerouslySkipPermissions: false,
     printTimeout: DEFAULT_PRINT_TIMEOUT,
+    timeout: null,
     addDirs: [],
     outDir: null,
   };
@@ -109,22 +160,38 @@ function parseArgs(argv) {
         break;
       case "--brief": opts.brief = next(); break;
       case "--cd": opts.cd = resolve(next()); break;
-      case "--model": opts.model = next(); break;
+      case "--lane": opts.lane = next(); break;
+      case "--model": opts.model = next(); flagged.add("model"); break;
       case "--project": opts.project = next(); break;
       case "--new-project": opts.newProject = true; break;
       case "--resume-last": opts.resumeLast = true; break;
       case "--conversation": opts.conversation = next(); break;
-      case "--sandbox": opts.sandbox = true; break;
+      case "--sandbox": opts.sandbox = true; flagged.add("sandbox"); break;
       case "--dangerously-skip-permissions": opts.dangerouslySkipPermissions = true; break;
       case "--print-timeout": opts.printTimeout = next(); break;
+      case "--timeout": opts.timeout = next(); flagged.add("timeout"); break;
       case "--add-dir": opts.addDirs.push(next()); break;
       case "--out-dir": opts.outDir = resolve(next()); break;
       default:
         fail(`unknown option: ${arg}`);
     }
   }
+  applyFleetLane(opts, flagged);
   if (opts.resumeLast && opts.conversation) {
     fail("--resume-last and --conversation are mutually exclusive; pass only one");
+  }
+  // A malformed --timeout must fail loudly: parseDuration returns null for it, and a null
+  // delay makes setTimeout fire on the next tick - a silent instant "timeout", the worst
+  // failure mode a watchdog has. Zero is rejected for the same reason.
+  if (opts.timeout !== null) {
+    const milliseconds = parseDuration(opts.timeout);
+    if (milliseconds === null || milliseconds <= 0 || milliseconds > MAX_TIMER_MS) {
+      fail(`--timeout "${opts.timeout}" must be an h/m/s duration from 1s through ${MAX_TIMER_DURATION}`);
+    }
+  }
+  const printTimeoutMs = parseDuration(opts.printTimeout);
+  if (printTimeoutMs === null || printTimeoutMs <= 0 || printTimeoutMs + 60_000 > MAX_TIMER_MS) {
+    fail(`--print-timeout "${opts.printTimeout}" must be an h/m/s duration from 1s through 596h30m23s so its 60s grace fits the relay watchdog limit`);
   }
   if (opts.project && (opts.resumeLast || opts.conversation)) {
     fail("--project cannot be combined with --resume-last or --conversation");
@@ -168,26 +235,36 @@ function readBrief(opts) {
 }
 
 function killChild(child, signal = "SIGTERM") {
-  // The kill must reach the whole process family, not just the CLI — a tool subprocess left
-  // running would keep editing after the relay reports timeout/aborted. On Windows Node can't
-  // kill a process family without a Job Object, so kill the tree by pid with the OS tool
-  // (/t includes descendants, /f forces it — the tree-kill/npm idiom).
+  if (!child || !child.pid) return;
   if (process.platform === "win32") {
-    if (signal !== "SIGTERM") return; // the first taskkill /f already felled the whole tree
-    // stderr is inherited so a real taskkill failure (e.g. access denied) is visible to the operator;
-    // its non-zero exit when the tree is already gone is the expected race and carries nothing to do.
-    try { execFileSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: ["ignore", "ignore", "inherit"] }); }
-    catch { /* already gone — nothing left to kill */ }
-  } else {
-    // On POSIX the child leads its own process group (the detached launch), so the negative-pid
-    // signal reaches every descendant; fall back to the lone pid if the group is already gone.
-    try { process.kill(-child.pid, signal); } catch { try { child.kill(signal); } catch { /* already gone */ } }
+    if (signal !== "SIGTERM") return;
+    try {
+      execFileSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
+        stdio: ["ignore", "ignore", "inherit"],
+      });
+    } catch {
+      // The process tree already exited.
+    }
+    return;
+  }
+  try {
+    process.kill(-child.pid, signal);
+  } catch {
+    try {
+      child.kill(signal);
+    } catch {
+      // The process group already exited.
+    }
   }
 }
 
-function agyVersion() {
+function agyVersion(timeoutMs) {
   try {
-    const out = execFileSync("agy", ["changelog"], { encoding: "utf8" }).trim();
+    const out = execFileSync("agy", ["changelog"], {
+      encoding: "utf8",
+      timeout: Math.min(timeoutMs, VERSION_PROBE_TIMEOUT_MS),
+      killSignal: "SIGKILL",
+    }).trim();
     const firstLine = out.split("\n").find(Boolean) || "";
     const match = firstLine.match(/^([^:\s]+):/);
     return match ? match[1] : firstLine || null;
@@ -195,29 +272,38 @@ function agyVersion() {
     // Only a missing binary means "unavailable"; any other changelog failure
     // (permissions, a broken subcommand) must not masquerade as exit 127.
     if (err && err.code === "ENOENT") return null;
+    if (err && err.code === "ETIMEDOUT") throw err;
     return "unknown";
   }
 }
 
 function parseDuration(duration) {
-  let milliseconds = 0;
-  let matched = false;
-  for (const match of duration.matchAll(/(\d+)h|(\d+)m|(\d+)s/g)) {
-    matched = true;
-    if (match[1]) milliseconds += Number(match[1]) * 60 * 60 * 1000;
-    if (match[2]) milliseconds += Number(match[2]) * 60 * 1000;
-    if (match[3]) milliseconds += Number(match[3]) * 1000;
+  const match = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/.exec(duration);
+  if (!match || (!match[1] && !match[2] && !match[3])) return null;
+  try {
+    const seconds =
+      BigInt(match[1] || 0) * 3600n +
+      BigInt(match[2] || 0) * 60n +
+      BigInt(match[3] || 0);
+    const milliseconds = seconds * 1000n;
+    if (milliseconds <= 0n || milliseconds > BigInt(MAX_TIMER_MS)) return null;
+    return Number(milliseconds);
+  } catch {
+    return null;
   }
-  return matched ? milliseconds : null;
 }
 
 function gitTouchedFiles(cwd) {
-  // null (not []) when git can't report - git missing, or a non-repo run - so the
-  // caller can tell "git unavailable" apart from "Antigravity changed nothing."
-  // [] means git ran and the working tree is clean.
   try {
-    const out = execFileSync("git", ["status", "--porcelain"], { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
-    return out.split("\n").map((line) => line.trimEnd()).filter(Boolean);
+    const output = execFileSync("git", ["status", "--porcelain"], {
+      cwd,
+      encoding: "utf8",
+      timeout: 10_000,
+      killSignal: "SIGKILL",
+      stdio: ["ignore", "pipe", "ignore"],
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    return output.split("\n").map((line) => line.trimEnd()).filter(Boolean);
   } catch {
     return null;
   }
@@ -306,6 +392,8 @@ function makeResultWriter(opts, version, run) {
     const ids = parseIdsFromLog(run.logPath);
     const result = {
       schema: "delegate-relay.result.v1",
+      lane: opts.lane,
+      laneSource: opts.laneSource,
       tool: "agy",
       workdir: opts.cd,
       model: opts.model,
@@ -324,7 +412,11 @@ function makeResultWriter(opts, version, run) {
       stderrPath: run.stderrPath,
       ...extra,
     };
-    writeFileSync(run.resultPath, `${JSON.stringify(result, null, 2)}\n`, "utf8");
+    // Publish atomically so a polling orchestrator never reads a half-written file
+    // (same idiom as claude-delegate's writeJsonAtomic and qoder-delegate).
+    const temporary = `${run.resultPath}.${process.pid}.tmp`;
+    writeFileSync(temporary, `${JSON.stringify(result, null, 2)}\n`, "utf8");
+    renameSync(temporary, run.resultPath);
     return result;
   };
 }
@@ -336,9 +428,26 @@ function reportUnavailable(writeResult, resultPath) {
   process.exit(127);
 }
 
-function dispatchToAgy(opts, brief, run, writeResult) {
+function reportVersionTimeout(writeResult, run, timeoutMs, error) {
+  const stderr = String(error?.stderr || "").trim();
+  if (stderr) writeFileSync(run.stderrPath, `${stderr}\n`, "utf8");
+  const message = `agy changelog version preflight timed out after ${Math.min(timeoutMs, VERSION_PROBE_TIMEOUT_MS)}ms; agy was not dispatched`;
+  const result = writeResult({
+    status: "timeout",
+    exitCode: 124,
+    signal: null,
+    finalMessage: "",
+    touchedFiles: null,
+    ...(stderr ? { stderrTail: stderr.split("\n").slice(-20) } : {}),
+    error: message,
+  });
+  printSummary(result, run.resultPath);
+  process.stderr.write(`relay: ${message}\n`);
+  process.exit(result.exitCode);
+}
+
+function dispatchToAgy(opts, brief, run, writeResult, watchdogMs) {
   const argv = buildArgv(opts, brief, run);
-  const timeoutMs = parseDuration(opts.printTimeout) ?? parseDuration(DEFAULT_PRINT_TIMEOUT);
   // Antigravity's installer provides a native `agy` binary. Launch directly so
   // multi-line briefs and paths with spaces are passed as argv, not shell text.
   const child = spawn("agy", argv, {
@@ -363,7 +472,7 @@ function dispatchToAgy(opts, brief, run, writeResult) {
     sigkillTimer = setTimeout(() => {
       if (!settled) killChild(child, "SIGKILL");
     }, 10_000);
-  }, timeoutMs + 60_000);
+  }, watchdogMs);
 
   // The relay's own death must still produce a result: without this, a kill from the
   // orchestrator's side (its command timeout, a stopped task, a closed terminal) writes
@@ -458,7 +567,13 @@ function dispatchToAgy(opts, brief, run, writeResult) {
       finalMessage,
       touchedFiles: gitTouchedFiles(opts.cd),
       ...(succeeded ? {} : { stderrTail: stderrTail.slice(-20) }),
-      ...(watchdogFired ? { error: `agy did not exit within --print-timeout ${opts.printTimeout} plus 60s grace; killed by the relay watchdog` } : {}),
+      ...(watchdogFired
+        ? {
+            error: opts.timeout !== null
+              ? `agy did not finish within --timeout ${opts.timeout}; killed by the relay watchdog`
+              : `agy did not exit within --print-timeout ${opts.printTimeout} plus 60s grace; killed by the relay watchdog`,
+          }
+        : {}),
     });
     printSummary(result, run.resultPath);
     process.exit(result.exitCode);
@@ -479,8 +594,19 @@ function main() {
     fail(`brief is ${Math.round(briefBytes / 1024)}KB; agy passes the prompt as a CLI argument, which the OS caps (~128KB on Linux). Trim it, or have agy read large context from the workspace instead of inlining it.`);
   }
 
-  const version = agyVersion();
+  const printTimeoutMs = parseDuration(opts.printTimeout);
+  // An explicit --timeout wins over the default print-timeout-plus-grace: agy can hang well
+  // past its own print timeout, which is exactly the case the grace window cannot cover.
+  const watchdogMs = opts.timeout !== null ? parseDuration(opts.timeout) : printTimeoutMs + 60_000;
   const run = prepareRunDir(opts, brief);
+  let version;
+  try {
+    version = agyVersion(watchdogMs);
+  } catch (error) {
+    const writeResult = makeResultWriter(opts, "unknown", run);
+    reportVersionTimeout(writeResult, run, watchdogMs, error);
+    return;
+  }
   const writeResult = makeResultWriter(opts, version, run);
 
   if (!version) {
@@ -488,7 +614,7 @@ function main() {
     return;
   }
 
-  dispatchToAgy(opts, brief, run, writeResult);
+  dispatchToAgy(opts, brief, run, writeResult, watchdogMs);
 }
 
 function printSummary(result, resultPath) {

@@ -108,7 +108,7 @@ drop the now-unused import." | node "<skill-dir>/scripts/relay.mjs" --resume-las
 
 (`<skill-dir>` is this skill's install directory — see [dispatch-and-poll.md](dispatch-and-poll.md).)
 
-`--resume-last` keeps Codex's context from the first run, so a short delta is enough. Then review
+`--session <threadId>` (or `--resume-last`) keeps Codex's context from the first run, so a short delta is enough. Then review
 again — rework gets the same gate-rerun, test check, diff-read, and sweep as the original, no
 shortcuts. Repeat until it's right, then commit.
 

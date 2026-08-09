@@ -26,6 +26,7 @@
  * Options:
  *   --brief <file>          Path to the brief. If omitted, the brief is read from stdin.
  *   --cd <dir>              Working root for Codex (default: current directory).
+ *   --lane <name>           Fleet lane from delegate-setup config (dials apply; explicit flags win).
  *   --model <name>          Codex model (default: Codex's own configured default).
  *   --effort <level>        Reasoning effort, passed to Codex as
  *                           `-c model_reasoning_effort=<level>` (default: Codex's
@@ -34,13 +35,16 @@
  *                           (default: workspace-write).
  *   --read-only             Shortcut for --sandbox read-only (review/diagnosis, no edits).
  *   --resume-last           Continue the most recent Codex session; send only the delta brief.
- *                           (Inherits the original session's sandbox and working root.)
- *   --clean-env             Launch codex (and the version preflight) with a minimal environment
- *                           - PATH, HOME, locale, temp, CODEX_HOME - instead of inheriting every
- *                           variable in the caller's shell. Keeps unrelated credentials out of
- *                           the implementer process. Also passes -c mcp_servers={} for the run:
- *                           configured MCP servers are token consumers and can hang at startup
- *                           under a minimal environment.
+ *                           An explicit --sandbox/--read-only override applies to the resumed turn.
+ *   --session <id>          Continue a specific Codex session by thread id (from a prior
+ *                           result.json). Safer than --resume-last when other Codex runs
+ *                           may have happened since - "last" is global, not per-repo.
+ *                           Mutually exclusive with --resume-last.
+ *   --clean-env             Launch Codex and its version preflight with only runtime basics.
+ *                           Changes inherited variables only; does not protect files or other
+ *                           same-user secrets.
+ *   --keep-env <name>       Keep one additional variable under --clean-env (repeatable).
+ *                           Required for environment-backed auth and other stripped variables.
  *   --skip-git-repo-check   Allow running outside a git repository.
  *   --timeout <dur>         Relay-side watchdog (default: off). Durations use h/m/s
  *                           strings like 30m or 2h. On expiry the codex child is killed
@@ -67,13 +71,60 @@
  * with no file as a usage error.
  */
 
-import { spawn, execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync, readFileSync, existsSync, appendFileSync } from "node:fs";
-import { join, resolve, basename } from "node:path";
+import {spawn, execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, writeFileSync, renameSync, readFileSync, existsSync, appendFileSync } from "node:fs";
+import {join, resolve, basename, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { constants, tmpdir } from "node:os";
 import { StringDecoder } from "node:string_decoder";
 
+const VERSION_PROBE_TIMEOUT_MS = 10_000;
+const MAX_TIMER_MS = 2_147_483_647;
 const SANDBOX_MODES = new Set(["read-only", "workspace-write", "danger-full-access"]);
+const SAFE_SESSION = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+const SAFE_ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+// Model reaches cmd.exe on win32 (shell:true for the codex.cmd shim) — same shell-safe
+// family as grok/pi. Keep in lockstep with delegate-setup MODEL_TOKEN.shellSafe.
+const SAFE_MODEL = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
+
+const IMPLEMENTER_KEY = "codex";
+
+function applyFleetLane(opts, flagged) {
+  if (!opts.lane) return;
+  const script = join(dirname(fileURLToPath(import.meta.url)), "../../delegate-setup/scripts/lane.mjs");
+  if (!existsSync(script)) {
+    fail("--lane requires the delegate-setup skill installed beside this relay");
+  }
+  const r = spawnSync(
+    process.execPath,
+    [script, "resolve", "--cwd", opts.cd, "--lane", opts.lane, "--implementer", IMPLEMENTER_KEY],
+    { encoding: "utf8", env: process.env },
+  );
+  if (r.error) fail(`lane resolve failed: ${r.error.message}`);
+  if (r.status !== 0) {
+    fail((r.stderr || "lane resolve failed").trim().replace(/^lane\.mjs:\s*/, ""));
+  }
+  let resolved;
+  try {
+    const lines = (r.stdout || "").trim().split("\n").filter(Boolean);
+    resolved = JSON.parse(lines[lines.length - 1]);
+  } catch {
+    fail("lane resolve returned invalid JSON");
+  }
+  opts.laneSource = resolved.source;
+  for (const [field, value] of Object.entries(resolved.dials || {})) {
+    if (flagged.has(field)) continue;
+    if (field === "autonomy" && (flagged.has("autonomy") || flagged.has("sandbox") || flagged.has("readOnly"))) continue;
+    if (field === "agent" && (flagged.has("agent") || flagged.has("readOnly"))) continue;
+    if (field === "sandbox" && (flagged.has("sandbox") || flagged.has("readOnly"))) continue;
+    if (field === "permissionMode" && (flagged.has("permissionMode") || flagged.has("readOnly"))) continue;
+    if (field === "planOnly" && (flagged.has("planOnly") || flagged.has("readOnly"))) continue;
+    if (field === "readOnly" && flagged.has("readOnly")) continue;
+    if (field === "force" && flagged.has("force")) continue;
+    opts[field] = value;
+    if (field === "sandbox") opts.sandboxConfigured = true;
+  }
+}
 
 function fail(message, code = 2) {
   process.stderr.write(`relay: ${message}\n`);
@@ -81,15 +132,21 @@ function fail(message, code = 2) {
 }
 
 function parseArgs(argv) {
+  const flagged = new Set();
   const opts = {
+    lane: null,
+    laneSource: null,
     brief: null,
     cd: process.cwd(),
     model: null,
     effort: null,
     sandbox: "workspace-write",
+    sandboxConfigured: false,
     resumeLast: false,
-    skipGitRepoCheck: false,
+    session: null,
     cleanEnv: false,
+    keepEnv: [],
+    skipGitRepoCheck: false,
     timeout: null,
     outDir: null,
   };
@@ -109,71 +166,96 @@ function parseArgs(argv) {
         break;
       case "--brief": opts.brief = next(); break;
       case "--cd": opts.cd = resolve(next()); break;
-      case "--model": opts.model = next(); break;
-      case "--effort": opts.effort = next(); break;
-      case "--sandbox": opts.sandbox = next(); break;
-      case "--read-only": opts.sandbox = "read-only"; break;
+      case "--lane": opts.lane = next(); break;
+      case "--model": opts.model = next(); flagged.add("model"); break;
+      case "--effort": opts.effort = next(); flagged.add("effort"); break;
+      case "--sandbox": opts.sandbox = next(); opts.sandboxConfigured = true; flagged.add("sandbox"); break;
+      case "--read-only": opts.sandbox = "read-only"; opts.sandboxConfigured = true; flagged.add("sandbox"); flagged.add("readOnly"); break;
       case "--resume-last": opts.resumeLast = true; break;
-      case "--skip-git-repo-check": opts.skipGitRepoCheck = true; break;
+      case "--session": opts.session = next(); break;
       case "--clean-env": opts.cleanEnv = true; break;
-      case "--timeout": opts.timeout = next(); break;
+      case "--keep-env": opts.keepEnv.push(next()); break;
+      case "--skip-git-repo-check": opts.skipGitRepoCheck = true; break;
+      case "--timeout": opts.timeout = next(); flagged.add("timeout"); break;
       case "--out-dir": opts.outDir = resolve(next()); break;
       default:
         fail(`unknown option: ${arg}`);
     }
   }
+  applyFleetLane(opts, flagged);
   if (!SANDBOX_MODES.has(opts.sandbox)) {
     fail(`invalid --sandbox "${opts.sandbox}" (expected: ${[...SANDBOX_MODES].join(", ")})`);
   }
   if (opts.effort !== null && !/^[a-z][a-z0-9-]*$/i.test(opts.effort)) {
     fail(`invalid --effort "${opts.effort}" (expected a non-empty bare token)`);
   }
+  if (opts.model !== null && !SAFE_MODEL.test(opts.model)) {
+    fail("--model contains unsupported characters (allowed: letters, digits, . _ : / -)");
+  }
+  if (opts.keepEnv.length && !opts.cleanEnv) {
+    fail("--keep-env requires --clean-env");
+  }
+  const invalidEnvName = opts.keepEnv.find((name) => !SAFE_ENV_NAME.test(name));
+  if (invalidEnvName) {
+    fail(`invalid --keep-env "${invalidEnvName}" (expected an environment variable name)`);
+  }
+  const missingEnvName = opts.keepEnv.find((name) => process.env[name] === undefined);
+  if (missingEnvName) {
+    fail(`--keep-env "${missingEnvName}" is not set`);
+  }
   // The watchdog is relay-only (codex has no timeout flag), so a malformed
   // --timeout must fail loudly here - a silent no-watchdog fallback would be wrong.
   if (opts.timeout !== null && parseDuration(opts.timeout) === null) {
-    fail(`--timeout "${opts.timeout}" is not a duration; use h/m/s strings like 30m, 90s, or 1h30m`);
+    fail(`--timeout "${opts.timeout}" is invalid or too long; use a positive h/m/s duration no longer than about 24 days`);
+  }
+  if (opts.session !== null && opts.resumeLast) {
+    fail("--session and --resume-last are mutually exclusive; pass only one");
+  }
+  // This value reaches cmd.exe on win32 (shell:true for the codex.cmd shim), so
+  // accept only the same shell-safe session token shape used by sibling relays.
+  if (opts.session !== null && !SAFE_SESSION.test(opts.session)) {
+    fail("--session must be a shell-safe thread id (letters, digits, . _ : -)");
   }
   return opts;
 }
 
 function parseDuration(duration) {
-  // Whole-string match: "1mtypo" must be rejected, not read as one minute.
   const match = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/.exec(duration);
   if (!match || (!match[1] && !match[2] && !match[3])) return null;
-  return (Number(match[1] || 0) * 3600 + Number(match[2] || 0) * 60 + Number(match[3] || 0)) * 1000;
-}
-
-function minimalEnv() {
-  // --clean-env: enough for codex to run and read its own auth, nothing else. An orchestrator's
-  // shell profile routinely holds cloud and provider credentials that the delegated task has no
-  // use for; this keeps them out of the child process.
-  const keep = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "LC_CTYPE", "TERM",
-    "TMPDIR", "CODEX_HOME", "NO_COLOR", "SystemRoot", "SystemDrive", "USERPROFILE", "APPDATA",
-    "LOCALAPPDATA", "TEMP", "TMP", "PATHEXT", "COMSPEC"];
-  const env = {};
-  for (const key of keep) {
-    if (process.env[key] !== undefined) env[key] = process.env[key];
+  try {
+    const seconds =
+      BigInt(match[1] || 0) * 3600n +
+      BigInt(match[2] || 0) * 60n +
+      BigInt(match[3] || 0);
+    const milliseconds = seconds * 1000n;
+    if (milliseconds <= 0n || milliseconds > BigInt(MAX_TIMER_MS)) return null;
+    return Number(milliseconds);
+  } catch {
+    return null;
   }
-  return env;
 }
 
 function killChild(child, signal = "SIGTERM") {
-  // The kill must reach the whole process family, not just the immediate child — a tool
-  // subprocess left running would keep editing after the relay reports timeout/aborted.
-  // On Windows the child is the .cmd shim (the shell:true launch above), Windows has no
-  // process-group signals, and Node can't kill a process family without a Job Object, so
-  // kill the tree by pid with the OS tool: /t includes descendants, /f forces it — the
-  // same idiom tree-kill and npm/pnpm use.
+  if (!child || !child.pid) return;
   if (process.platform === "win32") {
-    if (signal !== "SIGTERM") return; // the first taskkill /f already felled the whole tree
-    // stderr is inherited so a real taskkill failure (e.g. access denied) is visible to the operator;
-    // its non-zero exit when the tree is already gone is the expected race and carries nothing to do.
-    try { execFileSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: ["ignore", "ignore", "inherit"] }); }
-    catch { /* already gone — nothing left to kill */ }
-  } else {
-    // On POSIX the child leads its own process group (the detached launch), so the negative-pid
-    // signal reaches every descendant; fall back to the lone pid if the group is already gone.
-    try { process.kill(-child.pid, signal); } catch { try { child.kill(signal); } catch { /* already gone */ } }
+    if (signal !== "SIGTERM") return;
+    try {
+      execFileSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
+        stdio: ["ignore", "ignore", "inherit"],
+      });
+    } catch {
+      // The process tree already exited.
+    }
+    return;
+  }
+  try {
+    process.kill(-child.pid, signal);
+  } catch {
+    try {
+      child.kill(signal);
+    } catch {
+      // The process group already exited.
+    }
   }
 }
 
@@ -203,27 +285,62 @@ function readBrief(opts) {
   return stdin;
 }
 
-function codexVersion(cleanEnv) {
+function versionProbeTimeout(opts) {
+  // The watchdog is only armed once codex is running, so the preflight needs a bound of
+  // its own: a `codex --version` that never returns would wedge the relay here, before
+  // any result.json exists, and --timeout could not reach it.
+  const timeoutMs = opts.timeout === null ? null : parseDuration(opts.timeout);
+  return timeoutMs === null ? VERSION_PROBE_TIMEOUT_MS : Math.min(timeoutMs, VERSION_PROBE_TIMEOUT_MS);
+}
+
+function codexEnv(opts) {
+  if (!opts.cleanEnv) return process.env;
+  const keep = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "LC_CTYPE", "TERM",
+    "TMPDIR", "CODEX_HOME", "SystemRoot", "SystemDrive", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
+    "TEMP", "TMP", "PATHEXT", "COMSPEC", ...opts.keepEnv];
+  return Object.fromEntries(keep.filter((key) => process.env[key] !== undefined).map((key) => [key, process.env[key]]));
+}
+
+function codexVersion(probeTimeoutMs, env) {
   try {
     // On Windows, npm installs `codex` as a .cmd shim; Node's CreateProcess only
     // auto-appends .exe, never .cmd, so launching it needs shell:true there or it
     // ENOENTs on a working install. POSIX is unaffected. (git installs a real
     // git.exe and must NOT get this flag — see gitTouchedFiles.)
-    // The preflight launches the same binary, so --clean-env has to cover it too - otherwise
-    // the full environment reaches codex before dispatch even runs.
-    return execFileSync("codex", ["--version"], { encoding: "utf8", shell: process.platform === "win32", env: cleanEnv ? minimalEnv() : process.env }).trim();
-  } catch {
-    return null;
+    const version = execFileSync("codex", ["--version"], {
+      encoding: "utf8",
+      shell: process.platform === "win32",
+      timeout: probeTimeoutMs,
+      killSignal: "SIGKILL",
+      env,
+    }).trim();
+    return { version: version || "unknown", error: null };
+  } catch (error) {
+    if (error?.code === "ENOENT") return { version: null, error: null };
+    // shell:true routes a missing binary through cmd.exe, which reports it as a non-zero
+    // exit rather than ENOENT; that is still "not installed", not a broken install.
+    if (process.platform === "win32" &&
+        /not recognized as an internal or external command/i.test(String(error?.stderr || ""))) {
+      return { version: null, error: null };
+    }
+    // Anything else — a hung probe we killed, or a real non-zero exit — means codex is
+    // installed but not usable. Reporting that as "unavailable" would send the caller
+    // off to reinstall a binary that is already there.
+    return { version: null, error };
   }
 }
 
 function gitTouchedFiles(cwd) {
-  // null (not []) when git can't report — git missing, or a non-repo run under
-  // --skip-git-repo-check — so the caller can tell "git unavailable" apart from
-  // "Codex changed nothing." [] means git ran and the working tree is clean.
   try {
-    const out = execFileSync("git", ["status", "--porcelain"], { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
-    return out.split("\n").map((line) => line.trimEnd()).filter(Boolean);
+    const output = execFileSync("git", ["status", "--porcelain"], {
+      cwd,
+      encoding: "utf8",
+      timeout: 10_000,
+      killSignal: "SIGKILL",
+      stdio: ["ignore", "pipe", "ignore"],
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    return output.split("\n").map((line) => line.trimEnd()).filter(Boolean);
   } catch {
     return null;
   }
@@ -236,25 +353,25 @@ function timestamp() {
 
 function buildArgv(opts, finalPath) {
   const argv = ["exec"];
-  if (opts.resumeLast) argv.push("resume", "--last");
+  const resuming = Boolean(opts.session || opts.resumeLast);
+  // Codex accepts shared exec options before the resume subcommand. Reapply only
+  // an explicitly selected sandbox; otherwise leave the active Codex config alone.
+  if (resuming && opts.sandboxConfigured) argv.push("-s", opts.sandbox);
+  if (opts.session) argv.push("resume", opts.session);
+  else if (opts.resumeLast) argv.push("resume", "--last");
   // ponytail: shell:true on win32 (needed for the codex.cmd shim) doesn't quote
   // args, so a temp path with spaces (C:\Users\First Last\...) splits and the
   // trailing "-" misparses (issue #3). Quote the only spaceable arg in argv.
   // Ceiling: if quoting proves too blunt, drop shell:true and resolve the shim.
   const outPath = process.platform === "win32" ? `"${finalPath}"` : finalPath;
   argv.push("--json", "-o", outPath);
-  // `-s`/`-C` are not accepted by `exec resume`; resume inherits the original
-  // session's sandbox and working root, and we set the child process cwd below.
-  if (!opts.resumeLast) {
+  if (!resuming) {
     argv.push("-s", opts.sandbox);
   }
   if (opts.model) argv.push("-m", opts.model);
-  // `-c` is accepted by `exec resume` (unlike `-s`/`-C`), so the effort override
-  // applies to fresh and resumed runs alike.
+  // `-c` is accepted by the resume subcommand, so the effort override applies to
+  // fresh and resumed runs alike.
   if (opts.effort !== null) argv.push("-c", `model_reasoning_effort=${opts.effort}`);
-  // --clean-env is hermetic: MCP servers are token consumers and can hang at startup under a
-  // minimal environment, so disable them for the run.
-  if (opts.cleanEnv) argv.push("-c", "mcp_servers={}");
   if (opts.skipGitRepoCheck) argv.push("--skip-git-repo-check");
   argv.push("-"); // read the prompt from stdin
   return argv;
@@ -304,14 +421,19 @@ function makeResultWriter(opts, version, run) {
   // standing metadata, persists result.json, and returns the object it just
   // wrote so the caller can hand it straight to printSummary.
   return (extra) => {
+    const resuming = Boolean(opts.resumeLast || opts.session);
     const result = {
       schema: "delegate-relay.result.v1",
+      lane: opts.lane,
+      laneSource: opts.laneSource,
       workdir: opts.cd,
-      sandbox: opts.resumeLast ? "(inherited from resumed session)" : opts.sandbox,
+      sandbox: !resuming || opts.sandboxConfigured ? opts.sandbox : "(Codex config on resume)",
       model: opts.model,
       effort: opts.effort,
       resumeLast: opts.resumeLast,
+      session: opts.session,
       cleanEnv: opts.cleanEnv,
+      keepEnv: opts.keepEnv,
       codexVersion: version,
       startedAt: run.startedAt,
       finishedAt: new Date().toISOString(),
@@ -320,7 +442,11 @@ function makeResultWriter(opts, version, run) {
       finalPath: existsSync(run.finalPath) ? run.finalPath : null,
       ...extra,
     };
-    writeFileSync(run.resultPath, `${JSON.stringify(result, null, 2)}\n`, "utf8");
+    // Publish atomically so a polling orchestrator never reads a half-written file
+    // (same idiom as claude-delegate's writeJsonAtomic and qoder-delegate).
+    const temporary = `${run.resultPath}.${process.pid}.tmp`;
+    writeFileSync(temporary, `${JSON.stringify(result, null, 2)}\n`, "utf8");
+    renameSync(temporary, run.resultPath);
     return result;
   };
 }
@@ -332,13 +458,34 @@ function reportUnavailable(writeResult, resultPath) {
   process.exit(127);
 }
 
-function dispatchToCodex(opts, brief, run, writeResult) {
+function reportVersionFailure(opts, writeResult, run, error, probeTimeoutMs) {
+  const timedOut = error?.code === "ETIMEDOUT";
+  const stderr = String(error?.stderr || "").trim();
+  const message = timedOut
+    ? `codex --version preflight timed out after ${probeTimeoutMs}ms; Codex was not dispatched`
+    : `codex --version preflight failed${Number.isInteger(error?.status) ? ` with exit ${error.status}` : ""}; Codex was not dispatched`;
+  const result = writeResult({
+    status: timedOut ? "timeout" : "failed",
+    exitCode: timedOut ? 124 : Number.isInteger(error?.status) ? error.status : 1,
+    signal: null,
+    threadId: null,
+    finalMessage: "",
+    touchedFiles: gitTouchedFiles(opts.cd),
+    stderrTail: stderr ? stderr.split("\n").slice(-20) : [],
+    error: message,
+  });
+  printSummary(result, run.resultPath);
+  process.stderr.write(`relay: ${message}\n`);
+  process.exit(result.exitCode);
+}
+
+function dispatchToCodex(opts, brief, run, writeResult, env) {
   const argv = buildArgv(opts, run.finalPath);
   // shell:true on Windows so the codex.cmd shim resolves (see codexVersion). Safe:
   // the brief is fed via child.stdin below — never argv — and argv holds only
   // sandbox enums, model names, the pattern-checked effort, and file paths.
   // detached on POSIX: the child leads a new process group so killChild can fell the whole tree
-  const child = spawn("codex", argv, { cwd: opts.cd, stdio: ["pipe", "pipe", "pipe"], shell: process.platform === "win32", detached: process.platform !== "win32", env: opts.cleanEnv ? minimalEnv() : process.env });
+  const child = spawn("codex", argv, { cwd: opts.cd, stdio: ["pipe", "pipe", "pipe"], shell: process.platform === "win32", detached: process.platform !== "win32", env });
 
   let threadId = null;
   let stdoutBuf = "";
@@ -478,16 +625,24 @@ function main() {
   const brief = readBrief(opts);
   if (!brief.trim()) fail("empty brief (pass --brief <file> or pipe the brief on stdin)");
 
-  const version = codexVersion(opts.cleanEnv);
+  // Prepare the run dir before probing, so a preflight that times out or fails still has
+  // somewhere to publish result.json rather than exiting silently.
   const run = prepareRunDir(opts, brief);
-  const writeResult = makeResultWriter(opts, version, run);
+  const probeTimeoutMs = versionProbeTimeout(opts);
+  const env = codexEnv(opts);
+  const probe = codexVersion(probeTimeoutMs, env);
+  const writeResult = makeResultWriter(opts, probe.version, run);
 
-  if (!version) {
+  if (!probe.version && !probe.error) {
     reportUnavailable(writeResult, run.resultPath);
     return;
   }
+  if (probe.error) {
+    reportVersionFailure(opts, writeResult, run, probe.error, probeTimeoutMs);
+    return;
+  }
 
-  dispatchToCodex(opts, brief, run, writeResult);
+  dispatchToCodex(opts, brief, run, writeResult, env);
 }
 
 function printSummary(result, resultPath) {
@@ -497,7 +652,8 @@ function printSummary(result, resultPath) {
   if (result.signal === "SIGKILL" && result.status === "failed") lines.push("hint: the host killed the process (commonly the OOM killer or a supervisor timeout) — this is not a codex error; check host memory and re-dispatch, or split the task into smaller briefs.");
   if (result.signal === "SIGTERM" && result.status === "failed") lines.push("hint: something outside the relay terminated codex (a supervisor, the session ending, or a manual kill) — when the relay itself does the killing it reports status \"timeout\" or \"aborted\" instead; inspect the working tree before re-dispatching.");
   if (result.resumeLast) lines.push("mode: resumed most recent session");
-  if (result.threadId) lines.push(`thread id (resume with: codex exec resume ${result.threadId}): ${result.threadId}`);
+  if (result.session) lines.push(`mode: resumed session ${result.session}`);
+  if (result.threadId) lines.push(`thread id (resume with: --session ${result.threadId}): ${result.threadId}`);
   const touched = result.touchedFiles;
   if (touched === null) {
     lines.push("touched files: git unavailable — inspect the working tree directly");

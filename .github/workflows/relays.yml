@@ -21,6 +21,8 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+      - run: node test/relay-parity.mjs
+      - run: node test/relay-isolated.mjs
       - run: node test/relay-smoke.mjs
       - name: validate the skills package
         if: runner.os == 'Linux'

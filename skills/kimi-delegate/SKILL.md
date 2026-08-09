@@ -9,7 +9,7 @@ description: >-
   written directly without delegating.
 license: MIT
 metadata:
-  version: 0.1.0
+  version: 0.4.2
 ---
 
 # Kimi Delegate

@@ -10,7 +10,7 @@ description: >-
 license: MIT
 compatibility: Requires the `claude` CLI (Claude Code) installed and authenticated, Node 18+, and git. The orchestrating agent must be able to run shell commands and read files. Claude's shell sandbox requires macOS, Linux, or WSL2; native Windows launch is pending verification.
 metadata:
-  version: 0.1.0
+  version: 0.4.2
 ---
 
 # Claude Delegate
@@ -33,7 +33,11 @@ explicitly asks for delegation to another Claude Code process or session.
 ## Prerequisites
 
 1. `claude --version` succeeds.
-2. `claude auth status` reports an authenticated session.
+2. `claude auth status` reports an authenticated session. On macOS the live credentials sit in the
+   login Keychain; when the orchestrator's own sandbox blocks Keychain access (Codex's sandbox
+   does), `claude` falls back to a possibly stale credentials file and reports `loggedIn: false`
+   even though the login is valid. Re-run the check — and the dispatch itself — with that sandbox
+   escalated or outside it before concluding the CLI is unauthenticated.
 3. The target repository is the directory passed with `--cd`.
 4. On Linux/WSL2, Claude's sandbox dependencies are installed. The normal relay profile is
    configured to fail when the sandbox is unavailable instead of silently running shell commands

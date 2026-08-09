@@ -29,6 +29,7 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 | --- | --- |
 | `--brief <file>` | Brief path. Omit it to read stdin. The exact text is then sent to Claude on stdin, never argv. |
 | `--cd <dir>` | Child process cwd and target working root (default: current directory). |
+| `--lane <name>` | Fleet lane from `delegate-setup` config. Applies that lane's dials; fails if the lane's `implementer` is not this relay. Explicit dial flags win. |
 | `--out-dir <dir>` | Artifact directory (default: a fresh directory under the system temp directory). |
 | `--timeout <dur>` | Relay watchdog, such as `30m`, `90s`, or `2h` (default: off). |
 | `--model <name>` | Claude model alias or full name (default: Claude's configured choice). The relay does not pin a model version. |

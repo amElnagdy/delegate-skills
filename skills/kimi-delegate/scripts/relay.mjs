@@ -38,6 +38,7 @@
  * Options:
  *   --brief <file>          Path to the brief. If omitted, read it from stdin.
  *   --cd <dir>              Working root for Kimi (default: current directory).
+ *   --lane <name>           Fleet lane from delegate-setup config (dials apply; explicit flags win).
  *   --model <alias>         Kimi model alias (default: Kimi's own default_model).
  *   --session <id>          Resume a specific Kimi session; send only the delta brief.
  *   --resume-last           Resume the most recent Kimi session for this cwd;
@@ -64,13 +65,54 @@
  * or kimi_unavailable.
  */
 
-import { spawn, execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync, readFileSync, existsSync, appendFileSync } from "node:fs";
-import { join, resolve, basename } from "node:path";
+import {spawn, execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, writeFileSync, renameSync, readFileSync, existsSync, appendFileSync } from "node:fs";
+import {join, resolve, basename, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { constants, tmpdir } from "node:os";
 import { StringDecoder } from "node:string_decoder";
 
 const DEFAULT_TIMEOUT = "30m";
+const VERSION_PROBE_TIMEOUT_MS = 10_000;
+const MAX_TIMER_MS = 2_147_483_647;
+
+const IMPLEMENTER_KEY = "kimi";
+
+function applyFleetLane(opts, flagged) {
+  if (!opts.lane) return;
+  const script = join(dirname(fileURLToPath(import.meta.url)), "../../delegate-setup/scripts/lane.mjs");
+  if (!existsSync(script)) {
+    fail("--lane requires the delegate-setup skill installed beside this relay");
+  }
+  const r = spawnSync(
+    process.execPath,
+    [script, "resolve", "--cwd", opts.cd, "--lane", opts.lane, "--implementer", IMPLEMENTER_KEY],
+    { encoding: "utf8", env: process.env },
+  );
+  if (r.error) fail(`lane resolve failed: ${r.error.message}`);
+  if (r.status !== 0) {
+    fail((r.stderr || "lane resolve failed").trim().replace(/^lane\.mjs:\s*/, ""));
+  }
+  let resolved;
+  try {
+    const lines = (r.stdout || "").trim().split("\n").filter(Boolean);
+    resolved = JSON.parse(lines[lines.length - 1]);
+  } catch {
+    fail("lane resolve returned invalid JSON");
+  }
+  opts.laneSource = resolved.source;
+  for (const [field, value] of Object.entries(resolved.dials || {})) {
+    if (flagged.has(field)) continue;
+    if (field === "autonomy" && (flagged.has("autonomy") || flagged.has("sandbox") || flagged.has("readOnly"))) continue;
+    if (field === "agent" && (flagged.has("agent") || flagged.has("readOnly"))) continue;
+    if (field === "sandbox" && (flagged.has("sandbox") || flagged.has("readOnly"))) continue;
+    if (field === "permissionMode" && (flagged.has("permissionMode") || flagged.has("readOnly"))) continue;
+    if (field === "planOnly" && (flagged.has("planOnly") || flagged.has("readOnly"))) continue;
+    if (field === "readOnly" && flagged.has("readOnly")) continue;
+    if (field === "force" && flagged.has("force")) continue;
+    opts[field] = value;
+  }
+}
 
 function fail(message, code = 2) {
   process.stderr.write(`relay: ${message}\n`);
@@ -78,7 +120,10 @@ function fail(message, code = 2) {
 }
 
 function parseArgs(argv) {
+  const flagged = new Set();
   const opts = {
+    lane: null,
+    laneSource: null,
     brief: null,
     cd: process.cwd(),
     model: null,
@@ -104,16 +149,18 @@ function parseArgs(argv) {
         break;
       case "--brief": opts.brief = next(); break;
       case "--cd": opts.cd = resolve(next()); break;
-      case "--model": opts.model = next(); break;
+      case "--lane": opts.lane = next(); break;
+      case "--model": opts.model = next(); flagged.add("model"); break;
       case "--session": opts.session = next(); break;
       case "--resume-last": opts.resumeLast = true; break;
       case "--add-dir": opts.addDirs.push(next()); break;
-      case "--timeout": opts.timeout = next(); break;
+      case "--timeout": opts.timeout = next(); flagged.add("timeout"); break;
       case "--out-dir": opts.outDir = resolve(next()); break;
       default:
         fail(`unknown option: ${arg}`);
     }
   }
+  applyFleetLane(opts, flagged);
   if (opts.resumeLast && opts.session) {
     fail("--resume-last and --session are mutually exclusive; pass only one");
   }
@@ -124,7 +171,7 @@ function parseArgs(argv) {
   // The watchdog is relay-only (kimi has no timeout flag), so a malformed
   // --timeout must fail loudly here - a silent 30m fallback would be wrong.
   if (parseDuration(opts.timeout) === null) {
-    fail(`--timeout "${opts.timeout}" is not a duration; use h/m/s strings like 30m, 90s, or 1h30m`);
+    fail(`--timeout "${opts.timeout}" is invalid or too long; use a positive h/m/s duration no longer than about 24 days`);
   }
   return opts;
 }
@@ -155,49 +202,81 @@ function readBrief(opts) {
 }
 
 function killChild(child, signal = "SIGTERM") {
-  // The kill must reach the whole process family, not just the CLI — a tool subprocess left
-  // running would keep editing after the relay reports timeout/aborted. On Windows Node can't
-  // kill a process family without a Job Object, so kill the tree by pid with the OS tool
-  // (/t includes descendants, /f forces it — the tree-kill/npm idiom).
+  if (!child || !child.pid) return;
   if (process.platform === "win32") {
-    if (signal !== "SIGTERM") return; // the first taskkill /f already felled the whole tree
-    // stderr is inherited so a real taskkill failure (e.g. access denied) is visible to the operator;
-    // its non-zero exit when the tree is already gone is the expected race and carries nothing to do.
-    try { execFileSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: ["ignore", "ignore", "inherit"] }); }
-    catch { /* already gone — nothing left to kill */ }
-  } else {
-    // On POSIX the child leads its own process group (the detached launch), so the negative-pid
-    // signal reaches every descendant; fall back to the lone pid if the group is already gone.
-    try { process.kill(-child.pid, signal); } catch { try { child.kill(signal); } catch { /* already gone */ } }
+    if (signal !== "SIGTERM") return;
+    try {
+      execFileSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
+        stdio: ["ignore", "ignore", "inherit"],
+      });
+    } catch {
+      // The process tree already exited.
+    }
+    return;
+  }
+  try {
+    process.kill(-child.pid, signal);
+  } catch {
+    try {
+      child.kill(signal);
+    } catch {
+      // The process group already exited.
+    }
   }
 }
 
-function kimiVersion() {
+function versionProbeTimeout(opts) {
+  // The watchdog is only armed once kimi is running, so the preflight needs a bound of its
+  // own: a `kimi --version` that never returns would wedge the relay here, before any
+  // result.json exists, and --timeout could not reach it.
+  return Math.min(parseDuration(opts.timeout), VERSION_PROBE_TIMEOUT_MS);
+}
+
+function kimiVersion(probeTimeoutMs) {
   try {
-    const out = execFileSync("kimi", ["--version"], { encoding: "utf8" }).trim();
-    return out || "unknown";
+    const out = execFileSync("kimi", ["--version"], {
+      encoding: "utf8",
+      timeout: probeTimeoutMs,
+      killSignal: "SIGKILL",
+    }).trim();
+    return { version: out || "unknown", error: null };
   } catch (err) {
     // Only a missing binary means "unavailable"; any other version-probe
     // failure must not masquerade as exit 127.
-    if (err && err.code === "ENOENT") return null;
-    return "unknown";
+    if (err && err.code === "ENOENT") return { version: null, error: null };
+    // A hung probe we killed, or a real non-zero exit, means kimi is installed but not
+    // usable. Dispatching anyway would send the brief to a CLI already known to be broken.
+    return { version: null, error: err };
   }
 }
 
 function parseDuration(duration) {
-  // Whole-string match: "1mtypo" must be rejected, not read as one minute.
   const match = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/.exec(duration);
   if (!match || (!match[1] && !match[2] && !match[3])) return null;
-  return (Number(match[1] || 0) * 3600 + Number(match[2] || 0) * 60 + Number(match[3] || 0)) * 1000;
+  try {
+    const seconds =
+      BigInt(match[1] || 0) * 3600n +
+      BigInt(match[2] || 0) * 60n +
+      BigInt(match[3] || 0);
+    const milliseconds = seconds * 1000n;
+    if (milliseconds <= 0n || milliseconds > BigInt(MAX_TIMER_MS)) return null;
+    return Number(milliseconds);
+  } catch {
+    return null;
+  }
 }
 
 function gitTouchedFiles(cwd) {
-  // null (not []) when git cannot report - git missing, or a non-repo run - so
-  // the caller can tell "git unavailable" apart from "Kimi changed nothing."
-  // [] means git ran and the working tree is clean.
   try {
-    const out = execFileSync("git", ["status", "--porcelain"], { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
-    return out.split("\n").map((line) => line.trimEnd()).filter(Boolean);
+    const output = execFileSync("git", ["status", "--porcelain"], {
+      cwd,
+      encoding: "utf8",
+      timeout: 10_000,
+      killSignal: "SIGKILL",
+      stdio: ["ignore", "pipe", "ignore"],
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    return output.split("\n").map((line) => line.trimEnd()).filter(Boolean);
   } catch {
     return null;
   }
@@ -282,6 +361,8 @@ function makeResultWriter(opts, version, run) {
   return (extra) => {
     const result = {
       schema: "delegate-relay.result.v1",
+      lane: opts.lane,
+      laneSource: opts.laneSource,
       tool: "kimi",
       workdir: opts.cd,
       model: opts.model,
@@ -295,7 +376,11 @@ function makeResultWriter(opts, version, run) {
       stderrPath: run.stderrPath,
       ...extra,
     };
-    writeFileSync(run.resultPath, `${JSON.stringify(result, null, 2)}\n`, "utf8");
+    // Publish atomically so a polling orchestrator never reads a half-written file
+    // (same idiom as claude-delegate's writeJsonAtomic and qoder-delegate).
+    const temporary = `${run.resultPath}.${process.pid}.tmp`;
+    writeFileSync(temporary, `${JSON.stringify(result, null, 2)}\n`, "utf8");
+    renameSync(temporary, run.resultPath);
     return result;
   };
 }
@@ -312,6 +397,28 @@ function reportUnavailable(writeResult, resultPath) {
   printSummary(result, resultPath);
   process.stderr.write("relay: `kimi` not found on PATH. Install Kimi Code and run `kimi login`.\n");
   process.exit(127);
+}
+
+function reportVersionFailure(opts, writeResult, run, error, probeTimeoutMs) {
+  const timedOut = error?.code === "ETIMEDOUT";
+  const stderr = String(error?.stderr || "").trim();
+  if (stderr) writeFileSync(run.stderrPath, `${stderr}\n`, "utf8");
+  const message = timedOut
+    ? `kimi --version preflight timed out after ${probeTimeoutMs}ms; Kimi was not dispatched`
+    : `kimi --version preflight failed${Number.isInteger(error?.status) ? ` with exit ${error.status}` : ""}; Kimi was not dispatched`;
+  const result = writeResult({
+    status: timedOut ? "timeout" : "failed",
+    exitCode: timedOut ? 124 : Number.isInteger(error?.status) ? error.status : 1,
+    signal: null,
+    sessionId: null,
+    finalMessage: "",
+    touchedFiles: gitTouchedFiles(opts.cd),
+    stderrTail: stderr ? stderr.split("\n").slice(-20) : [],
+    error: message,
+  });
+  printSummary(result, run.resultPath);
+  process.stderr.write(`relay: ${message}\n`);
+  process.exit(result.exitCode);
 }
 
 function dispatchToKimi(opts, brief, run, writeResult) {
@@ -470,11 +577,18 @@ function main() {
     fail(`brief is ${Math.round(briefBytes / 1024)}KB; kimi passes the prompt as a CLI argument, which the OS caps (~128KB on Linux). Trim it, or have kimi read large context from the workspace instead of inlining it.`);
   }
 
-  const version = kimiVersion();
+  // Prepare the run dir before probing, so a preflight that times out or fails still has
+  // somewhere to publish result.json rather than exiting silently.
   const run = prepareRunDir(opts, brief);
-  const writeResult = makeResultWriter(opts, version, run);
-  if (!version) {
+  const probeTimeoutMs = versionProbeTimeout(opts);
+  const probe = kimiVersion(probeTimeoutMs);
+  const writeResult = makeResultWriter(opts, probe.version, run);
+  if (!probe.version && !probe.error) {
     reportUnavailable(writeResult, run.resultPath);
+    return;
+  }
+  if (probe.error) {
+    reportVersionFailure(opts, writeResult, run, probe.error, probeTimeoutMs);
     return;
   }
   dispatchToKimi(opts, brief, run, writeResult);

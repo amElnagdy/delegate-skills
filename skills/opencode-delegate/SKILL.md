@@ -10,7 +10,7 @@ description: >-
 license: MIT
 compatibility: Requires the `opencode` CLI installed and authenticated, Node 18+, and git. The orchestrating agent must be able to run shell commands and read files. Shell examples assume bash/zsh (macOS/Linux, or Git Bash/WSL on Windows).
 metadata:
-  version: 0.1.0
+  version: 0.4.2
 ---
 
 # OpenCode Delegate
@@ -42,9 +42,9 @@ other orchestrators as designed-for, not yet proven.)
 
 ## Choose the implementer model
 
-OpenCode has **no safe default** — a bare `opencode run` errors — so the relay requires `--model` on
-every fresh run (a resumed run inherits its session's model). Naming the model is the one decision a
-single-model backend like codex-delegate never had, and it has two owners:
+OpenCode has **no safe default** — a bare `opencode run` errors — so a fresh run needs a model via
+`--model` or a fleet `--lane` that sets one (a resumed run inherits its session's model). Naming the
+model is the one decision a single-model backend like codex-delegate never had, and it has two owners:
 
 - **The human owns which models are allowed.** `opencode models` lists hundreds of entries, most billed
   per token (OpenRouter and the like); only the human knows which are their flat-rate subscriptions, and
@@ -83,7 +83,8 @@ substitute the directory above it.)
 
 ```bash
 node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --model <provider/model> --cd /path/to/repo
-# --model is required on a fresh run (see "Choose the implementer model" above)
+# --model (or a --lane that sets model) is required on a fresh run
+# fleet lane from delegate-setup:           add --lane <name>  (dials apply; flags still win)
 # read-only (review/diagnosis, no edits):   add --read-only   (uses the plan agent)
 # continue the previous OpenCode session:   add --resume-last  (delta brief only; keeps the model)
 # hard time limit (watchdog):               add --timeout 2h  (default: off; implementation runs routinely need 1-2h)

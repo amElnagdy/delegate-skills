@@ -29,6 +29,7 @@ Options:
 | --- | --- |
 | `--brief <file>` | The brief. Omit it to read the brief from stdin before passing it to `agy --print`. |
 | `--cd <dir>` | Working root for Antigravity (default: current directory). |
+| `--lane <name>` | Fleet lane from `delegate-setup` config. Applies that lane's dials; fails if the lane's `implementer` is not this relay. Explicit dial flags win. |
 | `--model <name>` | Antigravity model label. Optional; a fresh run can use Antigravity's configured default. |
 | `--project <id>` | Use an existing Antigravity project. |
 | `--new-project` | Force a fresh Antigravity project. This is the default for fresh dispatches. |
@@ -36,7 +37,8 @@ Options:
 | `--conversation <id>` | Continue a specific Antigravity conversation; send only the delta brief. |
 | `--sandbox` | Enable Antigravity's terminal sandbox for the run. |
 | `--dangerously-skip-permissions` | Pass Antigravity's permission-bypass flag. Never use this unless the human explicitly accepts it. |
-| `--print-timeout <duration>` | Timeout for print mode (default: `30m`). |
+| `--print-timeout <duration>` | Timeout agy itself applies to print mode (default: `30m`). |
+| `--timeout <dur>` | Relay-side watchdog (e.g. `30m`); overrides the default of `--print-timeout` plus a 60s grace. On expiry the agy process tree is killed and `result.json` gets `status: "timeout"`. Set it explicitly when agy may hang past its own print timeout. Malformed, zero, and out-of-range durations are rejected; the maximum is `596h31m23s`. |
 | `--add-dir <dir>` | Add an extra workspace directory. Repeatable; relative paths resolve against `--cd`. Fresh runs always add the `--cd` repo (absolute path) as a workspace dir. Edits inside extra workspaces are not reported in `touchedFiles`. |
 | `--out-dir <dir>` | Where artifacts go (default: a fresh dir under the system temp dir). |
 
@@ -86,9 +88,9 @@ process has exited and `result.json` is written.
 
 - **`status: agy_unavailable` (exit 127):** `agy` is not on PATH. Install the Antigravity CLI and run
   its first-launch setup, then re-dispatch.
-- **`status: timeout`:** the `--print-timeout` watchdog killed the run. The working tree may hold a
-  half-applied change — inspect it before deciding between a longer `--print-timeout`, a smaller
-  brief, or a resume.
+- **`status: timeout`:** the relay watchdog killed the run. Inspect `error` to see whether the selected
+  limit was explicit `--timeout` or the derived `--print-timeout` plus 60s grace. The working tree may
+  hold a half-applied change — inspect it before changing that limit, reducing the brief, or resuming.
 - **`status: aborted`:** the relay itself was killed (its parent's timeout, a stopped task, a
   closed terminal) and forwarded the kill to agy. The result is written before the relay exits;
   inspect the working tree before re-dispatching. On native Windows a hard kill of the relay is

@@ -25,6 +25,7 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 | --- | --- |
 | `--brief <file>` | Brief path; omit to read stdin. |
 | `--cd <dir>` | Primary working root and child cwd; defaults to current directory. |
+| `--lane <name>` | Fleet lane from `delegate-setup` config. Applies that lane's dials; fails if the lane's `implementer` is not this relay. Explicit dial flags win. |
 | `--model <name>` | Exact live model value from `qodercli --list-models`; omit for Qoder's default. |
 | `--context-window <n>` | Positive integer requested for models that support explicit sizing. |
 | `--resume <id>` | Resume one Qoder session with a delta brief. |

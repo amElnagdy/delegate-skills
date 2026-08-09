@@ -34,18 +34,28 @@ Options:
 | --- | --- |
 | `--brief <file>` | The brief. Omit it to read the brief from stdin (`node relay.mjs … < brief.txt`). |
 | `--cd <dir>` | Working root for Codex (default: current directory). |
+| `--lane <name>` | Fleet lane from `delegate-setup` config. Applies that lane's dials; fails if the lane's `implementer` is not this relay. Explicit dial flags win. |
 | `--model <name>` | Codex model (default: Codex's own configured default). |
 | `--effort <level>` | Reasoning effort, passed to Codex as `-c model_reasoning_effort=<level>` (default: Codex's own configured default). The relay accepts a bare token; Codex and the model own the supported levels. Applies to fresh and resumed runs. |
 | `--sandbox <mode>` | `read-only` \| `workspace-write` \| `danger-full-access` (default: `workspace-write`). |
 | `--read-only` | Shortcut for `--sandbox read-only` — review/diagnosis with no edits. |
-| `--resume-last` | Continue the most recent Codex session; send only the delta brief (see review-and-land). |
-| `--clean-env` | Launch Codex (and the version preflight) with a minimal environment — PATH, HOME, locale, temp, `CODEX_HOME` — instead of the caller's whole shell profile, so unrelated credentials never reach the implementer. Also passes `-c mcp_servers={}` for the run: configured MCP servers burn tokens and can hang at startup under a minimal environment. |
+| `--resume-last` | Continue the most recent Codex session; send only the delta brief (see review-and-land). "Most recent" is global, so an unrelated Codex run can steal it — prefer `--session`. |
+| `--session <id>` | Continue one specific thread by id (the `threadId` from a prior `result.json`); send only the delta brief. Mutually exclusive with `--resume-last`; an empty id is rejected. |
+| `--clean-env` | Pass only runtime basics (`PATH`, home, locale, temp, `CODEX_HOME`, and Windows equivalents) to Codex and its version preflight. This changes inherited variables only; it does not protect files or other same-user secrets. |
+| `--keep-env <name>` | Keep one additional variable under `--clean-env`; repeat for each required environment-backed auth, custom-provider credential, proxy, certificate, or MCP variable. The name must be set and use portable environment-variable syntax. |
 | `--skip-git-repo-check` | Allow running outside a git repo. |
 | `--timeout <dur>` | Relay-side watchdog (e.g. `30m`, `2h`); on expiry the child is killed and `result.json` gets `status: "timeout"`. Off by default. |
 | `--out-dir <dir>` | Where artifacts go (default: a fresh dir under the system temp dir). |
 
 Artifacts default to the system temp dir on purpose: the repo under review stays clean, so the
 touched-files report shows only Codex's edits and nothing of the helper's own.
+
+`--clean-env` is not a broader security boundary: Codex can still access files and other same-user
+secrets available through `HOME`, `CODEX_HOME`, OS facilities, and the selected sandbox. File- or
+OS-backed auth and normal configuration still load, but environment-backed auth (`CODEX_API_KEY`,
+`OPENAI_API_KEY`, or `CODEX_ACCESS_TOKEN`) and provider, proxy, certificate, or MCP settings that
+reference a stripped variable need that variable named with `--keep-env`. The same filtered
+environment is used for preflight and dispatch.
 
 ## The result
 
@@ -56,11 +66,11 @@ touched-files report shows only Codex's edits and nothing of the helper's own.
 - `exitCode` — mirrors Codex's exit code; `128` plus the signal number if the child was killed; `127` if `codex` isn't on PATH; on a `timeout` the relay forces a non-zero code even when the child exited `0` after the watchdog's SIGTERM
 - `signal` — the signal that killed the child, otherwise `null`
 - `codexVersion` — the binary that actually ran
-- `threadId` — feed this to a later `codex exec resume <id>` (or use `--resume-last`)
+- `threadId` — feed this to a later `--session <id>` (exact thread; preferred) or `--resume-last` (global "most recent", which another Codex run can steal)
 - `finalMessage` — Codex's own final report (the `<structured_output_contract>` you asked for)
 - `touchedFiles` — `git status --porcelain` lines in the working root: your review starting point. `null` (not `[]`) when git can't report — `git` missing, or a non-repo run under `--skip-git-repo-check`; `[]` means git ran and the tree is clean
 - `briefPath` / `eventsPath` / `finalPath` — the exact brief relay sent, the raw JSONL event stream, and the final-message file
-- `workdir`, `sandbox`, `model`, `effort`, `resumeLast`, `startedAt`, `finishedAt`
+- `workdir`, `sandbox`, `model`, `effort`, `resumeLast`, `session`, `cleanEnv`, `keepEnv`, `startedAt`, `finishedAt` — `sandbox` is the applied mode, or a note that Codex used its active config on an unqualified resume; `session` is the explicit session id, or `null` for fresh and `--resume-last` runs; `keepEnv` records names only, never values
 - `stderrTail` — last ~20 stderr lines; present on every run that did not complete (`failed`, `timeout`, `aborted`), absent on `completed`, `codex_unavailable`, and launch failures
 - `error` — present on a launch failure, and on `timeout` and `aborted` runs
 
@@ -87,6 +97,10 @@ process has exited and `result.json` is written — not when a status line says 
 
 - **`status: codex_unavailable` (exit 127):** `codex` isn't on PATH or isn't found. Install
   (`npm i -g @openai/codex`) and `codex login`, then re-dispatch.
+- **an `error` mentioning `version preflight` (`failed`, or `timeout` at exit 124):** the bounded
+  `codex --version` probe exited non-zero or hung past its cap (10s, or `--timeout` when shorter), so
+  codex was never dispatched; only the relay's own artifacts may already exist under `--out-dir`.
+  Check the install by running `codex --version` yourself.
 - **`status: failed`:** read `result.json`'s `stderrTail` and the tail of `eventsPath` for the cause.
   Common causes: an auth lapse, an invalid `--model` or unsupported `--effort`, or a sandbox that
   blocked something the task needed. Fix the cause and re-dispatch; don't paper over it by doing the
@@ -122,11 +136,12 @@ Under the hood the helper runs roughly:
 
 ```bash
 codex exec --json -o <final.txt> -s workspace-write [-m model] [-c model_reasoning_effort=<level>] - < brief.txt   # fresh run
-codex exec resume --last --json -o <final.txt> [-m model] [-c model_reasoning_effort=<level>] - < delta-brief.txt  # resume (no -s/-C)
+codex exec [-s mode] resume --last --json -o <final.txt> [-m model] [-c model_reasoning_effort=<level>] - < delta-brief.txt  # resume
 ```
 
-`resume` deliberately gets no `-s`/`-C` — it inherits the original session's sandbox and working root —
-which is why the helper sets the child process's working directory instead.
+On resume, the helper places an explicit `--sandbox`/`--read-only` or fleet-lane sandbox before the
+`resume` subcommand so Codex applies it to the resumed turn. Without one, Codex uses its active config.
+The helper sets the child process's working directory instead of forwarding `-C`.
 
 Two alternatives exist if you ever want them, but the helper is the recommended path:
 

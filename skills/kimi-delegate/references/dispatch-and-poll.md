@@ -27,6 +27,7 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 | --- | --- |
 | `--brief <file>` | Brief path. Omit it to read the brief from stdin. |
 | `--cd <dir>` | Working root and child process cwd (default: current directory). |
+| `--lane <name>` | Fleet lane from `delegate-setup` config. Applies that lane's dials; fails if the lane's `implementer` is not this relay. Explicit dial flags win. |
 | `--model <alias>` | Kimi model alias for this run (default: Kimi's own `default_model`). |
 | `--session <id>` | Resume a specific Kimi session; send only the delta brief. |
 | `--resume-last` | Resume the most recent Kimi session for this cwd (`kimi --continue`); send only the delta brief. |
@@ -84,6 +85,10 @@ A pre-run usage error exits 2 and writes no result. A missing `kimi` exits 127 a
 
 - **`status: "kimi_unavailable"` (exit 127):** install the native Kimi Code CLI, authenticate with
   `kimi login`, and re-dispatch.
+- **an `error` mentioning `version preflight` (`failed`, or `timeout` at exit 124):** the bounded
+  `kimi --version` probe exited non-zero or hung past its cap (10s, or `--timeout` when shorter), so
+  kimi was never dispatched; only the relay's own artifacts may already exist under `--out-dir`.
+  Check the install by running `kimi --version` yourself.
 - **`status: "failed"`:** read `stderrTail`, `stderrPath`, and the tail of `events.jsonl`. A common
   cause is an unconfigured model alias: `error: failed to run prompt: config.invalid: Model "<x>" is not configured in config.toml…`
 - **`status: "aborted"`:** the relay itself was killed (its parent's timeout, a stopped task, a

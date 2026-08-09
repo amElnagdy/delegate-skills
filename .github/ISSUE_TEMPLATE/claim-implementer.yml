@@ -1,0 +1,56 @@
+name: Claim an implementer
+description: Say you are building a delegate skill for a CLI, before you write it.
+title: "claim: <cli>-delegate"
+labels: ["implementer"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Read the [open claims](https://github.com/amElnagdy/delegate-skills/issues?q=is%3Aissue+label%3Aimplementer) and the
+        [open pull requests](https://github.com/amElnagdy/delegate-skills/pulls) first. A claim is a public note that you started — not an
+        assignment, not exclusive, and it does not expire on a schedule. The merge checklist is in
+        [CONTRIBUTING.md](https://github.com/amElnagdy/delegate-skills/blob/master/CONTRIBUTING.md).
+  - type: input
+    id: cli
+    attributes:
+      label: CLI
+      description: The binary name and where it comes from.
+      placeholder: "`foo` — https://github.com/example/foo"
+    validations:
+      required: true
+  - type: textarea
+    id: noninteractive
+    attributes:
+      label: Non-interactive mode
+      description: The exact command that runs a task to completion with no TUI and no prompts.
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Machine-readable output
+      description: >-
+        What a relay can parse — structured stream, final report, session id, usage. Paste a few
+        lines of real output if you have them.
+    validations:
+      required: true
+  - type: textarea
+    id: autonomy
+    attributes:
+      label: Autonomy
+      description: >-
+        How the run's permission or sandbox posture is set on the command line. If it cannot be set,
+        say so — measured-after-the-fact is an acceptable answer, silence is not.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checked
+    attributes:
+      label: Before you start
+      options:
+        - label: No open claim or pull request already covers this CLI.
+          required: true
+        - label: A separate CLI edits a real working tree, so the diff is the deliverable.
+          required: true
+        - label: I read the merge checklist in CONTRIBUTING.md.
+          required: true

@@ -51,6 +51,7 @@
  * Options:
  *   --brief <file>                    Brief path. Omit to read the brief from stdin.
  *   --cd <dir>                        Child cwd (default: current directory).
+ *   --lane <name>           Fleet lane from delegate-setup config (dials apply; explicit flags win).
  *   --out-dir <dir>                   Artifact directory (default: system temp).
  *   --timeout <dur>                   Relay watchdog; off by default. Use h/m/s,
  *                                     such as 30m, 90s, or 1h30m.
@@ -101,7 +102,8 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { basename, delimiter, join, resolve } from "node:path";
+import {basename, delimiter, join, resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { constants as osConstants, tmpdir } from "node:os";
 import { StringDecoder } from "node:string_decoder";
 
@@ -111,6 +113,49 @@ const MAX_TIMER_MS = 2_147_483_647;
 const EFFORT_LEVELS = new Set(["low", "medium", "high", "xhigh", "max", "ultracode"]);
 const SAFE_MODEL = /^[A-Za-z0-9][A-Za-z0-9._:@\/\[\]-]*$/;
 const SAFE_SESSION = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+
+const IMPLEMENTER_KEY = "claude";
+
+function applyFleetLane(opts, flagged) {
+  if (!opts.lane) return;
+  const script = join(dirname(fileURLToPath(import.meta.url)), "../../delegate-setup/scripts/lane.mjs");
+  if (!existsSync(script)) {
+    fail("--lane requires the delegate-setup skill installed beside this relay");
+  }
+  const r = spawnSync(
+    process.execPath,
+    [script, "resolve", "--cwd", opts.cd, "--lane", opts.lane, "--implementer", IMPLEMENTER_KEY],
+    { encoding: "utf8", env: process.env },
+  );
+  if (r.error) fail(`lane resolve failed: ${r.error.message}`);
+  if (r.status !== 0) {
+    fail((r.stderr || "lane resolve failed").trim().replace(/^lane\.mjs:\s*/, ""));
+  }
+  let resolved;
+  try {
+    const lines = (r.stdout || "").trim().split("\n").filter(Boolean);
+    resolved = JSON.parse(lines[lines.length - 1]);
+  } catch {
+    fail("lane resolve returned invalid JSON");
+  }
+  opts.laneSource = resolved.source;
+  for (const [field, value] of Object.entries(resolved.dials || {})) {
+    if (flagged.has(field)) continue;
+    if (field === "autonomy" && (flagged.has("autonomy") || flagged.has("sandbox") || flagged.has("readOnly"))) continue;
+    if (field === "agent" && (flagged.has("agent") || flagged.has("readOnly"))) continue;
+    if (field === "sandbox" && (flagged.has("sandbox") || flagged.has("readOnly"))) continue;
+    if (field === "permissionMode" && (flagged.has("permissionMode") || flagged.has("readOnly"))) continue;
+    if (field === "planOnly" && (flagged.has("planOnly") || flagged.has("readOnly"))) continue;
+    if (
+      field === "readOnly" &&
+      (flagged.has("readOnly") || flagged.has("dangerouslySkipPermissions"))
+    ) {
+      continue;
+    }
+    if (field === "force" && flagged.has("force")) continue;
+    opts[field] = value;
+  }
+}
 
 function fail(message, code = 2) {
   process.stderr.write(`relay: ${message}\n`);
@@ -134,7 +179,10 @@ function parseDuration(duration) {
 }
 
 function parseArgs(argv) {
+  const flagged = new Set();
   const opts = {
+    lane: null,
+    laneSource: null,
     brief: null,
     cd: process.cwd(),
     outDir: null,
@@ -166,20 +214,25 @@ function parseArgs(argv) {
         break;
       case "--brief": opts.brief = next(); break;
       case "--cd": opts.cd = resolve(next()); break;
+      case "--lane": opts.lane = next(); break;
       case "--out-dir": opts.outDir = resolve(next()); break;
-      case "--timeout": opts.timeout = next(); break;
-      case "--model": opts.model = next(); break;
-      case "--effort": opts.effort = next(); break;
+      case "--timeout": opts.timeout = next(); flagged.add("timeout"); break;
+      case "--model": opts.model = next(); flagged.add("model"); break;
+      case "--effort": opts.effort = next(); flagged.add("effort"); break;
       case "--max-turns": opts.maxTurns = next(); break;
       case "--max-budget-usd": opts.maxBudgetUsd = next(); break;
       case "--resume-last": opts.resumeLast = true; break;
       case "--session": opts.session = next(); break;
-      case "--read-only": opts.readOnly = true; break;
-      case "--dangerously-skip-permissions": opts.dangerouslySkipPermissions = true; break;
+      case "--read-only": opts.readOnly = true; flagged.add("readOnly"); break;
+      case "--dangerously-skip-permissions":
+        opts.dangerouslySkipPermissions = true;
+        flagged.add("dangerouslySkipPermissions");
+        break;
       default:
         fail(`unknown option: ${arg}`);
     }
   }
+  applyFleetLane(opts, flagged);
 
   if (opts.resumeLast && opts.session) {
     fail("--resume-last and --session are mutually exclusive; pass only one");
@@ -580,6 +633,8 @@ function gitTouchedFiles(cwd) {
     const output = execFileSync("git", ["status", "--porcelain"], {
       cwd,
       encoding: "utf8",
+      timeout: 10_000,
+      killSignal: "SIGKILL",
       stdio: ["ignore", "pipe", "ignore"],
       maxBuffer: 64 * 1024 * 1024,
     });
@@ -615,6 +670,8 @@ function makeResultWriter(opts, version, run, state, beforeTree) {
   return (extra) => {
     const result = {
       schema: SCHEMA,
+      lane: opts.lane,
+      laneSource: opts.laneSource,
       tool: "claude",
       workdir: opts.cd,
       model: opts.model,
