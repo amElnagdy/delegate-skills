@@ -45,6 +45,11 @@ async function runScenario(h, skill, scenario) {
     mkdirSync(join(workDir, "loose"));
     writeFileSync(join(workDir, "loose", "existing.txt"), "pre-existing\n");
   }
+  if (scenario.artifactEndpointRename) {
+    writeFileSync(join(workDir, "source.txt"), "tracked source\n");
+    runGit(workDir, ["add", "source.txt"]);
+    runGit(workDir, ["-c", "user.name=Smoke", "-c", "user.email=smoke@example.invalid", "commit", "-qm", "fixture"]);
+  }
   const outDir = scenario.artifactsInside
     ? workDir
     : join(h.scratch, `out-${skill}-${scenario.name}`);
@@ -54,6 +59,10 @@ async function runScenario(h, skill, scenario) {
       : scenario.dirty ? "claude-read-only-append" : "claude-read-only-clean",
     ...(skill === "grok" && scenario.dirty ? { SMOKE_APPEND_FILE: "already-dirty.txt" } : {}),
     ...(scenario.untrackedDirectory ? { SMOKE_WRITE_FILE: join("loose", "new.txt") } : {}),
+    ...(scenario.artifactEndpointRename ? {
+      SMOKE_GIT_RENAME_FROM: "source.txt",
+      SMOKE_GIT_RENAME_TO: "final.txt",
+    } : {}),
   });
   const outcome = await waitFor(child);
   h.check(`${skill} ${scenario.name}: relay close wait did not time out`, outcome.exited);
@@ -75,6 +84,7 @@ export async function runReadOnlyTripwire(h) {
     { name: "proof-over-unknown", dirty: true, unknown: true, expected: true },
     { name: "new-file-in-untracked-directory", untrackedDirectory: true, expected: true },
     { name: "relay-artifacts", artifactsInside: true, expected: false },
+    { name: "artifact-endpoint-rename", artifactsInside: true, artifactEndpointRename: true, expected: true },
     { name: "relay-artifacts-plus-write", artifactsInside: true, dirty: true, expected: true },
   ];
   for (const skill of ["claude", "grok"]) {
