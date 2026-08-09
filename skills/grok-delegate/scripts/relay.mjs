@@ -395,6 +395,10 @@ function dirtyPaths(cwd) {
   return paths;
 }
 
+function asciiFold(value) {
+  return value.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
+}
+
 function canonicalFilePath(path) {
   const absolute = resolve(path);
   let parent;
@@ -405,8 +409,7 @@ function canonicalFilePath(path) {
   try {
     const entries = readdirSync(parent);
     if (entries.includes(leaf)) return canonical;
-    const fold = (value) => value.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
-    const matches = entries.filter((entry) => fold(entry) === fold(leaf));
+    const matches = entries.filter((entry) => asciiFold(entry) === asciiFold(leaf));
     return join(parent, matches.length === 1 ? matches[0] : leaf);
   } catch {
     return canonical;
@@ -420,17 +423,23 @@ function gitPathKey(root, path) {
   return process.platform === "win32" ? key.replaceAll("\\", "/") : key;
 }
 
+function gitPathIsExcluded(root, path, excluded, foldedExcluded) {
+  return excluded.has(path) ||
+    (foldedExcluded.has(asciiFold(path)) && excluded.has(gitPathKey(root, join(root, path))));
+}
+
 function gitTripwireState(cwd, excludedPaths) {
   const root = gitRepoRoot(cwd);
   if (root === null) return null;
   const entries = gitStatusEntries(cwd);
   if (entries === null) return null;
   const excluded = new Set(excludedPaths.map((path) => gitPathKey(root, path)));
+  const foldedExcluded = new Set([...excluded].map(asciiFold));
   return entries.flatMap((entry) => [
     [entry.status, "path", entry.path],
     ...(entry.origin === null ? [] : [[entry.status.replace(/[^RC]/g, " "), "origin", entry.origin]]),
   ]
-    .filter(([, , path]) => !excluded.has(path)));
+    .filter(([, , path]) => !gitPathIsExcluded(root, path, excluded, foldedExcluded)));
 }
 
 function pathFingerprint(absolutePath) {
@@ -525,9 +534,10 @@ function fingerprintDirtyPaths(cwd, excludedPaths) {
   const paths = dirtyPaths(cwd);
   if (paths === null) return null;
   const excluded = new Set(excludedPaths.map((path) => gitPathKey(root, path)));
+  const foldedExcluded = new Set([...excluded].map(asciiFold));
   return {
     root,
-    ...fingerprintPaths(root, paths.filter((path) => !excluded.has(path))),
+    ...fingerprintPaths(root, paths.filter((path) => !gitPathIsExcluded(root, path, excluded, foldedExcluded))),
   };
 }
 

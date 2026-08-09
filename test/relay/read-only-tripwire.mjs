@@ -45,10 +45,13 @@ async function runScenario(h, skill, scenario) {
     writeFileSync(join(workDir, "already-dirty.txt"), "pre-existing\n");
     symlinkSync("already-dirty.txt", join(workDir, "final.txt"));
   }
-  if (scenario.caseAliasedArtifact || scenario.caseDistinctUserWrite) {
+  if (scenario.caseAliasedArtifact || scenario.caseRenamedArtifact || scenario.caseDistinctUserWrite) {
     writeFileSync(join(workDir, "FINAL.TXT"), "tracked user file\n");
     runGit(workDir, ["add", "FINAL.TXT"]);
     runGit(workDir, ["-c", "user.name=Smoke", "-c", "user.email=smoke@example.invalid", "commit", "-qm", "fixture"]);
+    if (scenario.caseRenamedArtifact) {
+      renameSync(join(workDir, "FINAL.TXT"), join(workDir, "Final.txt"));
+    }
     if (scenario.caseDistinctUserWrite) {
       writeFileSync(join(workDir, "FINAL.TXT"), "pre-existing user change\n", { flag: "a" });
     }
@@ -134,6 +137,7 @@ export async function runReadOnlyTripwire(h) {
     { name: "new-file-in-untracked-directory", untrackedDirectory: true, expected: true },
     { name: "relay-artifacts", artifactsInside: true, expected: false },
     { name: "case-aliased-relay-artifact", artifactsInside: true, caseAliasedArtifact: true, expected: false },
+    { name: "case-renamed-relay-artifact", artifactsInside: true, caseRenamedArtifact: true, expected: false },
     ...(caseSensitiveFilenames ? [{
       name: "case-distinct-user-write",
       artifactsInside: true,
