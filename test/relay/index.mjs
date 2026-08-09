@@ -1,6 +1,7 @@
 import { runPackageShape } from "./package-shape.mjs";
 import { runSyntax } from "./syntax.mjs";
 import { runCodex } from "./codex.mjs";
+import { runCline } from "./cline.mjs";
 import { runCursor } from "./cursor.mjs";
 import { runVibe } from "./vibe.mjs";
 import { runAtomic } from "./atomic.mjs";
@@ -17,6 +18,7 @@ export const runners = [
   ["package-shape", runPackageShape],
   ["syntax", runSyntax],
   ["codex", runCodex],
+  ["cline", runCline],
   ["cursor", runCursor],
   ["vibe", runVibe],
   ["atomic", runAtomic],

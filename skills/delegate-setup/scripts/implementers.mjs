@@ -65,6 +65,20 @@ export const IMPLEMENTERS = Object.freeze([
     winShell: true,
   },
   {
+    key: "cline",
+    skill: "cline-delegate",
+    binary: "cline",
+    versionArgs: ["--version"],
+    // No status command exposes login state; usage stays unknown rather than guessed —
+    // the CLI's conversations live under a profile that has no documented stable path.
+    authProbe: null,
+    modelProbe: null,
+    usageProbe: null,
+    // Plan mode is a dispatch flag (--plan), not a lane dial; readOnly is unsupported.
+    supports: ["provider", "model", "timeout"],
+    winShell: true,
+  },
+  {
     key: "codex",
     skill: "codex-delegate",
     binary: "codex",

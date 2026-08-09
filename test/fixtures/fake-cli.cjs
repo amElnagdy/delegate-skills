@@ -80,6 +80,21 @@ if (["pi-success", "pi-error"].includes(process.env.SMOKE_MODE)) {
     console.log(JSON.stringify({ type: "agent_end", messages: [] }));
     process.exit(0);
   });
+} else if (["cline-success", "cline-error"].includes(process.env.SMOKE_MODE)) {
+  const failed = process.env.SMOKE_MODE === "cline-error";
+  const brief = args.at(-1) ?? "";
+  fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify({ args, brief }));
+  console.log(JSON.stringify({ type: "run_start", sessionId: "cline-session-1", modelId: "fake/fake-model", providerId: "fake", cwd: process.cwd() }));
+  console.log(JSON.stringify({ type: "agent_event", agentType: "task", subagent: false, message: { type: "text", text: "working" } }));
+  console.log(JSON.stringify({
+    type: "run_result",
+    finishReason: failed ? "error" : "completed",
+    text: failed ? "fake cline failed" : "fake cline completed",
+    usage: { inputTokens: 7, outputTokens: 2 },
+    model: { id: "fake/fake-model", provider: "fake" },
+    durationMs: 42,
+  }));
+  process.exit(failed ? 1 : 0);
 } else if (["cursor-success", "claude-success", "claude-read-only-write", "claude-read-only-clean", "claude-chunked"].includes(process.env.SMOKE_MODE)) {
   let brief = "";
   process.stdin.setEncoding("utf8");
