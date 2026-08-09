@@ -140,7 +140,7 @@ if (["pi-success", "pi-error"].includes(process.env.SMOKE_MODE)) {
       fs.writeFileSync("read-only-violation.txt", "written by fake claude\n");
     }
     if (mode === "claude-read-only-append") {
-      fs.appendFileSync("already-dirty.txt", "appended by fake claude\n");
+      fs.appendFileSync(process.env.SMOKE_APPEND_FILE ?? "already-dirty.txt", "appended by fake claude\n");
     }
     if (process.env.SMOKE_CAPTURE_FILE) {
       fs.writeFileSync(process.env.SMOKE_CAPTURE_FILE, JSON.stringify({

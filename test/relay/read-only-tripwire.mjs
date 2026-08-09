@@ -45,6 +45,14 @@ async function runScenario(h, skill, scenario) {
     writeFileSync(join(workDir, "already-dirty.txt"), "pre-existing\n");
     symlinkSync("already-dirty.txt", join(workDir, "final.txt"));
   }
+  if (scenario.caseAliasedArtifact || scenario.caseDistinctUserWrite) {
+    writeFileSync(join(workDir, "FINAL.TXT"), "tracked user file\n");
+    runGit(workDir, ["add", "FINAL.TXT"]);
+    runGit(workDir, ["-c", "user.name=Smoke", "-c", "user.email=smoke@example.invalid", "commit", "-qm", "fixture"]);
+    if (scenario.caseDistinctUserWrite) {
+      writeFileSync(join(workDir, "FINAL.TXT"), "pre-existing user change\n", { flag: "a" });
+    }
+  }
   if (scenario.invalidUtf8) {
     writeFileSync(Buffer.concat([Buffer.from(`${workDir}/invalid-`), Buffer.from([0xff])]), "pre-existing\n");
   }
@@ -70,11 +78,14 @@ async function runScenario(h, skill, scenario) {
   const outDir = scenario.artifactsInside
     ? workDir
     : join(h.scratch, `out-${skill}-${scenario.name}`);
+  const appendFile = scenario.dirty
+    ? "already-dirty.txt"
+    : scenario.caseDistinctUserWrite ? "FINAL.TXT" : null;
   const child = h.runRelay(skill, workDir, outDir, ["--read-only"], {
     SMOKE_MODE: skill === "grok"
       ? "grok-read-only"
-      : scenario.dirty ? "claude-read-only-append" : "claude-read-only-clean",
-    ...(skill === "grok" && scenario.dirty ? { SMOKE_APPEND_FILE: "already-dirty.txt" } : {}),
+      : appendFile ? "claude-read-only-append" : "claude-read-only-clean",
+    ...(appendFile ? { SMOKE_APPEND_FILE: appendFile } : {}),
     ...(scenario.untrackedDirectory ? { SMOKE_WRITE_FILE: join("loose", "new.txt") } : {}),
     ...(scenario.invalidUtf8 ? { SMOKE_APPEND_INVALID_UTF8: "696e76616c69642dff" } : {}),
     ...(scenario.indexOnly ? { SMOKE_INDEX_ONLY_FILE: "index-dirty.txt" } : {}),
@@ -109,6 +120,10 @@ export async function runReadOnlyTripwire(h) {
   if (!invalidUtf8Filenames) {
     console.log("  skip  invalid UTF-8 filename: host filesystem rejects arbitrary filename bytes");
   }
+  const caseProbe = join(h.scratch, "case-sensitive-probe");
+  writeFileSync(caseProbe, "lower\n");
+  writeFileSync(join(h.scratch, "CASE-SENSITIVE-PROBE"), "upper\n");
+  const caseSensitiveFilenames = readFileSync(caseProbe, "utf8") === "lower\n";
   const scenarios = [
     { name: "clean", expected: false },
     { name: "unknown", repo: false, expected: null },
@@ -118,6 +133,13 @@ export async function runReadOnlyTripwire(h) {
     ...(invalidUtf8Filenames ? [{ name: "invalid-utf8-filename", invalidUtf8: true, expected: null }] : []),
     { name: "new-file-in-untracked-directory", untrackedDirectory: true, expected: true },
     { name: "relay-artifacts", artifactsInside: true, expected: false },
+    { name: "case-aliased-relay-artifact", artifactsInside: true, caseAliasedArtifact: true, expected: false },
+    ...(caseSensitiveFilenames ? [{
+      name: "case-distinct-user-write",
+      artifactsInside: true,
+      caseDistinctUserWrite: true,
+      expected: true,
+    }] : []),
     { name: "preexisting-artifact-rename", artifactsInside: true, preexistingArtifactRename: true, expected: false },
     { name: "artifact-endpoint-rename", artifactsInside: true, artifactEndpointRename: true, expected: true },
     { name: "relay-artifacts-plus-write", artifactsInside: true, dirty: true, expected: true },

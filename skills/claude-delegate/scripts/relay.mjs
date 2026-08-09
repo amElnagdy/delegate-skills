@@ -103,6 +103,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   renameSync,
   statSync,
   writeFileSync,
@@ -715,7 +716,20 @@ function dirtyPaths(cwd) {
 
 function canonicalFilePath(path) {
   const absolute = resolve(path);
-  try { return join(realpathSync.native(dirname(absolute)), basename(absolute)); } catch { return absolute; }
+  let parent;
+  try { parent = realpathSync.native(dirname(absolute)); } catch { return absolute; }
+  const leaf = basename(absolute);
+  const canonical = join(parent, leaf);
+  try { lstatSync(canonical); } catch { return canonical; }
+  try {
+    const entries = readdirSync(parent);
+    if (entries.includes(leaf)) return canonical;
+    const fold = (value) => value.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
+    const matches = entries.filter((entry) => fold(entry) === fold(leaf));
+    return join(parent, matches.length === 1 ? matches[0] : leaf);
+  } catch {
+    return canonical;
+  }
 }
 
 function gitPathKey(root, path) {
