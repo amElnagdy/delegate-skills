@@ -99,14 +99,19 @@ function makeLineScanner(onObject) {
   let buf = "";
   return (chunk) => {
     if (!chunk) return;
-    buf += chunk;
-    const lines = buf.split("\n");
-    buf = lines.pop() ?? "";
-    for (const line of lines) {
+    let start = 0;
+    for (;;) {
+      const end = chunk.indexOf("\n", start);
+      if (end === -1) break;
+      const line = buf + chunk.slice(start, end);
+      buf = "";
       const trimmed = line.trim();
-      if (!trimmed) continue;
-      try { onObject(JSON.parse(trimmed)); } catch { /* skip non-JSON lines */ }
+      if (trimmed) {
+        try { onObject(JSON.parse(trimmed)); } catch { /* skip non-JSON lines */ }
+      }
+      start = end + 1;
     }
+    buf += chunk.slice(start);
     if (buf.length > MAX_BUFFERED_CHARS) buf = "";
   };
 }

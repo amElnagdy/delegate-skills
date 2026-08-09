@@ -26,11 +26,30 @@ function extract(source, symbol, kind, relay) {
   return source.slice(start, end);
 }
 
-function loadScanner(relay, symbol) {
+function loadScanner(relay, symbol, onVisit) {
   const source = readFileSync(join(here, "..", "skills", `${relay}-delegate`, "scripts", "relay.mjs"), "utf8");
   const maxBufferedChars = extract(source, "MAX_BUFFERED_CHARS", "const", relay);
-  const scanner = extract(source, symbol, "function", relay);
-  return new Function(`${maxBufferedChars}\n${scanner}\nreturn ${symbol};`)();
+  let scanner = extract(source, symbol, "function", relay);
+  if (onVisit) {
+    // Issue #51 needs a deterministic work bound; source instrumentation avoids a wall-clock assertion.
+    const instrumented = symbol === "makeEventScanner"
+      ? scanner.replace(
+        /(\s+)(const ch = buf\[[^\]]+\];)/,
+        "$1onVisit();$1$2",
+      )
+      : scanner.includes('const lines = buf.split("\\n");')
+        ? scanner.replace(
+          /(\s+)(const lines = buf\.split\("\\n"\);)/,
+          "$1onVisit(buf.length);$1$2",
+        )
+        : scanner.replace(
+          /(\s+)(const end = chunk\.indexOf\("\\n", start\);)/,
+          "$1onVisit(chunk.length - start);$1$2",
+        );
+    if (instrumented === scanner) throw new Error(`${relay}: could not instrument ${symbol}`);
+    scanner = instrumented;
+  }
+  return new Function("onVisit", `${maxBufferedChars}\n${scanner}\nreturn ${symbol};`)(onVisit);
 }
 
 // Parity covers every makeEventScanner copy; Vibe's makeLineScanner is tested directly.
@@ -82,6 +101,16 @@ test("event scanner: object split across chunk boundaries", () => {
   assert.deepEqual(events, []);
   scan('"y"]}');
   assert.deepEqual(events, [{ a: 1, b: ["x", "y"] }]);
+});
+
+test("event scanner: many small chunks examine each character once", () => {
+  let visits = 0;
+  const factory = loadScanner("claude", "makeEventScanner", () => { visits += 1; });
+  const { events, scan } = collectScanner(factory);
+  const event = JSON.stringify({ result: "x".repeat(4096) });
+  for (let i = 0; i < event.length; i += 16) scan(event.slice(i, i + 16));
+  assert.equal(visits, event.length);
+  assert.deepEqual(events, [{ result: "x".repeat(4096) }]);
 });
 
 test("event scanner: braces inside string values do not close the object", () => {
@@ -181,6 +210,16 @@ test("line scanner: split line parses once the newline arrives", () => {
   assert.deepEqual(events, []);
   scan('"x"]}\n{"c":2}\n');
   assert.deepEqual(events, [{ a: 1, b: ["x"] }, { c: 2 }]);
+});
+
+test("line scanner: many small chunks search only newly appended data", () => {
+  let searched = 0;
+  const factory = loadScanner("vibe", "makeLineScanner", (length) => { searched += length; });
+  const { events, scan } = collectScanner(factory);
+  const partial = "x".repeat(4096);
+  for (let i = 0; i < partial.length; i += 16) scan(partial.slice(i, i + 16));
+  assert.equal(searched, partial.length);
+  assert.deepEqual(events, []);
 });
 
 test("line scanner: oversized unterminated line is dropped, later line parses", () => {
