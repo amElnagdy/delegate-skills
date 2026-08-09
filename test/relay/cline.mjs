@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export async function runCline(h) {
@@ -12,7 +12,7 @@ export async function runCline(h) {
     "--cd", workDir,
     "--out-dir", outDir,
     "--provider", "fake",
-    "--model", "fake/fake-model",
+    "--model", "fake-model",
   ], {
     env: { ...h.baseEnv, SMOKE_MODE: "cline-success", SMOKE_ARGS_FILE: argsFile },
     encoding: "utf8",
@@ -22,30 +22,34 @@ export async function runCline(h) {
   h.check("cline success: documented argv is exact",
     JSON.stringify(capture.args) === JSON.stringify([
       "--json", "-v",
+      "--auto-approve", "true",
       "--provider", "fake",
-      "--model", "fake/fake-model",
-      "--cwd", workDir,
-      "smoke brief: run until killed.",
+      "--model", "fake-model",
+      "Follow the task instructions provided on stdin.",
     ]));
-  h.check("cline success: brief rides argv as the [prompt] positional", capture.brief === "smoke brief: run until killed.");
+  h.check("cline success: brief is streamed on stdin and cwd stays out of argv",
+    capture.brief === "smoke brief: run until killed." &&
+    realpathSync(capture.cwd) === realpathSync(workDir) &&
+    !capture.args.includes("--cwd") &&
+    !capture.args.includes("--timeout"));
   h.check("cline success: result.json exists", existsSync(join(outDir, "result.json")));
   if (existsSync(join(outDir, "result.json"))) {
     const value = h.result(outDir);
     h.check("cline success: run_start and run_result parsed",
       value.status === "completed" &&
       value.exitCode === 0 &&
-      value.sessionId === "cline-session-1" &&
+      value.sessionId === null &&
       value.finalMessage === "fake cline completed" &&
       value.provider === "fake" &&
-      value.model === "fake/fake-model" &&
+      value.model === "fake-model" &&
       value.actualProvider === "fake" &&
-      value.actualModel === "fake/fake-model" &&
+      value.actualModel === "fake-model" &&
       value.finishReason === "completed" &&
       value.durationMs === 42 &&
       value.usage?.inputTokens === 7 &&
       value.usage?.outputTokens === 2 &&
       value.planMode === false &&
-      value.resumed === false &&
+      value.autoApprove === true &&
       value.clineVersion === "fake-cli 0.0.0-smoke");
   }
 
@@ -62,34 +66,47 @@ export async function runCline(h) {
     encoding: "utf8",
   });
   const planCapture = existsSync(planArgsFile) ? JSON.parse(readFileSync(planArgsFile, "utf8")) : {};
-  h.check("cline plan: --plan is passed and recorded",
+  h.check("cline plan: --plan forces auto-approve false in argv and result",
     planRun.status === 0 &&
     Array.isArray(planCapture.args) &&
     planCapture.args.includes("--plan") &&
+    planCapture.args.includes("--auto-approve") &&
+    planCapture.args[planCapture.args.indexOf("--auto-approve") + 1] === "false" &&
     existsSync(join(planOutDir, "result.json")) &&
-    h.result(planOutDir).planMode === true);
+    h.result(planOutDir).planMode === true &&
+    h.result(planOutDir).autoApprove === false);
 
-  const resumeOutDir = join(h.scratch, "out-resume-cline");
-  const resumeArgsFile = join(h.scratch, "args-resume-cline");
-  const resumeRun = spawnSync(process.execPath, [
+  const unsafePlanOutDir = join(h.scratch, "out-unsafe-plan-cline");
+  const unsafePlan = spawnSync(process.execPath, [
     h.relayPath("cline"),
     "--brief", h.briefPath,
     "--cd", workDir,
-    "--out-dir", resumeOutDir,
+    "--out-dir", unsafePlanOutDir,
+    "--plan",
+    "--auto-approve", "true",
+  ], { env: h.baseEnv, encoding: "utf8" });
+  h.check("cline plan: auto-approve true is rejected before dispatch",
+    unsafePlan.status === 2 &&
+    /requires auto-approve false/.test(unsafePlan.stderr) &&
+    !existsSync(join(unsafePlanOutDir, "result.json")));
+
+  const invalidAutoApprove = spawnSync(process.execPath, [
+    h.relayPath("cline"),
+    "--brief", h.briefPath,
+    "--cd", workDir,
+    "--auto-approve", "yes",
+  ], { env: h.baseEnv, encoding: "utf8" });
+  h.check("cline auto-approve: non-boolean value is rejected before dispatch",
+    invalidAutoApprove.status === 2 && /must be true or false/.test(invalidAutoApprove.stderr));
+
+  const unsupportedResume = spawnSync(process.execPath, [
+    h.relayPath("cline"),
+    "--brief", h.briefPath,
+    "--cd", workDir,
     "--session", "cline-session-9",
-  ], {
-    env: { ...h.baseEnv, SMOKE_MODE: "cline-success", SMOKE_ARGS_FILE: resumeArgsFile },
-    encoding: "utf8",
-  });
-  const resumeCapture = existsSync(resumeArgsFile) ? JSON.parse(readFileSync(resumeArgsFile, "utf8")) : {};
-  h.check("cline resume: uses documented --id and records resumed",
-    resumeRun.status === 0 &&
-    Array.isArray(resumeCapture.args) &&
-    resumeCapture.args.includes("--id") &&
-    resumeCapture.args.includes("cline-session-9") &&
-    !resumeCapture.args.includes("--session") &&
-    existsSync(join(resumeOutDir, "result.json")) &&
-    h.result(resumeOutDir).resumed === true);
+  ], { env: h.baseEnv, encoding: "utf8" });
+  h.check("cline resume: unsupported relay flag is rejected before dispatch",
+    unsupportedResume.status === 2 && /unknown option: --session/.test(unsupportedResume.stderr));
 
   const unsafeProvider = spawnSync(process.execPath, [
     h.relayPath("cline"),
@@ -99,34 +116,69 @@ export async function runCline(h) {
   ], { env: h.baseEnv, encoding: "utf8" });
   h.check("cline provider: shell-unsafe value is rejected", unsafeProvider.status === 2);
 
+  const bareModelOutDir = join(h.scratch, "out-bare-model-cline");
+  const bareModelArgsFile = join(h.scratch, "args-bare-model-cline");
   const bareModel = spawnSync(process.execPath, [
     h.relayPath("cline"),
     "--brief", h.briefPath,
     "--cd", workDir,
-    "--model", "deepseek-v4-flash",
-  ], { env: h.baseEnv, encoding: "utf8" });
-  h.check("cline model: bare id is rejected before dispatch (cline expects provider/model)",
-    bareModel.status === 2 &&
-    /vendor-qualified/.test(bareModel.stderr));
+    "--out-dir", bareModelOutDir,
+    "--provider", "openrouter",
+    "--model", "provider-local-model",
+    "--auto-approve", "false",
+  ], {
+    env: { ...h.baseEnv, SMOKE_MODE: "cline-success", SMOKE_ARGS_FILE: bareModelArgsFile },
+    encoding: "utf8",
+  });
+  const bareModelCapture = existsSync(bareModelArgsFile)
+    ? JSON.parse(readFileSync(bareModelArgsFile, "utf8"))
+    : {};
+  h.check("cline model: bare id is accepted with a separate provider flag",
+    bareModel.status === 0 &&
+    bareModelCapture.args?.includes("provider-local-model") &&
+    bareModelCapture.args?.[bareModelCapture.args.indexOf("--auto-approve") + 1] === "false" &&
+    h.result(bareModelOutDir).model === "provider-local-model" &&
+    h.result(bareModelOutDir).autoApprove === false);
 
   if (h.WIN) {
     const unsafeBriefPath = join(h.scratch, "brief-unsafe-cline.txt");
-    writeFileSync(unsafeBriefPath, "use 100% of the quota; \"fix\" it", "utf8");
+    const unsafeBriefText = "use 100% now! \"fix\" it\r\nthen test & | ^ < >";
+    writeFileSync(unsafeBriefPath, unsafeBriefText, "utf8");
+    const unsafeBriefOutDir = join(h.scratch, "out-unsafe-brief-cline");
+    const unsafeBriefArgsFile = join(h.scratch, "args-unsafe-brief-cline");
     const unsafeBrief = spawnSync(process.execPath, [
       h.relayPath("cline"),
       "--brief", unsafeBriefPath,
       "--cd", workDir,
-    ], { env: h.baseEnv, encoding: "utf8" });
-    h.check("cline win32 brief: %/quote/newline brief is rejected before dispatch", unsafeBrief.status === 2);
+      "--out-dir", unsafeBriefOutDir,
+    ], {
+      env: { ...h.baseEnv, SMOKE_MODE: "cline-success", SMOKE_ARGS_FILE: unsafeBriefArgsFile },
+      encoding: "utf8",
+    });
+    const unsafeBriefCapture = existsSync(unsafeBriefArgsFile)
+      ? JSON.parse(readFileSync(unsafeBriefArgsFile, "utf8"))
+      : {};
+    h.check("cline win32 transport: shell metacharacters and newlines stay intact on stdin",
+      unsafeBrief.status === 0 && unsafeBriefCapture.brief === unsafeBriefText);
 
     const unsafeCdPath = join(h.scratch, "dir-with-!bang");
     mkdirSync(unsafeCdPath, { recursive: true });
+    const unsafeCdOutDir = join(h.scratch, "out-unsafe-cd-cline");
+    const unsafeCdArgsFile = join(h.scratch, "args-unsafe-cd-cline");
     const unsafeCd = spawnSync(process.execPath, [
       h.relayPath("cline"),
       "--brief", h.briefPath,
       "--cd", unsafeCdPath,
-    ], { env: h.baseEnv, encoding: "utf8" });
-    h.check("cline win32 cd: path with % or ! is rejected before dispatch", unsafeCd.status === 2);
+      "--out-dir", unsafeCdOutDir,
+    ], {
+      env: { ...h.baseEnv, SMOKE_MODE: "cline-success", SMOKE_ARGS_FILE: unsafeCdArgsFile },
+      encoding: "utf8",
+    });
+    const unsafeCdCapture = existsSync(unsafeCdArgsFile)
+      ? JSON.parse(readFileSync(unsafeCdArgsFile, "utf8"))
+      : {};
+    h.check("cline win32 cwd: shell metacharacters stay in the spawn cwd option",
+      unsafeCd.status === 0 && realpathSync(unsafeCdCapture.cwd) === realpathSync(unsafeCdPath));
   }
 
   const errorOutDir = join(h.scratch, "out-error-cline");
@@ -158,7 +210,8 @@ export async function runCline(h) {
   h.check("cline unavailable: missing binary writes the structured result",
     missing.status === 127 &&
     existsSync(join(missingOutDir, "result.json")) &&
-    h.result(missingOutDir).status === "cline_unavailable");
+    h.result(missingOutDir).status === "cline_unavailable" &&
+    h.result(missingOutDir).finalPath === null);
 
   for (const [mode, expectedStatus, expectedExit] of [
     ["cline-version-fail", "failed", 7],

@@ -15,28 +15,24 @@
  * is used. The `cline` process it launches does authenticate — exactly as you do
  * at the terminal. Read this file before you run it.
  *
- * The brief is passed to cline as its `[prompt]` positional argument — the
- * transport this relay uses. Cline's `--json` output mode accepts a prompt
- * argument or piped stdin; the relay always uses the positional, so stdin is
- * never used to send the brief. The single prompt token is argv — quote it,
- * keep briefs focused, and keep secrets out of the brief on shared machines —
- * reference workspace files or environment variables instead.
+ * The brief is streamed to cline on stdin. Current Cline JSON mode checks for
+ * a positional prompt before it reads piped input, so the relay passes a fixed
+ * positional instruction and keeps the full brief out of argv.
  *
  * It deliberately does NOT commit. Committing is always the orchestrator's job
  * — after it reviews the diff and re-runs the project gates.
  *
- * Autonomy: in headless JSON mode cline auto-approves tools and executes shell
- * commands without prompts (there is no interactive confirmation stream). There
- * is no sandbox; `--plan` restricts cline to plan mode (analysis only). The diff
- * reported in `touchedFiles` is the record of what changed.
+ * Autonomy: the relay explicitly sets Cline's `--auto-approve` (true in act
+ * mode, false with `--plan`). Plan mode can request a switch to act mode, so
+ * `--plan --auto-approve true` is rejected to preserve the read-only gate.
+ * Cline also supports sandbox through `--data-dir` / `CLINE_SANDBOX` and
+ * command policy through `CLINE_COMMAND_PERMISSIONS`; this relay does not
+ * configure them. The diff reported in `touchedFiles` records what changed.
  *
-* On native Windows `cline` is an npm-installed `.cmd` shim this relay launches
- * with shell:true, which does not quote argv: the relay quotes the two spaceable
- * values (`--cwd` and the brief) itself. That is why a brief containing %, !, a
- * quote, or a newline cannot be dispatched on Windows — keep the brief on a
- * single line there. And `--model` ids must be vendor-qualified
- * (`provider/model`, e.g. `deepseek/deepseek-v4-flash`): cline rejects a bare
- * model id such as `deepseek-v4-flash`.
+ * On native Windows `cline` is an npm-installed `.cmd` shim this relay launches
+ * with shell:true. Provider and model values therefore accept only shell-safe
+ * tokens; the working directory is the child process cwd and the brief stays
+ * on stdin.
  *
  * Usage:
  *   node relay.mjs --brief <file> [options]
@@ -47,11 +43,11 @@
  *   --cd <dir>              Working root for cline (default: current directory).
  *   --lane <name>           Fleet lane from delegate-setup config (dials apply; explicit flags win).
  *   --provider <name>       cline provider id (default: cline's own default).
- *   --model <id>            Vendor-qualified cline model id, e.g. deepseek/deepseek-v4-flash
- *                           (default: cline's own default). Cline rejects a bare id.
+ *   --model <id>            cline model id (default: cline's own default).
  *                           Letters, digits, and . _ : / - only.
- *   --session <id>          Resume a specific cline session; send only the delta brief.
- *   --plan                  Restrict cline to plan mode (analysis only, no edits).
+ *   --plan                  Read-only plan mode; forces --auto-approve false.
+ *   --auto-approve <bool>   Cline tool auto-approval (default: true in act mode,
+ *                           false with --plan). True conflicts with --plan.
  *   --timeout <dur>         Relay-side watchdog (default: 30m). h/m/s strings.
  *   --out-dir <dir>         Where to write run artifacts (default: a fresh dir
  *                           under the system temp dir).
@@ -61,8 +57,8 @@
  *   status, exitCode, signal, clineVersion, sessionId, finalMessage (cline's own
  *   report, from run_result.text), requested/actual provider and model, usage,
  *   finishReason, touchedFiles (git porcelain, null if git cannot report),
- *   planMode, resumed, and paths to brief.txt, final.txt, events.jsonl, and
- *   stderr.txt.
+ *   planMode, autoApprove, briefPath, nullable finalPath, eventsPath, and
+ *   stderrPath. sessionId is nullable because fresh JSON runs omit it.
  *
  * Exit codes: a pre-run usage error (bad/missing args, empty brief) exits 2
  * before any run and writes no result file; a missing `cline` binary exits 127;
@@ -95,8 +91,9 @@ import { StringDecoder } from "node:string_decoder";
 const DEFAULT_TIMEOUT = "30m";
 const MAX_TIMER_MS = 2_147_483_647;
 const VERSION_TIMEOUT_MS = 10_000;
-// --model, --provider, and --session values reach a shell on win32 (shell:true for the
-// .cmd shim), so they are restricted to safe tokens.
+const STDIN_PROMPT = "Follow the task instructions provided on stdin.";
+// --model and --provider values reach a shell on win32 (shell:true for the .cmd
+// shim), so they are restricted to safe tokens.
 const SAFE_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
 
 const IMPLEMENTER_KEY = "cline";
@@ -167,8 +164,8 @@ function parseArgs(argv) {
     cd: process.cwd(),
     provider: null,
     model: null,
-    session: null,
     plan: false,
+    autoApprove: null,
     timeout: DEFAULT_TIMEOUT,
     outDir: null,
   };
@@ -191,8 +188,13 @@ function parseArgs(argv) {
       case "--lane": opts.lane = next(); break;
       case "--provider": opts.provider = next(); flagged.add("provider"); break;
       case "--model": opts.model = next(); flagged.add("model"); break;
-      case "--session": opts.session = next(); break;
       case "--plan": opts.plan = true; break;
+      case "--auto-approve": {
+        const value = next();
+        if (value !== "true" && value !== "false") fail("--auto-approve must be true or false");
+        opts.autoApprove = value === "true";
+        break;
+      }
       case "--timeout": opts.timeout = next(); flagged.add("timeout"); break;
       case "--out-dir": opts.outDir = resolve(next()); break;
       default:
@@ -200,30 +202,20 @@ function parseArgs(argv) {
     }
   }
   applyFleetLane(opts, flagged);
-  for (const flag of ["model", "provider", "session"]) {
+  if (opts.plan && opts.autoApprove === true) {
+    fail("--plan conflicts with --auto-approve true; plan mode requires auto-approve false to prevent a switch to act mode");
+  }
+  if (opts.autoApprove === null) opts.autoApprove = !opts.plan;
+  for (const flag of ["model", "provider"]) {
     if (opts[flag] !== null && !SAFE_TOKEN.test(opts[flag])) {
       fail(`--${flag} value contains unsupported characters (allowed: letters, digits, . _ : / -)`);
     }
   }
-  // cline rejects a bare model id at startup ("expected modelType/model").
-  // Fail before dispatch instead of after, so the requested id is never ambiguous.
-  if (opts.model !== null && !opts.model.includes("/")) {
-    fail(`--model "${opts.model}" is not a vendor-qualified id; cline rejects it (expected provider/model, e.g. deepseek/deepseek-v4-flash)`);
-  }
   if (parseDuration(opts.timeout) === null) {
-    fail(`--timeout "${opts.timeout}" is not a duration; use h/m/s strings like 30m, 90s, or 1h30m`);
-  }
-  if (parseDuration(opts.timeout) === 0) fail("--timeout must be greater than zero");
-  // setTimeout overflows past 2^31 - 1 ms (~24.8 days) and fires immediately,
-  // which would read as an instant spurious timeout — reject it up front.
-  if (parseDuration(opts.timeout) > 2_147_483_647) {
-    fail(`--timeout "${opts.timeout}" exceeds the maximum schedulable watchdog (~24.8 days)`);
+    fail(`--timeout "${opts.timeout}" is not a positive schedulable duration; use h/m/s strings like 30m, 90s, or 1h30m (maximum ~24.8 days)`);
   }
   if (!existsSync(opts.cd) || !statSync(opts.cd).isDirectory()) {
     fail(`working directory not found: ${opts.cd}`);
-  }
-  if (process.platform === "win32" && /[\0\r\n"%!]/.test(opts.cd)) {
-    fail(`--cd "${opts.cd}" contains characters (%, !, a quote, or a newline) that the Windows cline.cmd launch cannot serialize safely; choose a path without them`);
   }
   return opts;
 }
@@ -351,31 +343,14 @@ function timestamp() {
   return new Date().toISOString().replace(/[:.]/g, "-");
 }
 
-function quoteWindowsArg(value) {
-  // shell:true on win32 does not quote argv elements: the command line is
-  // joined with raw spaces and cmd re-parses it when it runs the cline.cmd
-  // shim's `%*`, so a multi-word value would split before cline sees it.
-  // Hand-quote the spaceable values — same pattern as the codex/grok relays.
-  if (process.platform !== "win32") return value;
-  // cmd expands %VAR% even inside quotes, and embedded quotes/newlines break
-  // the quote boundary. Fail loudly rather than silently corrupting the brief.
-  if (/[\0\r\n"%!]/.test(value)) {
-    throw new Error("the cline.cmd launch cannot safely serialize a value containing %, !, a quote, or a newline; keep the brief to a single line without those characters on Windows");
-  }
-  return `"${value}"`;
-}
-
-function buildArgv(opts, brief) {
-  // cline's --json accepts the prompt as a positional [prompt] argument or as
-  // piped stdin; the relay always uses the positional. -v (verbose) is required
-  // so run_start carries the requested provider/model.
-  const argv = ["--json", "-v"];
+function buildArgv(opts) {
+  // Current Cline JSON mode checks for a positional prompt before reading
+  // piped input. Keep that positional fixed and stream the user brief on stdin.
+  const argv = ["--json", "-v", "--auto-approve", String(opts.autoApprove)];
   if (opts.provider) argv.push("--provider", opts.provider);
   if (opts.model) argv.push("--model", opts.model);
-  if (opts.session) argv.push("--id", opts.session);
   if (opts.plan) argv.push("--plan");
-  argv.push("--cwd", quoteWindowsArg(opts.cd));
-  argv.push(quoteWindowsArg(brief));
+  argv.push(process.platform === "win32" ? `"${STDIN_PROMPT}"` : STDIN_PROMPT);
   return argv;
 }
 
@@ -457,12 +432,12 @@ function makeResultWriter(opts, version, run) {
       provider: opts.provider,
       model: opts.model,
       planMode: opts.plan,
-      resumed: Boolean(opts.session),
+      autoApprove: opts.autoApprove,
       clineVersion: version,
       startedAt: run.startedAt,
       finishedAt: new Date().toISOString(),
       briefPath: run.briefPath,
-      finalPath: run.finalPath,
+      finalPath: existsSync(run.finalPath) ? run.finalPath : null,
       eventsPath: run.eventsPath,
       stderrPath: run.stderrPath,
       ...extra,
@@ -551,14 +526,13 @@ function installPreflightSignalHandlers(opts, run, writeResult, getChild) {
 }
 
 function dispatchToCline(opts, brief, run, writeResult) {
-  const child = spawn("cline", buildArgv(opts, brief), {
+  const child = spawn("cline", buildArgv(opts), {
     cwd: opts.cd,
     stdio: ["pipe", "pipe", "pipe"],
     // shell:true on win32 so the cline.cmd shim resolves. Safe on both
-    // platforms the same way codex-delegate's launch is: argv holds only the
-    // fixed flag names plus token-validated --provider/--model/--id values,
-    // and the two spaceable values (--cwd and the brief) are hand-quoted now
-    // buildArgv so cmd's %* re-parse keeps them whole.
+    // platforms the same way codex-delegate's launch is: argv holds only fixed
+    // values plus token-validated --provider/--model values. The brief is
+    // stdin and cwd is a spawn option, so neither reaches cmd.exe.
     shell: process.platform === "win32",
     detached: process.platform !== "win32", // POSIX: lead a new process group so killChild can fell the whole tree
   });
@@ -618,7 +592,7 @@ function dispatchToCline(opts, brief, run, writeResult) {
   // A fast-exiting cline (usage error, crashed startup) closes the pipe before
   // the write; swallow EPIPE here — the exit code reports the failure.
   child.stdin.on("error", () => {});
-  child.stdin.end();
+  child.stdin.end(brief);
 
   const assembleFinal = () => {
     const message = resultText ?? "";
@@ -744,10 +718,6 @@ async function main() {
   const opts = parseArgs(process.argv.slice(2));
   const brief = readBrief(opts);
   if (!brief.trim()) fail("empty brief (pass --brief <file> or pipe the brief on stdin)");
-  if (process.platform === "win32" && /[\0\r\n"%!]/.test(brief)) {
-    fail("on Windows the cline.cmd launch cannot safely serialize a brief containing %, !, a quote, or a newline; keep the brief to a single line without those characters");
-  }
-
   const timeoutMs = parseDuration(opts.timeout) ?? parseDuration(DEFAULT_TIMEOUT);
   const run = prepareRunDir(opts, brief);
   let writeResult = makeResultWriter(opts, null, run);
@@ -776,9 +746,8 @@ function printSummary(result, resultPath) {
   if (result.signal === "SIGKILL" && result.status === "failed") lines.push("hint: the host killed the process (commonly the OOM killer or a supervisor timeout) — this is not a cline error; check host memory and re-dispatch, or split the task into smaller briefs.");
   if (result.signal === "SIGTERM" && result.status === "failed") lines.push("hint: something outside the relay terminated cline (a supervisor, the session ending, or a manual kill) — when the relay itself kills it, reports status \"timeout\" or \"aborted\" instead; inspect the working tree before re-dispatching.");
   if (result.planMode) lines.push("mode: plan-only (analysis, no edits)");
-  if (result.resumed) lines.push("mode: resumed an existing session");
-  if (result.actualModel) lines.push(`model: ${result.actualProvider ? `${result.actualProvider}/` : ""}${result.actualModel}`);
-  if (result.sessionId) lines.push(`session id: ${result.sessionId} (resume with: --session ${result.sessionId})`);
+  if (result.actualModel) lines.push(`model: ${result.actualModel}${result.actualProvider ? ` (provider: ${result.actualProvider})` : ""}`);
+  if (result.sessionId) lines.push(`session id: ${result.sessionId}`);
   const touched = result.touchedFiles;
   if (touched === null) {
     lines.push("touched files: git unavailable - inspect the working tree directly");
@@ -804,5 +773,5 @@ function printSummary(result, resultPath) {
 main().catch((error) => {
   const detail = error && error.stack ? error.stack : String(error);
   process.stderr.write(`relay: unexpected internal error: ${detail}\n`);
-  fail("relay: unexpected internal error (no result written)");
+  process.exit(2);
 });
