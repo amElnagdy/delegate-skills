@@ -83,6 +83,18 @@ A local endpoint that is not running looks like a hang, not an error: Aider retr
 until the relay's `--timeout` watchdog fires and reports `status: "timeout"`. Confirm the server is up
 before dispatching a long brief.
 
+### Staying offline
+
+No account or provider registration is involved: Aider is a pip install, the endpoint is yours, and
+`OPENAI_API_KEY` only has to be non-empty. The relay pins the flags that would otherwise reach the
+network on their own - `--no-check-update`, `--no-analytics` (Aider's own default is `random`, which
+opts some sessions in by itself), and `--no-detect-urls`, without which Aider offers to scrape any URL
+in the brief and `--yes-always` accepts that offer silently.
+
+What remains outside the relay's control is the model's own tooling: a brief that asks Aider to run a
+command which installs packages or calls an API will still do so. Offline means nothing in the
+dispatch path reaches out on its own, not that a sandbox is preventing it.
+
 ## The loop
 
 Run these five steps per task. Steps 1, 4, and 5 require judgment; 2 and 3 are mechanical.

@@ -75,8 +75,9 @@ These are not configurable, and the reason matters:
 | `--no-dirty-commits` | Aider's `--dirty-commits` defaults to `True` and would commit your pre-existing uncommitted work before starting. |
 | `--no-gitignore` | Aider otherwise writes `.aider*` into `.gitignore` on startup, dirtying the tree. |
 | `--yes-always` | A headless run cannot answer a confirmation prompt. |
-| `--no-analytics` | No telemetry from a dispatched run. |
+| `--no-analytics` | No telemetry from a dispatched run. Aider's own `--analytics` default is `random`, which opts some sessions in by itself. |
 | `--no-check-update` | No version check on a dispatch path. |
+| `--no-detect-urls` | Aider's `--detect-urls` defaults to `True` and offers to scrape any URL in the message. Under `--yes-always` that offer is auto-accepted, so a URL in the brief becomes an unannounced outbound fetch - and, with Playwright absent, a run that hangs until the watchdog fires. |
 | `--no-pretty` | Colour codes would corrupt the captured report. |
 | `--no-stream` | Whole responses; the relay captures text, not a live view. |
 

@@ -35,8 +35,15 @@
  *                        a confirmation prompt.
  *   --no-gitignore       Aider otherwise writes `.aider*` into .gitignore on
  *                        startup, dirtying the tree the reviewer is about to read.
- *   --no-analytics       No telemetry from the dispatched run.
+ *   --no-analytics       No telemetry from the dispatched run. Aider's own
+ *                        --analytics default is "random", which opts some
+ *                        sessions in on its own.
  *   --no-check-update    No version check on a dispatch path.
+ *   --no-detect-urls     Aider's --detect-urls defaults to True and offers to
+ *                        scrape any URL in the message. Under --yes-always that
+ *                        offer is auto-accepted, so a URL in the brief becomes an
+ *                        unannounced outbound fetch - and, without Playwright
+ *                        installed, a run that hangs until the watchdog fires.
  *   --no-pretty          Plain output; colour codes would corrupt the captured report.
  *   --no-stream          Whole responses; the relay captures text, not a live view.
  *
@@ -367,6 +374,7 @@ function buildArgv(opts, run) {
     "--no-gitignore",
     "--no-analytics",
     "--no-check-update",
+    "--no-detect-urls",
     "--no-pretty",
     "--no-stream",
   ];
