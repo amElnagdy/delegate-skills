@@ -35,7 +35,7 @@ jargon. Use these terms; don't invent synonyms.
 | `session`, `--continue`, `model alias`, `auto permission mode`, `plan mode`, `--yolo` | Kimi Code's own terms — use verbatim when discussing `kimi` | don't paraphrase them |
 | `session`, `--continue`, `--resume`, `plan mode`, `--force`, `--trust`, `models` | Cursor Agent's own terms — use verbatim when discussing `cursor-agent` | don't paraphrase them |
 | `session`, `--continue`, `--resume`, `permission mode` (`acceptEdits`/`plan`/`bypassPermissions`), `sandbox`, `subagents`, `agent teams`, `background sessions` | Claude Code's own terms — use verbatim when discussing Claude | never use `subagents` as a generic synonym for implementer |
-| `session`, `--json`, `-v` (verbose), `--cwd`, `--model`, `--provider`, `--id` (resume), `--plan`, `-t`/`--timeout` (CLI's own flag) | Cline's own terms — use verbatim when discussing `cline`. The relay's `--timeout` watchdog is a different flag with the same spelling | don't paraphrase them |
+| `session`, `--json`, `-v` (verbose), `--auto-approve`, `--cwd`, `--model`, `--provider`, `--id` (unsupported by the JSON relay), `--plan`, `--data-dir` / `CLINE_SANDBOX` (sandbox), `CLINE_COMMAND_PERMISSIONS`, `-t`/`--timeout` (CLI's own flag) | Cline's own terms — use verbatim when discussing `cline`. The relay's `--timeout` watchdog is a different flag with the same spelling | don't invent a Cline permission-mode enum |
 | `session`, `-c`, `--resume`, `permission mode` (`default`/`accept_edits`/`auto`/`bypass_permissions`/`dont_ask`/`plan`), `print mode`, `stream-json`, `model`, `context window` | Qoder CLI's own terms — use verbatim when discussing Qoder | don't paraphrase them |
 | `--prompt`, `--output` (`streaming`/`json`/`text`), `--agent` (`plan`/`accept-edits`/`auto-approve`), `--max-turns`, `--max-price`, `--max-tokens`, `--trust`, `--resume`, `--continue`, `--enabled-tools`, `--disabled-tools` | Mistral Vibe's own terms — use verbatim when discussing `vibe` | don't invent a Vibe sandbox enum; `--trust` is not a permission mode |
 | `session`, `--continue`, `--session`, `print mode`, `--mode json`, `tools`, `context files`, `project trust` | Pi's own terms — use verbatim when discussing `pi` | don't paraphrase them |
@@ -83,12 +83,13 @@ and the skill's `relay.mjs`.
   no-write or read-only run against a throwaway repo) before relying on it.
 - If you touch how a `relay.mjs` launches its implementer CLI, smoke-test on Windows too (native
   PowerShell/cmd, not just Git Bash/WSL): the `codex`, `opencode`, `grok`, `pi`, and `cline` launches
-  need `shell:true` on win32 to resolve the `.cmd` shim (which is why their spaceable args are quoted
-  and value flags token-validated); the `claude` and `cursor-agent` launches serialize a pre-joined
+  need `shell:true` on win32 to resolve the `.cmd` shim. Cline streams its brief on stdin and uses the
+  child process cwd; the other launches quote spaceable args, and all value flags are token-validated.
+  The `claude` and `cursor-agent` launches serialize a pre-joined
   command string through the shell on win32 for the same shim reason; `agy`, `kimi`, current
   `qodercli`, and `vibe` installs use native binaries. Each changed launch still needs its own Windows
   smoke before claiming support. Upstream Vibe works on Windows but officially supports and targets
-  UNIX; this repository's native Windows relay launch is unverified.
+  UNIX; this repository's native Windows Cline stdin launch and Vibe relay launch are unverified.
 - Keep the README's "Verification status" honest — claim only what's been run.
 
 ## Local Claude Code config

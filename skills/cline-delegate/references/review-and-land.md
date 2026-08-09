@@ -54,21 +54,18 @@ however messy an interrupted run looks, inspect it first: `git status`, `git dif
 `git diff --cached` for anything the implementer staged (plain `git diff` is blind to the index),
 and commit the intended files explicitly.
 
-## Rework: send the delta
+## Rework: re-dispatch a corrected brief
 
-Continue the same session with only the correction:
+Re-dispatch the correction with the needed context:
 
 ```bash
 echo "The fix is right, but the tests mock the DB session: use the real migrated fixture and
-remove the unused import." | node "<skill-dir>/scripts/relay.mjs" --session <id> --cd /path/to/repo
+remove the unused import." | node "<skill-dir>/scripts/relay.mjs" --cd /path/to/repo
 ```
 
-Use `--session <id>` with the id recorded in `result.json` - the stable handle, since a fresh
-dispatch mints a new session id. There is no `--resume-last` in cline's contract; `--session` is
-the resume path. Rework gets the same test review, diff review, and implementer sweep.
-
-Give the delta brief to the same session only when you want its context. For a correction that
-needs a different model, a fresh run may be cleaner.
+Cline's verified headless JSON path does not support session resume, so each correction is a fresh
+run and its brief must restate the required context. Rework gets the same test review, diff review,
+and implementer sweep.
 
 ## Surface, do not absorb
 

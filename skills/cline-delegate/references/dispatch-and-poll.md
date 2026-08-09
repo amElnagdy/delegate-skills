@@ -11,9 +11,8 @@ cline --version
 ```
 
 Install `cline`; on macOS/Linux it ships as a native binary, on Windows as an npm package (the
-relay launches the `.cmd` shim with `shell:true`). Authenticate by running `cline` once in a
-terminal and following its setup panel, or by configuring `ANTHROPIC_API_KEY` / a base URL. A
-headless run that is not authenticated fails fast with `status: "failed"` (exit 1).
+relay launches the `.cmd` shim with `shell:true`). Authenticate with `cline auth`. A headless run
+that is not authenticated fails with `status: "failed"` (exit 1).
 
 ## Dispatching
 
@@ -29,15 +28,16 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 | `--cd <dir>` | Working root and child process cwd (default: current directory). |
 | `--lane <name>` | Fleet lane from `delegate-setup` config. Applies that lane's dials; fails if the lane's `implementer` is not this relay. Explicit dial flags win. |
 | `--provider <name>` | Cline provider name (default: cline's own default). Token-validated. |
-| `--model <id>` | Cline model id, must be vendor-qualified (`provider/model`, e.g. `deepseek/deepseek-v4-flash`) - cline rejects a bare id; relay fails fast on bare ids (default: cline's own default). Token-validated: letters, digits, `. _ : / -`. |
-| `--session <id>` | Resume a specific cline session; send only the delta brief. |
-| `--plan` | Restrict cline to plan mode: analysis only, no edits. |
-| `--timeout <dur>` | Relay watchdog (default: `30m`; h/m/s strings). Independent of cline's own CLI-side timeout. |
+| `--model <id>` | Cline model id (default: cline's own default). Provider-local and qualified ids are accepted. Token-validated: letters, digits, `. _ : / -`. |
+| `--plan` | Plan mode with `--auto-approve false`; explicit `--auto-approve true` is rejected so Cline cannot auto-approve a switch to act mode. |
+| `--auto-approve <bool>` | Cline tool auto-approval. Defaults to `true` in act mode and `false` with `--plan`. |
+| `--timeout <dur>` | Relay watchdog (default: `30m`; h/m/s strings). The relay never passes it as Cline's own `-t` / `--timeout`. |
 | `--out-dir <dir>` | Artifact directory (default: a fresh directory under the system temp dir). |
 | `-h`, `--help` | Print the relay's header help. |
 
-The child cwd pins the workspace; cline reads the workspace from that directory. The relay passes
-`-v` (verbose) so `run_start` carries the `sessionId`, and never passes an interactive flag.
+The child cwd pins the workspace; the relay does not pass Cline's `--cwd`. `-v` (verbose) exposes
+provider and model in `run_start`. Fresh JSON runs may omit `sessionId`, and the verified headless
+JSON path does not support resume, so the relay has no resume flag.
 
 ## Artifacts and result fields
 
@@ -53,12 +53,14 @@ Artifacts live outside the repo by default, so they do not appear in `touchedFil
 `result.json` fields:
 
 - `schema`, `tool` (`"cline"`), `status` (`completed` | `failed` | `timeout` | `aborted` | `cline_unavailable`), `exitCode`, and `signal` (`null` unless the child died on a signal).
-- `workdir`, requested `provider`/`model`, `planMode`, `resumed`, `clineVersion`, `sessionId`,
+- `workdir`, requested `provider`/`model`, `planMode`, `autoApprove`, `clineVersion`, `sessionId`,
   `startedAt`, and `finishedAt`.
-- `actualProvider`, `actualModel`, `finishReason`, `usage`, and `durationMs` from cline's
-  `run_result` event.
-- `briefPath`, `finalPath`, `eventsPath`, and `stderrPath`.
-- `sessionId` - parsed from the `run_start` event. Resume with `--session <id>`.
+- `actualProvider` and the initial `actualModel` from `run_start`; `run_result` can update the model
+  and supplies `finishReason`, `usage`, and `durationMs`.
+- `briefPath`, nullable `finalPath`, `eventsPath`, and `stderrPath`. `finalPath` is `null` when
+  Cline emitted no final text and `final.txt` was not created.
+- `sessionId` - parsed from `run_start` when Cline emits one; otherwise `null`. It is observational,
+  not a resume promise.
 - `finalMessage` - cline's final text (`run_result.text`).
 - `touchedFiles` - `git status --porcelain` lines for the **final working tree under `--cd` only**,
   not an attribution of cline's edits: anything already dirty before dispatch shows up too.
@@ -119,19 +121,20 @@ The launch is equivalent to:
 
 ```bash
 cline --json -v [--provider <name>] [--model <id>] \
-  [--id <session-id>] [--plan] [--cwd <dir>] "<brief as one positional argument>"
+  --auto-approve <true|false> [--plan] \
+  "Follow the task instructions provided on stdin." < brief.txt
 ```
 
-The brief rides argv as the trailing `[prompt]` positional - the transport this relay uses for
-cline's prompt (cline's `--json` output mode accepts a prompt argument or piped stdin; the
-relay always uses argv, so stdin is never used for payloads). The relay quotes the single argument
-and token-validates every flag value ahead of dispatch, which keeps the `shell:true` launch on
-native Windows (where cline is a `.cmd` shim) safe - a brief is one quoted token, never an
-unvalidated embedded command. `-v` (verbose) is required so the `run_start` event carries the
-requested provider/model. Before dispatch the relay runs a
+Current Cline JSON mode checks for a positional prompt before reading piped input, so the relay
+passes the fixed instruction and streams the real brief on stdin. The child process cwd pins the
+workspace. Only token-validated provider/model values and fixed text reach the `shell:true` launch
+on native Windows; the brief and cwd do not. `-v` (verbose) exposes the requested provider/model.
+Before dispatch the relay runs a
 bounded `cline --version` preflight (10s cap) so a hung or crashing CLI fails fast and explicitly
-instead of hanging the run. Cline writes to the working tree from its own tool surface - there is
-no sandbox, and no permission prompts in headless mode; the diff is the record.
+instead of hanging the run. In act mode, auto-approval defaults true. With `--plan`, the relay
+forces it false because Cline can otherwise auto-approve a switch to act mode. Cline also exposes
+sandbox through `--data-dir` / `CLINE_SANDBOX` and command policy through
+`CLINE_COMMAND_PERMISSIONS`; the relay leaves those controls to the inherited CLI environment.
 
 ## The commit boundary
 

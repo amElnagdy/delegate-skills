@@ -66,7 +66,7 @@ Skip setup when you want one implementer or one-off dials. Pick the skill for a 
 | --- | --- | --- | --- | --- |
 | [`agy-delegate`](skills/agy-delegate/SKILL.md) | Google Antigravity (`agy`) | Antigravity's own `permissions`; bypass opt-in | — [^none] | `--resume-last`, `--conversation <id>` |
 | [`claude-delegate`](skills/claude-delegate/SKILL.md) | [Claude Code](https://code.claude.com/docs/en/overview) (`claude`) | `acceptEdits` + explicit tool surface | `--read-only` (`plan` mode) | `--resume-last`, `--session <id>` |
-| [`cline-delegate`](skills/cline-delegate/SKILL.md) | [Cline](https://github.com/cline/cline) (`cline`) | full local tools — no sandbox, no permission modes [^none] | `--plan` (plan mode) | `--session <id>` |
+| [`cline-delegate`](skills/cline-delegate/SKILL.md) | [Cline](https://github.com/cline/cline) (`cline`) | `--auto-approve true` in act mode; inherited sandbox/command policy not configured by the relay | `--plan` + `--auto-approve false` (relay-enforced pair) | — (headless JSON resume unsupported) |
 | [`codex-delegate`](skills/codex-delegate/SKILL.md) | [OpenAI Codex](https://github.com/openai/codex) (`codex`) | `--sandbox workspace-write` | `--read-only` | `--resume-last`, `--session <id>` |
 | [`cursor-delegate`](skills/cursor-delegate/SKILL.md) | [Cursor Agent](https://cursor.com/cli) (`cursor-agent`) | `--force`; `--no-force` withholds command approval | `--read-only` (plan mode) | `--resume-last`, `--session <id>` |
 | [`grok-delegate`](skills/grok-delegate/SKILL.md) | Grok Build (`grok`) | workspace-scoped; `--full-access` opt-in | `--read-only` — best-effort [^grok] | `--resume-last`, `--session <id>` |
@@ -187,8 +187,8 @@ This package is intentionally inspectable:
 
 **Verification status** — claims here are backed by runs, not assumptions.
 
-True of every relay: argument handling, exit codes, `result.json` shape, resume, and signal reporting
-are verified, along with each implementer-specific guard.
+True of every relay: argument handling, exit codes, `result.json` shape, supported resume mappings,
+and signal reporting are verified, along with each implementer-specific guard.
 
 Per skill — platform, CLI version, and what the run exercised:
 
@@ -216,21 +216,21 @@ Per skill — platform, CLI version, and what the run exercised:
 - `codex-delegate`, `opencode-delegate`, `vibe-delegate` — contract-tested only: argument validation,
   bounded version preflight, missing binary, result parsing, and whole-process-tree timeout/abort
   cleanup. No end-to-end run is recorded here.
-- `cline-delegate` — Windows, `cline` 3.0.51: native `.cmd` shim launch through the win32 quoting
-  path, brief as the `[prompt]` positional, `deepseek/deepseek-v4-flash` model selection, real
-  edit landing an `OUTPUT.md`, and result capture. Contract-tested too: argument validation,
-  bounded version preflight, missing binary, result parsing, plan mode, resume via `--session`,
-  and whole-process-tree timeout/abort cleanup. On Windows the brief must be a single line
-  without `%`, `!`, quotes, or newlines — cmd cannot serialize them through the shim.
+- `cline-delegate` — macOS, `cline` 3.0.52: current-binary unauthenticated plan probe reached
+  `run_start` with the fixed positional instruction plus the real brief on stdin, accepted a
+  provider-local model id, parsed the failing `run_result`, and left the tree clean. Contract-tested:
+  plan mode forcing `--auto-approve false`, the unsafe true conflict, argument validation, nullable
+  `sessionId`/`finalPath`, bounded version preflight, missing binary, result parsing, and whole-process-tree
+  timeout/abort cleanup. The contributor also reported a native Windows 3.0.51 edit run against the
+  earlier positional-brief commit; that does not verify this exact stdin-based head on Windows.
 - `delegate-setup` — contract-tested: discover JSON shape, config validate/write/load, whole-lane
   project overlay, global write without creating `.delegate/`, and `--lane` resolve / wrong-skill /
   flag-override against relays. The smoke suite runs live discovery against installed CLIs
   (versions vary by machine). Native Windows discover smoke not yet claimed.
 
-Not yet verified: native Windows launches for `agy`, `claude`, `grok`, `kimi`, `pi`, `qoder`,
-and `vibe` (the `codex`/`opencode`/`grok` launches use the same `.cmd` shim handling as cline's,
-which is the pattern verified above; Cursor
-serializes a pre-joined, quoted command; Qoder and Vibe target their documented native executables).
+Not yet verified: native Windows launches for `agy`, `claude`, exact-head `cline`, `grok`, `kimi`,
+`pi`, `qoder`, and `vibe` (`codex`/`opencode`/`grok` have contract-tested `.cmd` shim handling;
+Cursor serializes a pre-joined, quoted command; Qoder and Vibe target their documented native executables).
 Claude's own shell sandbox is unsupported on native Windows regardless of launch mechanics, and upstream
 Vibe officially targets UNIX. A native Linux `cursor-agent` run is unverified. The full delegate →
 review → commit loop is designed for and run on Claude Code; other orchestrators (Cursor, …) are

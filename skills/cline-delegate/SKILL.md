@@ -8,6 +8,7 @@ description: >-
   Cline while staying the reviewer. DO NOT USE for tasks small enough to do inline, or when the user
   wants the code written directly without delegating.
 license: MIT
+compatibility: Requires the `cline` CLI installed and authenticated with `cline auth`, Node 18+, and git. The orchestrator must be able to run shell commands and read files.
 metadata:
   version: 0.4.2
 ---
@@ -25,8 +26,8 @@ The loop needs only a shell command and file access, so any comparable orchestra
 
 - The task is small enough to do inline; delegation overhead is not worth it.
 - The `cline` CLI is not installed or authenticated.
-- You need a sandboxed implementer. Cline is a coding agent for dev machines: no sandbox,
-  no multi-tenancy, and by default it can run `bash`/`powershell` commands as the current user.
+- You require the relay to configure a sandbox or command policy. Cline exposes those controls,
+  but this relay leaves them to the CLI environment; use `--plan` when the run must be read-only.
 
 ## Prerequisites (check once)
 
@@ -38,14 +39,9 @@ The loop needs only a shell command and file access, so any comparable orchestra
 
 ## Choose the model (optional)
 
-Cline picks a default model. To choose another, pass `--model <id>` or `--provider <name>`
+Cline picks a default model. To choose another, pass the separate `--model <id>` or `--provider <name>`
 (e.g. `anthropic`, `openai-native`, `openrouter`). The relay accepts letters, digits,
 and `. _ : / -` only (the value reaches a shell on Windows).
-
-`--model` ids must be **vendor-qualified** (`provider/model`, e.g.
-`deepseek/deepseek-v4-flash`): cline rejects a bare id like `deepseek-v4-flash`
-with "invalid model format, expected modelType/model", and the relay fails fast on a
-bare id instead of dispatching a doomed run.
 
 ## The loop
 
@@ -60,18 +56,14 @@ the relay's `--brief`. See [references/writing-the-brief.md](references/writing-
 
 ### 2. Dispatch
 
-Use the bundled relay. It runs `cline --json -v` with the brief as cline's `[prompt]` positional argument (the transport this relay uses for cline's prompt; cline also accepts piped stdin, but the relay never uses it), captures the JSON event
-stream, and writes `result.json`.
-
-On Windows the brief must be a single line without `%`, `!`, `"`, or newlines, and
-`--model` ids must be vendor-qualified (`provider/model`) - the relay rejects violations
-before dispatch, not after the run starts. See [references/writing-the-brief.md](references/writing-the-brief.md).
+Use the bundled relay. It runs `cline --json -v`, streams the brief on stdin behind a fixed
+positional instruction, captures the JSON event stream, and writes `result.json`.
 
 ```bash
 node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 # choose a model / provider:        add --model <id>  --provider <name>
-# read-only planning pass:          add --plan
-# resume a specific session:         add --session <id>   (delta brief only)
+# read-only planning pass:          add --plan   (forces --auto-approve false)
+# deny approval-required tools:     add --auto-approve false
 # hard time limit (watchdog):        add --timeout 2h   (the 30m default suits brief runs; most implementation briefs should be 1-2h)
 # see all options:                   node .../relay.mjs --help
 ```
@@ -102,18 +94,17 @@ See [references/review-and-land.md](references/review-and-land.md).
 If the work is good, commit it. The relay never commits - the diff and `result.json` are the
 record; run `git status` and `git diff` first to confirm exactly what changed. If the group has a
 PR flow, make the commit and push a branch; let human review happen. If the diff is wrong or
-incomplete, send a delta brief to the same session with `--session <id>` and review again.
+incomplete, re-dispatch a corrected brief in a fresh run and review again.
 
 ## Autonomy and permissions
 
-Run as a CLI subprocess with `--json -v`, cline has no UI prompts: it executes tool calls
-and shell commands immediately, without confirmation. There is no sandbox and no
-permission-mode enforcement in headless runs - cline evaluates each tool call and runs
-`bash`/`powershell` as the current user, so malformed or malicious briefs are dangerous.
-The headless read-only gate is `--plan`, which restricts cline to plan mode (analysis
-only, no edits). Plan-first for anything risky: dispatch the brief with `--plan`, review
-the plan output, then re-dispatch to the same session without `--plan` to implement. There
-is no second agent.
+The relay explicitly passes Cline's `--auto-approve`, defaulting to `true` in act mode. Cline
+plan mode can request a switch to act mode, so `--plan` forces `--auto-approve false`; the relay
+rejects `--plan --auto-approve true`. That pair is the read-only gate. Cline also exposes sandbox
+through `--data-dir` / `CLINE_SANDBOX` and command policy through `CLINE_COMMAND_PERMISSIONS`,
+but the relay does not configure or override them. Plan-first for anything risky, then review the
+plan before a separate act-mode dispatch. Malformed or malicious briefs remain dangerous in act
+mode because commands run as the current user.
 
 ## Authorization model
 

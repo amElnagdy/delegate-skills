@@ -5,24 +5,15 @@ your conversation and no shared context** - only the text you send and whatever 
 the workspace. If a constraint is not in the brief or discoverable in the repo, it does not exist
 for cline.
 
-Cline does not auto-load `AGENTS.md` or `CLAUDE.md` context files from the workspace; it sees only
-the brief plus the files it reads itself. Repo conventions you rely on must be inlined.
+Cline can auto-discover the workspace's `AGENTS.md`. Still restate load-bearing repo constraints in
+the brief so the implementer does not have to infer which rules matter for this task.
 
-## Model choice and resumed sessions
+## Model choice
 
 Cline picks a default model when `--model` is omitted, so a fresh dispatch does not require it.
 Pass `--model <id>` only when the human asked for a specific model, or `--provider <name>` to
 pick a provider. The relay forwards ids and provider names made of letters, digits, `. _ : / -`
 only.
-
-When you do pass `--model <id>`, the id must be **vendor-qualified** (`provider/model`, e.g.
-`deepseek/deepseek-v4-flash`) — cline rejects a bare id like `deepseek-v4-flash` with
-"invalid model format, expected modelType/model". The relay validates the shape before dispatch
-and fails fast with exit 2 instead of letting the run die after startup.
-
-A resumed run keeps the session context. Send only the delta brief with `--session <id>` (the
-relay maps this to cline's `--id` flag). The session id comes from a previous run's
-`result.json`.
 
 ## The shape that works
 
@@ -64,7 +55,8 @@ Add extra blocks only when the task needs them:
   first plausible cause) and `<missing_context_gating>` (find missing repo facts or state what is
   unknown).
 - **Research or recommendations** - add `<research_mode>` (separate observed facts, inferences,
-  and open questions), and dispatch with `--plan` so cline cannot modify the tree.
+  and open questions), and dispatch with `--plan`; the relay pairs it with
+  `--auto-approve false` to prevent a switch to act mode.
 
 ## Always ask for the report explicitly
 
@@ -127,20 +119,11 @@ Report: (1) the root cause and fix, (2) files touched, (3) pytest and ruff outco
 
 ## Brief delivery
 
-The relay passes the brief as cline's `[prompt]` positional argument - the transport this
-relay uses for cline's prompt. (Cline's `--json` output mode accepts a prompt argument or
-piped stdin; the relay always uses the positional, so stdin is never used.) Keep the brief
-focused so it stays well under OS command-line limits; large context should be pointed at
-workspace files cline reads itself. Keep secrets out of the brief anyway on
-shared machines - reference environment variables or files with tight permissions.
-
-**On Windows the brief must be a single line**, without `%`, `!`, `"`, or newlines: the relay
-launches the `cline.cmd` shim through cmd.exe, which re-parses the quoted `[prompt]` token and
-cannot carry those characters. The relay rejects a non-portable brief before dispatch (exit 2);
-it never mangles it and sends. On Windows, author the brief as a single line - replace the XML
-block markers' newlines with ordinary prose or `|`-joined blocks, e.g.
-"`<task>fix the refund double-charge in services/billing/refund.py | verification_loop: run pytest tests/billing/ -q | action_safety: no unrelated refactors, do NOT commit | structured_output_contract: report what changed, files touched, gate outcomes`".
-The validated sandbox is the same; only the layout shifts.
+The relay streams the full brief on stdin and passes only a fixed positional instruction. Current
+Cline JSON mode checks for a positional prompt before reading piped input, so a pure stdin launch
+does not work; the fixed instruction satisfies that guard without exposing the brief in argv or
+subjecting it to command-line length and Windows shell-quoting limits. Keep secrets out of the
+brief anyway: it is preserved in the run's `brief.txt` artifact.
 
 Dispatch with [dispatch-and-poll.md](dispatch-and-poll.md), then review and commit with
 [review-and-land.md](review-and-land.md).

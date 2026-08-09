@@ -24,8 +24,8 @@ the default because it preserves clean task boundaries.
 Fresh cline sessions do not remember earlier tasks. If task 2 chooses a helper name, fixture
 location, or interface that task 5 needs, write that fact into task 5's brief.
 
-Resume a cline session only for rework on the same task: `--session <id>` from that task's
-`result.json`, with a delta brief. Start unrelated queue items in fresh sessions.
+Cline's verified headless JSON path does not support session resume. Rework and unrelated queue
+items both use fresh runs, so every brief must carry the context it needs.
 
 ## Keep a progress file
 
