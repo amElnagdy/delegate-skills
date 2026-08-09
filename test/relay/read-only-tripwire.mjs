@@ -35,9 +35,11 @@ async function waitFor(child, timeoutMs = 15_000) {
 }
 
 async function runScenario(h, skill, scenario) {
+  const workName = `work-${skill}-${scenario.name}${scenario.trailingSpaceRoot ? " " : ""}`;
+  if (scenario.trailingSpaceRoot) h.freshRepo(workName.slice(0, -1));
   const workDir = scenario.repo === false
-    ? join(h.scratch, `work-${skill}-${scenario.name}`)
-    : h.freshRepo(`work-${skill}-${scenario.name}`);
+    ? join(h.scratch, workName)
+    : h.freshRepo(workName);
   if (scenario.repo === false) mkdirSync(workDir);
   if (scenario.unknown) addDirtySubmodule(workDir);
   if (scenario.dirty) writeFileSync(join(workDir, "already-dirty.txt"), "pre-existing\n");
@@ -138,6 +140,7 @@ export async function runReadOnlyTripwire(h) {
     { name: "clean", expected: false },
     { name: "unknown", repo: false, expected: null },
     { name: "already-dirty", dirty: true, expected: true },
+    ...(!h.WIN ? [{ name: "trailing-space-root", trailingSpaceRoot: true, dirty: true, expected: true }] : []),
     { name: "index-only-already-dirty", indexOnly: true, expected: true },
     { name: "proof-over-unknown", dirty: true, unknown: true, expected: true },
     ...(invalidUtf8Filenames ? [{ name: "invalid-utf8-filename", invalidUtf8: true, expected: null }] : []),
@@ -195,14 +198,16 @@ export async function runReadOnlyTripwire(h) {
   const workDir = join(h.scratch, "work-grok-spawn-error");
   const outDir = join(h.scratch, "out-grok-spawn-error");
   mkdirSync(workDir);
-  const child = spawn(process.execPath, [
-    h.relayPath("grok"), "--brief", h.briefPath, "--cd", workDir, "--out-dir", outDir, "--read-only",
-  ], { env: { ...h.baseEnv, SMOKE_MODE: "grok-spawn-error" }, stdio: ["ignore", "pipe", "pipe"] });
-  let stdout = "";
-  child.stdout.on("data", (data) => { stdout += data; });
   const shimDir = h.baseEnv.PATH.split(delimiter)[0];
   const removedShim = join(shimDir, "grok.removed");
   const grokShim = join(shimDir, "grok");
+  writeFileSync(grokShim,
+    `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(join(shimDir, "fake-cli.cjs"))} "$@"\n`);
+  const child = spawn(process.execPath, [
+    h.relayPath("grok"), "--brief", h.briefPath, "--cd", workDir, "--out-dir", outDir, "--read-only",
+  ], { env: { ...h.baseEnv, PATH: shimDir, SMOKE_MODE: "grok-spawn-error" }, stdio: ["ignore", "pipe", "pipe"] });
+  let stdout = "";
+  child.stdout.on("data", (data) => { stdout += data; });
   let outcome;
   try {
     outcome = await waitFor(child);

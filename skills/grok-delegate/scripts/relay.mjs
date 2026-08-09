@@ -400,7 +400,7 @@ function gitRepoRoot(cwd) {
       timeout: 10_000,
       killSignal: "SIGKILL",
       stdio: ["ignore", "pipe", "ignore"],
-    }).trim() || null;
+    }).replace(/\n$/, "") || null;
   } catch {
     return null;
   }
