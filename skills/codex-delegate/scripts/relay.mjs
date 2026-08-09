@@ -40,6 +40,11 @@
  *                           result.json). Safer than --resume-last when other Codex runs
  *                           may have happened since - "last" is global, not per-repo.
  *                           Mutually exclusive with --resume-last.
+ *   --clean-env             Launch Codex and its version preflight with only runtime basics.
+ *                           Changes inherited variables only; does not protect files or other
+ *                           same-user secrets.
+ *   --keep-env <name>       Keep one additional variable under --clean-env (repeatable).
+ *                           Required for environment-backed auth and other stripped variables.
  *   --skip-git-repo-check   Allow running outside a git repository.
  *   --timeout <dur>         Relay-side watchdog (default: off). Durations use h/m/s
  *                           strings like 30m or 2h. On expiry the codex child is killed
@@ -77,6 +82,7 @@ const VERSION_PROBE_TIMEOUT_MS = 10_000;
 const MAX_TIMER_MS = 2_147_483_647;
 const SANDBOX_MODES = new Set(["read-only", "workspace-write", "danger-full-access"]);
 const SAFE_SESSION = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+const SAFE_ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 // Model reaches cmd.exe on win32 (shell:true for the codex.cmd shim) — same shell-safe
 // family as grok/pi. Keep in lockstep with delegate-setup MODEL_TOKEN.shellSafe.
 const SAFE_MODEL = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
@@ -138,6 +144,8 @@ function parseArgs(argv) {
     sandboxConfigured: false,
     resumeLast: false,
     session: null,
+    cleanEnv: false,
+    keepEnv: [],
     skipGitRepoCheck: false,
     timeout: null,
     outDir: null,
@@ -165,6 +173,8 @@ function parseArgs(argv) {
       case "--read-only": opts.sandbox = "read-only"; opts.sandboxConfigured = true; flagged.add("sandbox"); flagged.add("readOnly"); break;
       case "--resume-last": opts.resumeLast = true; break;
       case "--session": opts.session = next(); break;
+      case "--clean-env": opts.cleanEnv = true; break;
+      case "--keep-env": opts.keepEnv.push(next()); break;
       case "--skip-git-repo-check": opts.skipGitRepoCheck = true; break;
       case "--timeout": opts.timeout = next(); flagged.add("timeout"); break;
       case "--out-dir": opts.outDir = resolve(next()); break;
@@ -181,6 +191,17 @@ function parseArgs(argv) {
   }
   if (opts.model !== null && !SAFE_MODEL.test(opts.model)) {
     fail("--model contains unsupported characters (allowed: letters, digits, . _ : / -)");
+  }
+  if (opts.keepEnv.length && !opts.cleanEnv) {
+    fail("--keep-env requires --clean-env");
+  }
+  const invalidEnvName = opts.keepEnv.find((name) => !SAFE_ENV_NAME.test(name));
+  if (invalidEnvName) {
+    fail(`invalid --keep-env "${invalidEnvName}" (expected an environment variable name)`);
+  }
+  const missingEnvName = opts.keepEnv.find((name) => process.env[name] === undefined);
+  if (missingEnvName) {
+    fail(`--keep-env "${missingEnvName}" is not set`);
   }
   // The watchdog is relay-only (codex has no timeout flag), so a malformed
   // --timeout must fail loudly here - a silent no-watchdog fallback would be wrong.
@@ -272,7 +293,15 @@ function versionProbeTimeout(opts) {
   return timeoutMs === null ? VERSION_PROBE_TIMEOUT_MS : Math.min(timeoutMs, VERSION_PROBE_TIMEOUT_MS);
 }
 
-function codexVersion(probeTimeoutMs) {
+function codexEnv(opts) {
+  if (!opts.cleanEnv) return process.env;
+  const keep = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "LC_CTYPE", "TERM",
+    "TMPDIR", "CODEX_HOME", "SystemRoot", "SystemDrive", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
+    "TEMP", "TMP", "PATHEXT", "COMSPEC", ...opts.keepEnv];
+  return Object.fromEntries(keep.filter((key) => process.env[key] !== undefined).map((key) => [key, process.env[key]]));
+}
+
+function codexVersion(probeTimeoutMs, env) {
   try {
     // On Windows, npm installs `codex` as a .cmd shim; Node's CreateProcess only
     // auto-appends .exe, never .cmd, so launching it needs shell:true there or it
@@ -283,6 +312,7 @@ function codexVersion(probeTimeoutMs) {
       shell: process.platform === "win32",
       timeout: probeTimeoutMs,
       killSignal: "SIGKILL",
+      env,
     }).trim();
     return { version: version || "unknown", error: null };
   } catch (error) {
@@ -402,6 +432,8 @@ function makeResultWriter(opts, version, run) {
       effort: opts.effort,
       resumeLast: opts.resumeLast,
       session: opts.session,
+      cleanEnv: opts.cleanEnv,
+      keepEnv: opts.keepEnv,
       codexVersion: version,
       startedAt: run.startedAt,
       finishedAt: new Date().toISOString(),
@@ -447,13 +479,13 @@ function reportVersionFailure(opts, writeResult, run, error, probeTimeoutMs) {
   process.exit(result.exitCode);
 }
 
-function dispatchToCodex(opts, brief, run, writeResult) {
+function dispatchToCodex(opts, brief, run, writeResult, env) {
   const argv = buildArgv(opts, run.finalPath);
   // shell:true on Windows so the codex.cmd shim resolves (see codexVersion). Safe:
   // the brief is fed via child.stdin below — never argv — and argv holds only
   // sandbox enums, model names, the pattern-checked effort, and file paths.
   // detached on POSIX: the child leads a new process group so killChild can fell the whole tree
-  const child = spawn("codex", argv, { cwd: opts.cd, stdio: ["pipe", "pipe", "pipe"], shell: process.platform === "win32", detached: process.platform !== "win32" });
+  const child = spawn("codex", argv, { cwd: opts.cd, stdio: ["pipe", "pipe", "pipe"], shell: process.platform === "win32", detached: process.platform !== "win32", env });
 
   let threadId = null;
   let stdoutBuf = "";
@@ -597,7 +629,8 @@ function main() {
   // somewhere to publish result.json rather than exiting silently.
   const run = prepareRunDir(opts, brief);
   const probeTimeoutMs = versionProbeTimeout(opts);
-  const probe = codexVersion(probeTimeoutMs);
+  const env = codexEnv(opts);
+  const probe = codexVersion(probeTimeoutMs, env);
   const writeResult = makeResultWriter(opts, probe.version, run);
 
   if (!probe.version && !probe.error) {
@@ -609,7 +642,7 @@ function main() {
     return;
   }
 
-  dispatchToCodex(opts, brief, run, writeResult);
+  dispatchToCodex(opts, brief, run, writeResult, env);
 }
 
 function printSummary(result, resultPath) {

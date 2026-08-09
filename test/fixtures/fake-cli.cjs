@@ -1,8 +1,24 @@
 const fs = require("node:fs");
 const args = process.argv.slice(2);
+const capturedEnv = () => Object.fromEntries(
+  ["PATH", "HOME", "SMOKE_PROVIDER_TOKEN", "SMOKE_SECRET_TOKEN"]
+    .filter((key) => process.env[key] !== undefined)
+    .map((key) => [key, process.env[key]]),
+);
+// Environment-isolation tests cannot pass their control variables through the
+// environment. Load their fixture beside the fake before handling --version so
+// the preflight and dispatch can be captured independently.
+if (!process.env.SMOKE_MODE) {
+  try {
+    Object.assign(process.env, JSON.parse(fs.readFileSync(require("node:path").join(__dirname, "smoke-fallback.json"), "utf8")));
+  } catch { /* no environment-isolation fixture */ }
+}
 // Every probe form one relay or another uses: --version, grok's \`version\` subcommand, and
 // agy's \`changelog\`. Treating them alike lets any relay's hang/fail mode be driven by name.
 const versionProbe = args.includes("--version") || args[0] === "version" || args[0] === "changelog";
+if (versionProbe && process.env.SMOKE_PREFLIGHT_ENV_FILE) {
+  fs.writeFileSync(process.env.SMOKE_PREFLIGHT_ENV_FILE, JSON.stringify(capturedEnv()));
+}
 if (versionProbe && process.env.SMOKE_MODE === "grok-version-fallback-budget") {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 700);
   if (args[0] === "version") {
@@ -24,6 +40,7 @@ if (versionProbe && process.env.SMOKE_MODE === "grok-version-fallback-budget") {
 }
 if (process.env.SMOKE_MODE === "capture") {
   fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify(args));
+  if (process.env.SMOKE_ENV_FILE) fs.writeFileSync(process.env.SMOKE_ENV_FILE, JSON.stringify(capturedEnv()));
   process.exit(0);
 }
 if (process.env.SMOKE_MODE === "agy-permission-denied") {
