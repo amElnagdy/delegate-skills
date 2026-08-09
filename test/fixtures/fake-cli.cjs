@@ -19,7 +19,11 @@ const versionProbe = args.includes("--version") || args[0] === "version" || args
 if (versionProbe && process.env.SMOKE_PREFLIGHT_ENV_FILE) {
   fs.writeFileSync(process.env.SMOKE_PREFLIGHT_ENV_FILE, JSON.stringify(capturedEnv()));
 }
-if (versionProbe && process.env.SMOKE_MODE === "grok-version-fallback-budget") {
+if (versionProbe && process.env.SMOKE_MODE === "grok-spawn-error" && process.platform !== "win32") {
+  fs.renameSync(require("node:path").join(__dirname, "grok"), require("node:path").join(__dirname, "grok.removed"));
+  console.log("fake-cli 0.0.0-smoke");
+  process.exit(0);
+} else if (versionProbe && process.env.SMOKE_MODE === "grok-version-fallback-budget") {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 700);
   if (args[0] === "version") {
     console.error("fake documented version failure");
@@ -42,6 +46,29 @@ if (process.env.SMOKE_MODE === "capture") {
   fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify(args));
   if (process.env.SMOKE_ENV_FILE) fs.writeFileSync(process.env.SMOKE_ENV_FILE, JSON.stringify(capturedEnv()));
   process.exit(0);
+}
+if (process.env.SMOKE_WRITE_FILE) {
+  fs.writeFileSync(process.env.SMOKE_WRITE_FILE, "written by fake cli\n");
+}
+if (process.env.SMOKE_APPEND_INVALID_UTF8) {
+  fs.appendFileSync(Buffer.from(process.env.SMOKE_APPEND_INVALID_UTF8, "hex"), "appended by fake cli\n");
+}
+if (process.env.SMOKE_RETARGET_SYMLINK && process.env.SMOKE_SYMLINK_TARGET_HEX) {
+  fs.unlinkSync(process.env.SMOKE_RETARGET_SYMLINK);
+  fs.symlinkSync(Buffer.from(process.env.SMOKE_SYMLINK_TARGET_HEX, "hex"), process.env.SMOKE_RETARGET_SYMLINK);
+}
+if (process.env.SMOKE_INDEX_ONLY_FILE) {
+  const { execFileSync } = require("node:child_process");
+  const oid = execFileSync("git", ["hash-object", "-w", "--stdin"], {
+    input: "new staged content\n",
+    encoding: "utf8",
+  }).trim();
+  execFileSync("git", ["update-index", "--cacheinfo", `100644,${oid},${process.env.SMOKE_INDEX_ONLY_FILE}`]);
+}
+if (process.env.SMOKE_GIT_RENAME_FROM && process.env.SMOKE_GIT_RENAME_TO) {
+  require("node:child_process").execFileSync("git", [
+    "mv", "-f", process.env.SMOKE_GIT_RENAME_FROM, process.env.SMOKE_GIT_RENAME_TO,
+  ]);
 }
 if (process.env.SMOKE_MODE === "agy-permission-denied") {
   console.error('jetski: no output produced — a tool required the "write_file" permission that headless\nmode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow\nin settings.json (e.g. write_file(<target>)). Alternatively, re-run with\n--dangerously-skip-permissions to auto-approve all tools.');
@@ -86,6 +113,14 @@ if (process.env.SMOKE_MODE === "vibe-success") {
   fs.writeSync(1, JSON.stringify({ role: "assistant", content: "fake vibe completed" }));
   process.exit(0);
 }
+if (process.env.SMOKE_MODE === "grok-read-only") {
+  if (process.env.SMOKE_APPEND_FILE) {
+    fs.appendFileSync(process.env.SMOKE_APPEND_FILE, "appended by fake grok\n");
+  }
+  console.log(JSON.stringify({ type: "text", data: "fake grok completed" }));
+  console.log(JSON.stringify({ type: "end", sessionId: "grok-session-1" }));
+  process.exit(0);
+}
 if (["pi-success", "pi-error"].includes(process.env.SMOKE_MODE)) {
   let brief = "";
   process.stdin.setEncoding("utf8");
@@ -110,7 +145,7 @@ if (["pi-success", "pi-error"].includes(process.env.SMOKE_MODE)) {
     console.log(JSON.stringify({ type: "agent_end", messages: [] }));
     process.exit(0);
   });
-} else if (["cursor-success", "claude-success", "claude-read-only-write", "claude-read-only-clean", "claude-chunked"].includes(process.env.SMOKE_MODE)) {
+} else if (["cursor-success", "claude-success", "claude-read-only-write", "claude-read-only-clean", "claude-read-only-append", "claude-chunked"].includes(process.env.SMOKE_MODE)) {
   let brief = "";
   process.stdin.setEncoding("utf8");
   process.stdin.on("data", (chunk) => { brief += chunk; });
@@ -137,6 +172,9 @@ if (["pi-success", "pi-error"].includes(process.env.SMOKE_MODE)) {
     }
     if (mode === "claude-read-only-write") {
       fs.writeFileSync("read-only-violation.txt", "written by fake claude\n");
+    }
+    if (mode === "claude-read-only-append") {
+      fs.appendFileSync(process.env.SMOKE_APPEND_FILE ?? "already-dirty.txt", "appended by fake claude\n");
     }
     if (process.env.SMOKE_CAPTURE_FILE) {
       fs.writeFileSync(process.env.SMOKE_CAPTURE_FILE, JSON.stringify({

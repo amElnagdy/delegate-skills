@@ -77,8 +77,8 @@ Skip setup when you want one implementer or one-off dials. Pick the skill for a 
 
 [^none]: No CLI-enforced read-only mode. `touchedFiles` and the diff, not a flag, are the guarantee.
 
-[^grok]: `grok` cannot be prevented from writing headlessly, so the relay snapshots the tree and sets
-`readOnlyViolation: true` when a read-only run wrote anyway.
+[^grok]: `grok` cannot be prevented from writing headlessly. The relay reports a tri-state
+`readOnlyViolation` tripwire for detected Git-visible changes; it does not enforce or attribute them.
 
 Each skill name links to its `SKILL.md`, which owns that implementer's prerequisites, flags, and
 caveats. Building one for another CLI? [Claim it first](../../issues?q=is%3Aissue+label%3Aimplementer),
@@ -194,7 +194,7 @@ Per skill — platform, CLI version, and what the run exercised:
 - `agy-delegate` — macOS, `agy` 1.0.16: headless edit run, `--print=` delivery, absolute `--add-dir`
   workspace pin.
 - `claude-delegate` — macOS, `claude` 2.1.220: write run under `acceptEdits`; plan mode refusing an
-  edit, with the porcelain tripwire true on a violation and false on a clean run;
+  edit, with the Git tripwire true on a violation and false on a clean run;
   `--session`/`--resume-last` resume; `claude_unavailable`/127 and usage errors exiting 2 without a
   result file; deny rules and the shell sandbox blocking `git commit`, `git push`, `git -C <dir> push`,
   a nested `claude`, and a `$HOME` write.
