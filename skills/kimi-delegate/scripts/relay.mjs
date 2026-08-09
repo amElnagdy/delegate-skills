@@ -89,26 +89,17 @@ function makeEventScanner(onObject) {
     if (!chunk) return;
     buf += chunk;
     for (let i = 0; i < buf.length; i += 1) {
-      if (start !== -1 && i - start >= MAX_BUFFERED_CHARS) {
-        // Drop the oversized partial object's state, but keep scanning this
-        // chunk so a later concatenated event is not lost.
-        depth = 0;
-        start = -1;
-        inString = false;
-        escaped = false;
-      }
       const ch = buf[i];
+      // Only track strings inside an object (depth > 0). At depth 0 we are
+      // skipping a junk prefix, and an unmatched `"` there must not swallow the
+      // real `{...}` that follows in the same chunk.
       if (inString) {
         if (escaped) escaped = false;
         else if (ch === "\\") escaped = true;
         else if (ch === '"') inString = false;
-        continue;
-      }
-      // Only track strings inside an object (depth > 0).  At depth 0 we are
-      // skipping a junk prefix, and an unmatched `"` there must not swallow the
-      // real `{...}` that follows in the same chunk.
-      if (ch === '"') { if (depth > 0) inString = true; continue; }
-      if (ch === "{") {
+      } else if (ch === '"') {
+        if (depth > 0) inString = true;
+      } else if (ch === "{") {
         if (depth === 0) start = i;
         depth += 1;
       } else if (ch === "}") {
@@ -120,6 +111,17 @@ function makeEventScanner(onObject) {
             start = -1;
           }
         }
+      }
+      if (i === buf.length - 1 && depth > 0 && start !== -1 && buf.length - start > MAX_BUFFERED_CHARS) {
+        // A complete object may exceed the retained-input cap within this
+        // chunk. Drop only an oversized partial, then rescan its suffix so a
+        // later concatenated event is not lost.
+        buf = buf.slice(start + MAX_BUFFERED_CHARS);
+        start = -1;
+        depth = 0;
+        inString = false;
+        escaped = false;
+        i = -1;
       }
     }
     // Retain only an in-progress object (if any) so the buffer cannot grow

@@ -133,6 +133,13 @@ test("event scanner: oversized tail split across chunks is still dropped", () =>
   assert.deepEqual(events, [{ ok: 1 }]);
 });
 
+test("event scanner: complete same-chunk object may exceed the retention cap", () => {
+  const { events, scan } = collectScanner(makeEventScanner);
+  scan(JSON.stringify({ result: "x".repeat(1_100_000) }));
+  assert.equal(events.length, 1);
+  assert.equal(events[0].result.length, 1_100_000);
+});
+
 test("event scanner: oversized tail does not hide a later event in the same chunk", () => {
   const { events, scan } = collectScanner(makeEventScanner);
   scan(`{"broken":"${"x".repeat(1_100_000)}{"ok":1}`);
@@ -182,6 +189,13 @@ test("line scanner: oversized unterminated line is dropped, later line parses", 
   assert.deepEqual(events, []);
   scan('{"ok":1}\n');
   assert.deepEqual(events, [{ ok: 1 }]);
+});
+
+test("line scanner: complete line may exceed the retention cap", () => {
+  const { events, scan } = collectScanner(makeLineScanner);
+  scan(`${JSON.stringify({ result: "x".repeat(1_100_000) })}\n`);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].result.length, 1_100_000);
 });
 
 test("line scanner: oversized line does not hide a later event in the same chunk", () => {
