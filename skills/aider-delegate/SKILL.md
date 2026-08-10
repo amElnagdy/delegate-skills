@@ -5,13 +5,13 @@ description: >-
   it yourself. Use this whenever the user wants to hand implementation work to Aider - phrasings like
   "have Aider do X", "delegate this to aider", "run it through Aider", or "use Aider to
   implement/fix/refactor" - or wants to run a queue of coding tasks through Aider while staying the
-  reviewer. Also the skill for delegating coding work to a **local or self-hosted model** - phrasings
-  like "have my local model do X", "delegate this to llama.cpp / Ollama / vLLM / LM Studio", or "run
-  this through the local LLM" - since Aider drives any OpenAI-compatible endpoint via `--api-base`.
-  DO NOT USE for tasks small enough to do inline, or when the user wants the code written directly
+  reviewer. This includes asking Aider to drive a local or self-hosted OpenAI-compatible endpoint
+  ("have Aider use my local model", "run Aider against llama.cpp / Ollama / vLLM / LM Studio"), which
+  Aider reaches via `--api-base`. DO NOT USE for local-model or coding requests that do not name
+  Aider, for tasks small enough to do inline, or when the user wants the code written directly
   without delegating.
 license: MIT
-compatibility: Requires the `aider` CLI installed with a configured model, Node 18+, and git. The orchestrating agent must be able to run shell commands and read files. Shell examples assume bash/zsh (macOS/Linux, or Git Bash/WSL on Windows).
+compatibility: Requires the `aider` CLI (`python -m pip install aider-chat`), Node 18+, and git. Aider must be able to authenticate to a model before dispatch - export the provider key it expects (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, …) or set it in Aider's own config; a local OpenAI-compatible endpoint still needs a non-empty `OPENAI_API_KEY`. The orchestrating agent must be able to run shell commands and read files. Shell examples assume bash/zsh (macOS/Linux, or Git Bash/WSL on Windows).
 metadata:
   version: 0.4.2
 ---
@@ -91,9 +91,11 @@ network on their own - `--no-check-update`, `--no-analytics` (Aider's own defaul
 opts some sessions in by itself), and `--no-detect-urls`, without which Aider offers to scrape any URL
 in the brief and `--yes-always` accepts that offer silently.
 
-What remains outside the relay's control is the model's own tooling: a brief that asks Aider to run a
-command which installs packages or calls an API will still do so. Offline means nothing in the
-dispatch path reaches out on its own, not that a sandbox is preventing it.
+`--no-suggest-shell-commands` closes the remaining path by which a run could reach the network without
+being asked to. What stays outside the relay's control is the brief itself: instructions that tell
+Aider to install a package or call an API will still be carried out, and `--auto-lint` runs the
+repository's own tooling. Offline here means nothing in the dispatch path reaches out on its own - not
+that a sandbox is stopping it.
 
 ## The loop
 
@@ -162,8 +164,21 @@ and the diff holds. If rework is needed, send a delta brief with `--resume-last`
 ## Autonomy and permissions
 
 The relay passes `--yes-always`, Aider's own term for auto-confirming every prompt, because a headless
-run cannot answer one. Aider has no sandbox and no permission modes: within its file scope it edits
-freely, and it can run linters and tests that the repository configures.
+run cannot answer one. **Understand what that consents to in advance.** Auto-confirmation applies to
+every prompt Aider would otherwise raise, and Aider's prompts are not limited to file edits: left at
+its defaults it also offers to run shell commands it has suggested, and `--yes-always` would accept
+those with nobody reading them. The relay therefore pins `--no-suggest-shell-commands`, which removes
+that path.
+
+What remains is not a sandbox, and nothing here pretends otherwise. Aider has no permission modes and
+no isolation: within its file scope it edits freely, and `--auto-lint` (on by default) runs whatever
+linter the repository configures. A brief that tells Aider to run a command still gets a command run.
+Delegation is the authorization; if a run must not be able to touch the host, run it in a container or
+a throwaway worktree, because no flag in this relay will give you that.
+
+**File selection is not a security boundary.** `--file`, `--read`, and `--subtree-only` set what Aider
+puts in its chat context, which is a scoping and token-cost decision. They do not confine what it can
+reach. See [references/writing-the-brief.md](references/writing-the-brief.md).
 
 `--read-only` maps to Aider's `--dry-run`, which performs the run without modifying files. The relay
 does not independently verify that claim - it reports what `git status --porcelain` shows and warns if

@@ -36,7 +36,7 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 | `--resume-last` | Restore Aider's chat history for this repo. Send a delta brief. |
 | `--history-file <path>` | Pin a specific chat history file (Aider's `--chat-history-file`). |
 | `--timeout <dur>` | Relay watchdog, h/m/s. Default `30m`. |
-| `--out-dir <dir>` | Where run artifacts go. Default: a fresh dir under the system temp dir. |
+| `--out-dir <dir>` | Where run artifacts go. Default: a fresh dir under the system temp dir. A reused directory has its previous `final.txt` and `result.json` removed before dispatch, so a poller can never read the last run's result as this one's. |
 
 Relative `--file`, `--read`, and `--history-file` paths resolve against `--cd`, not the relay's own
 cwd, so they mean what they look like they mean regardless of flag order.
@@ -75,6 +75,7 @@ These are not configurable, and the reason matters:
 | `--no-dirty-commits` | Aider's `--dirty-commits` defaults to `True` and would commit your pre-existing uncommitted work before starting. |
 | `--no-gitignore` | Aider otherwise writes `.aider*` into `.gitignore` on startup, dirtying the tree. |
 | `--yes-always` | A headless run cannot answer a confirmation prompt. |
+| `--no-suggest-shell-commands` | The other half of `--yes-always`. Aider's `--suggest-shell-commands` defaults to `True`, and an auto-confirmed suggestion runs on the host with nobody reading it. This is a blast-radius reduction, not a sandbox. |
 | `--no-analytics` | No telemetry from a dispatched run. Aider's own `--analytics` default is `random`, which opts some sessions in by itself. |
 | `--no-check-update` | No version check on a dispatch path. |
 | `--no-detect-urls` | Aider's `--detect-urls` defaults to `True` and offers to scrape any URL in the message. Under `--yes-always` that offer is auto-accepted, so a URL in the brief becomes an unannounced outbound fetch - and, with Playwright absent, a run that hangs until the watchdog fires. |
@@ -107,7 +108,7 @@ Everything lands in the run directory (temp by default, so the repo under review
 | `touchedFiles` | `git status --porcelain` lines. `[]` when the tree is clean, `null` when git cannot report. |
 | `readOnly` | Whether this was dispatched as a dry run. |
 | `resumed` | Whether chat history was restored. |
-| `error` | Present on a non-clean outcome; says what went wrong. |
+| `error` | Present on **every** non-clean outcome, including an ordinary nonzero exit; says what went wrong. |
 | `stderrTail` | Last stderr lines, on a non-clean outcome. |
 
 ## Waiting for completion
@@ -132,9 +133,13 @@ Completion means the process exited and `result.json` exists. Trust that over an
 - **`status: "aborted"`.** The relay itself was killed and forwarded the kill to Aider. Same caution:
   the tree may be partial.
 - **`--read-only` run that changed something.** Aider's `--dry-run` is Aider's promise, not the
-  relay's measurement, so the relay warns when a read-only run leaves changed paths behind. Aider's
-  own `.aider*` bookkeeping is excluded from that check - it is written even under `--dry-run` - but
-  it still appears in `touchedFiles`, which reports git verbatim. Any other path is worth inspecting.
+  relay's measurement, so the relay warns when a read-only run leaves changed paths behind. Only the
+  files Aider *generates* are excluded from that check - `.aider.chat.history.md`,
+  `.aider.input.history`, `.aider.llm.history`, and the `.aider.tags.cache.v*` directory - because it
+  writes them even under `--dry-run`. Aider's user-managed settings are deliberately **not** excluded:
+  if `.aider.conf.yml`, `.aider.model.settings.yml`, `.aider.model.metadata.json`, or `.aiderignore`
+  changed during a dry run, that is exactly what the warning is for. Everything, generated or not,
+  still appears in `touchedFiles`, which reports git verbatim.
 
 ## Recovering lost work
 

@@ -6,7 +6,8 @@
  * run, and write a structured result the orchestrating agent can review. The
  * orchestrator runs this one command and reads the result JSON - every
  * Aider-specific mechanic lives in here, which keeps the skill
- * orchestrator-agnostic. Verified against aider 0.86.2 on Windows.
+ * orchestrator-agnostic. What was actually run, and on what, is recorded in the
+ * README's Verification status list rather than pinned here.
  *
  * Trust posture: relay.mjs itself makes no network calls, reads or writes no
  * credentials, and sends no telemetry; it has no dependencies (Node built-ins
@@ -96,7 +97,7 @@
  */
 
 import {spawn, execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync, renameSync, readFileSync, existsSync, appendFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, renameSync, readFileSync, existsSync, appendFileSync, rmSync } from "node:fs";
 import {join, resolve, basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { constants, tmpdir } from "node:os";
@@ -331,18 +332,31 @@ function timestamp() {
   return new Date().toISOString().replace(/[:.]/g, "-");
 }
 
-// Aider writes its own bookkeeping into the repo - .aider.chat.history.md,
-// .aider.input.history, .aider.tags.cache.v*/ - and keeps doing so under
-// --dry-run. They stay in touchedFiles, which reports git verbatim, but they must
-// not trip the read-only warning: a dry run that touched nothing else is exactly
-// what was asked for.
+// Aider writes its own bookkeeping into the repo and keeps doing so under --dry-run.
+// These stay in touchedFiles, which reports git verbatim, but they must not trip the
+// read-only warning: a dry run that touched nothing else is exactly what was asked for.
+// The list is exhaustive on purpose. A blanket `.aider*` match would also swallow
+// user-managed settings - .aider.conf.yml, .aider.model.settings.yml,
+// .aider.model.metadata.json, .aiderignore - and those changing during a dry run is
+// precisely what the warning exists to report.
+const AIDER_GENERATED_FILE = /^\.aider\.(?:chat\.history\.md|input\.history|llm\.history)$/;
+const AIDER_GENERATED_DIR = /^\.aider\.tags\.cache\.v\d+$/;
+
+function isAiderGenerated(path) {
+  const segments = path.split("/");
+  // the tags cache is a directory; git may report it or anything beneath it
+  if (segments.some((segment) => AIDER_GENERATED_DIR.test(segment))) return true;
+  return AIDER_GENERATED_FILE.test(segments[segments.length - 1]);
+}
+
 function withoutAiderArtifacts(touchedFiles) {
   if (!Array.isArray(touchedFiles)) return [];
   return touchedFiles.filter((line) => {
-    // git porcelain v1: two status columns, a space, then the path.
-    const path = line.slice(3).replace(/^"|"$/g, "");
-    const name = path.split("/").pop();
-    return !/^\.aider(\.|$)/.test(path) && !/^\.aider(\.|$)/.test(name);
+    // git porcelain v1: two status columns, a space, then the path. A rename reports
+    // `old -> new`; judge the destination, which is what the run actually wrote.
+    const entry = line.slice(3).trim();
+    const target = entry.includes(" -> ") ? entry.slice(entry.lastIndexOf(" -> ") + 4) : entry;
+    return !isAiderGenerated(target.replace(/^"|"$/g, ""));
   });
 }
 
@@ -357,6 +371,11 @@ function prepareRunDir(opts, brief) {
     stderrPath: join(outDir, "stderr.txt"),
     resultPath: join(outDir, "result.json"),
   };
+  // A reused --out-dir must not advertise the previous run: a poller that races the
+  // dispatch would read the old result.json as if it were this run's, and a preflight
+  // failure or a run with no stdout would publish a finalPath for someone else's report.
+  rmSync(run.finalPath, { force: true });
+  rmSync(run.resultPath, { force: true });
   writeFileSync(run.briefPath, brief, "utf8");
   writeFileSync(run.stderrPath, "", "utf8");
   return run;
@@ -367,8 +386,15 @@ function buildArgv(opts, run) {
   // reviewable (both default to True in aider); --no-gitignore stops aider writing
   // `.aider*` into .gitignore and dirtying the tree; the rest keep headless output
   // clean and side-effect free.
+  //
+  // --no-suggest-shell-commands is the other half of --yes-always. Aider's
+  // --suggest-shell-commands defaults to True, and a suggestion under --yes-always is
+  // accepted with nobody there to read it: the model's proposed command runs on the
+  // host. Turning the suggestions off is not a sandbox - see SKILL.md - but it removes
+  // the one path where a dispatched run executes a command the brief never named.
   const argv = [
     "--yes-always",
+    "--no-suggest-shell-commands",
     "--no-auto-commits",
     "--no-dirty-commits",
     "--no-gitignore",
@@ -424,13 +450,16 @@ function makeResultWriter(opts, version, run) {
   };
 }
 
-function reportUnavailable(writeResult, resultPath) {
+function reportUnavailable(opts, writeResult, resultPath) {
   const result = writeResult({
     status: "aider_unavailable",
     exitCode: 127,
     signal: null,
     finalMessage: "",
-    touchedFiles: null,
+    // git can still report here, and the contract reserves null for when it cannot.
+    // The tree is whatever it already was; say so rather than claiming ignorance.
+    touchedFiles: gitTouchedFiles(opts.cd),
+    error: "`aider` was not found on PATH; nothing was dispatched",
   });
   printSummary(result, resultPath);
   process.stderr.write("relay: `aider` not found on PATH. Install Aider (https://aider.chat/docs/install.html) and configure a model.\n");
@@ -462,11 +491,20 @@ function reportVersionFailure(opts, writeResult, run, error, probeTimeoutMs) {
 // cannot separate "did the work" from "never reached a model". These are aider's
 // own end-of-run error lines; matching them turns that silent success into a
 // failed status the orchestrator can act on.
+// Every pattern is line-anchored. An earlier revision matched a bare `OPENAI_API_KEY`
+// anywhere in the report, so a successful run whose report merely *mentioned* the
+// variable ("Updated the docs to explain OPENAI_API_KEY setup") was published as an
+// authentication failure. A diagnostic is a line aider emits, not a word it says.
 const MODEL_FAILURE_PATTERNS = [
-  /litellm\.(?:APIConnectionError|AuthenticationError|BadRequestError|RateLimitError|NotFoundError|InternalServerError|Timeout)/i,
+  // litellm surfaces the provider error class at the head of its own line; allow a
+  // short prefix ("Error: ", a retry counter) but not a sentence of prose.
+  /^.{0,60}?litellm\.(?:APIConnectionError|AuthenticationError|BadRequestError|RateLimitError|NotFoundError|InternalServerError|Timeout)\b/im,
   /^\s*(?:Error|Warning) connecting to /im,
-  /API key not found|OPENAI_API_KEY|ANTHROPIC_API_KEY.*not set/i,
-  /Unable to (?:connect|reach) /i,
+  /^\s*(?:Error|Warning):?\s*(?:\w+_API_KEY|API key)\b.*\b(?:not set|not found|missing|invalid)\b/im,
+  /^\s*The API provider is not able to authenticate you\b/im,
+  // Needs an endpoint-shaped object: "Unable to connect" on its own is ordinary prose
+  // a report could easily contain while describing the very thing it just documented.
+  /^\s*Unable to (?:connect|reach)\s+(?:the\s+)?(?:model|endpoint|server|host|API|provider|https?:)/im,
 ];
 
 function detectModelFailure(text) {
@@ -489,6 +527,7 @@ function dispatchToAider(opts, run, writeResult) {
 
   let stdout = "";
   const stderrTail = [];
+  let stderrRemainder = "";
   let settled = false;
   let watchdogFired = false;
   let sigkillTimer = null;
@@ -517,12 +556,28 @@ function dispatchToAider(opts, run, writeResult) {
   child.stderr.on("data", (chunk) => {
     process.stderr.write(chunk);
     appendFileSync(run.stderrPath, chunk);
-    const text = stderrDecoder.write(chunk);
-    for (const line of text.split("\n")) {
+    // Carry the un-newlined tail forward. A chunk that ends mid-line would otherwise
+    // publish half a line in stderrTail as though it were whole, and the rest of that
+    // line would arrive as a second, equally broken entry.
+    const text = stderrRemainder + stderrDecoder.write(chunk);
+    const lines = text.split("\n");
+    stderrRemainder = lines.pop() ?? "";
+    for (const line of lines) {
       if (line.trim()) stderrTail.push(line.trimEnd());
     }
     while (stderrTail.length > 20) stderrTail.shift();
   });
+
+  // Both decoders hold any trailing bytes of a split multibyte character until they
+  // are flushed, and stderr holds a final line that never got its newline. Drain both
+  // before assembling a result, or the last thing aider said is the thing that is lost.
+  const flushStreams = () => {
+    stdout += stdoutDecoder.end();
+    const tail = stderrRemainder + stderrDecoder.end();
+    stderrRemainder = "";
+    if (tail.trim()) stderrTail.push(tail.trimEnd());
+    while (stderrTail.length > 20) stderrTail.shift();
+  };
 
   const assembleFinal = () => {
     const message = stdout.trim();
@@ -540,6 +595,7 @@ function dispatchToAider(opts, run, writeResult) {
       settled = true;
       clearTimeout(watchdogTimer);
       if (sigkillTimer) clearTimeout(sigkillTimer);
+      flushStreams();
       const abortedFields = {
         status: "aborted",
         exitCode: 128 + (constants.signals[sig] || 15),
@@ -567,6 +623,7 @@ function dispatchToAider(opts, run, writeResult) {
     settled = true;
     clearTimeout(watchdogTimer);
     if (sigkillTimer) clearTimeout(sigkillTimer);
+    flushStreams();
     const result = writeResult({
       status: "failed",
       exitCode: 1,
@@ -588,6 +645,7 @@ function dispatchToAider(opts, run, writeResult) {
     // a descendant that ignored SIGTERM must not outlive the timeout report: once the
     // parent is down, sweep the group (no-op where taskkill already felled the tree)
     if (watchdogFired) killChild(child, "SIGKILL");
+    flushStreams();
     const finalMessage = assembleFinal();
     const modelFailure = watchdogFired
       ? null
@@ -604,11 +662,18 @@ function dispatchToAider(opts, run, writeResult) {
       finalMessage,
       touchedFiles: gitTouchedFiles(opts.cd),
       ...(succeeded ? {} : { stderrTail: stderrTail.slice(-20) }),
-      ...(watchdogFired
-        ? { error: `aider did not finish within --timeout ${opts.timeout}; killed by the relay watchdog` }
-        : modelFailure
-          ? { error: `aider reported a model or endpoint failure and exited ${code}: ${modelFailure}` }
-          : {}),
+      // Every non-clean outcome carries an `error`. A plain nonzero exit used to fall
+      // through this chain with none, leaving the consumer to infer the cause from
+      // exitCode alone - which the result contract says it should never have to do.
+      ...(succeeded
+        ? {}
+        : watchdogFired
+          ? { error: `aider did not finish within --timeout ${opts.timeout}; killed by the relay watchdog` }
+          : modelFailure
+            ? { error: `aider reported a model or endpoint failure and exited ${code}: ${modelFailure}` }
+            : signal
+              ? { error: `aider was killed by ${signal} — inspect the working tree before re-dispatching` }
+              : { error: `aider exited ${code} without reporting a model or endpoint failure; see stderrTail and final.txt` }),
     });
     printSummary(result, run.resultPath);
     process.exit(result.exitCode);
@@ -628,7 +693,7 @@ function main() {
   const probe = aiderVersion(probeTimeoutMs);
   const writeResult = makeResultWriter(opts, probe.version, run);
   if (!probe.version && !probe.error) {
-    reportUnavailable(writeResult, run.resultPath);
+    reportUnavailable(opts, writeResult, run.resultPath);
     return;
   }
   if (probe.error) {
@@ -656,7 +721,7 @@ function printSummary(result, resultPath) {
   }
   const unexpected = result.readOnly ? withoutAiderArtifacts(touched) : [];
   if (unexpected.length) {
-    lines.push(`warning: --read-only dispatched aider --dry-run, yet ${unexpected.length} path(s) outside aider's own .aider* bookkeeping changed. Inspect the diff before trusting this run.`);
+    lines.push(`warning: --read-only dispatched aider --dry-run, yet ${unexpected.length} path(s) outside aider's own generated history and cache changed. Inspect the diff before trusting this run.`);
   }
   if (result.stderrTail && result.stderrTail.length) {
     lines.push("last stderr:");

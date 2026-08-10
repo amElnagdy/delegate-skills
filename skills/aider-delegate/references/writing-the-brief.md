@@ -44,7 +44,7 @@ What to tell me when done (see below).
 ## Scope the files explicitly
 
 Aider builds a repo map and pulls in files it thinks are relevant, which is useful for discovery and
-risky for a bounded task. Two relay flags make the boundary real:
+risky for a bounded task. Two relay flags aim the run:
 
 - `--file <path>` puts a file in Aider's **editing** scope. Repeatable.
 - `--read <path>` supplies a file as **read-only context**. Repeatable.
@@ -52,8 +52,16 @@ risky for a bounded task. Two relay flags make the boundary real:
 Use `--read` for the interface, schema, or example the change must conform to, and `--file` for what
 should actually change. `--subtree-only` restricts Aider to the current subtree of the repository.
 
-Scoping the dispatch does not replace a `DO NOT TOUCH` section - state the boundary in the brief too,
-because the brief is what Aider reasons about.
+**These are chat-context controls, not a security boundary.** They decide what Aider starts with, and
+what you pay for in tokens - they do not confine what the run can reach. Aider has no sandbox, the
+relay dispatches it with `--yes-always`, and a run that decides it needs another file is not stopped
+by their absence. Treat them as aim, not as a fence. When a change genuinely must not be able to touch
+something, the boundary has to come from outside Aider: a container, a VM, or a throwaway
+`git worktree` holding only what the task may see.
+
+Scoping the dispatch also does not replace a `DO NOT TOUCH` section - state the boundary in the brief
+too, because the brief is what Aider reasons about, and then verify it in the diff rather than
+assuming it held.
 
 ## Always ask for the report explicitly
 
