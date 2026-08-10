@@ -463,7 +463,11 @@ function reportUnavailable(opts, writeResult, resultPath) {
   });
   printSummary(result, resultPath);
   process.stderr.write("relay: `aider` not found on PATH. Install Aider (https://aider.chat/docs/install.html) and configure a model.\n");
-  process.exit(127);
+  // Set the code and return rather than process.exit(): printSummary writes aider's whole
+  // final report in one stdout write, and stdout to a pipe is asynchronous on macOS - which
+  // is exactly how an orchestrator captures this. Forcing exit can truncate that write.
+  // Every caller of this helper already returns, so falling through dispatches nothing.
+  process.exitCode = 127;
 }
 
 function reportVersionFailure(opts, writeResult, run, error, probeTimeoutMs) {
@@ -484,7 +488,7 @@ function reportVersionFailure(opts, writeResult, run, error, probeTimeoutMs) {
   });
   printSummary(result, run.resultPath);
   process.stderr.write(`relay: ${message}\n`);
-  process.exit(result.exitCode);
+  process.exitCode = result.exitCode;
 }
 
 // Aider exits 0 after reporting a model or endpoint failure, so exit status alone
@@ -613,6 +617,9 @@ function dispatchToAider(opts, run, writeResult) {
         // the child may flush files during the grace window; refresh the snapshot so the
         // artifact matches the tree the orchestrator will actually find
         writeResult({ ...abortedFields, touchedFiles: gitTouchedFiles(opts.cd) });
+        // The one forced exit the relay keeps. The other paths set process.exitCode so the
+        // summary can drain, but here a child that refused to die would keep the loop alive
+        // and hang the relay; after the grace window, leaving is the point.
         process.exit(result.exitCode);
       }, 2000);
     });
@@ -634,7 +641,7 @@ function dispatchToAider(opts, run, writeResult) {
       error: String(err && err.message ? err.message : err),
     });
     printSummary(result, run.resultPath);
-    process.exit(1);
+    process.exitCode = 1;
   });
 
   child.on("close", (code, signal) => {
@@ -676,7 +683,7 @@ function dispatchToAider(opts, run, writeResult) {
               : { error: `aider exited ${code} without reporting a model or endpoint failure; see stderrTail and final.txt` }),
     });
     printSummary(result, run.resultPath);
-    process.exit(result.exitCode);
+    process.exitCode = result.exitCode;
   });
 }
 
