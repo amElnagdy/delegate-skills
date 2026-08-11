@@ -58,6 +58,7 @@ later-edited project config fails closed until it is reviewed and written again 
 | `cursor` | cursor-delegate | `cursor-agent` | model, force, timeout, readOnly |
 | `pi` | pi-delegate | `pi` | provider, model, timeout, readOnly |
 | `aider` | aider-delegate | `aider` | model, timeout, readOnly |
+| `gemini` | gemini-delegate | `gemini` | model, sandbox, timeout, readOnly |
 
 OpenCode uses `variant` for reasoning intensity, not `effort`. Do not write `effort` on an `opencode` lane.
 OpenCode lanes **require** `model` in `provider/model` form, with a non-empty provider before the first

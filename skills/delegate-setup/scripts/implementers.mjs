@@ -248,7 +248,7 @@ export const IMPLEMENTERS = Object.freeze([
     winShell: true,
   },
   {
-    key: "aider",
+key: "aider",
     skill: "aider-delegate",
     binary: "aider",
     versionArgs: ["--version"],
@@ -263,6 +263,21 @@ export const IMPLEMENTERS = Object.freeze([
     usageProbe: null,
     supports: ["model", "timeout", "readOnly"],
     winShell: false,
+  },
+  {
+    key: "gemini",
+    skill: "gemini-delegate",
+    binary: "gemini",
+    versionArgs: ["--version"],
+    authProbe: null,
+    // Gemini's CLI reference documents model aliases and concrete model ids but
+    // does not provide a safe offline listing command for the relay.
+    modelProbe: null,
+    // Gemini stores sessions under its own user state; the layout is not a
+    // stable public contract, so usage remains unknown rather than guessed.
+    usageProbe: null,
+    supports: ["model", "sandbox", "timeout", "readOnly"],
+    winShell: true,
   },
 ]);
 

@@ -140,7 +140,40 @@ if (process.env.SMOKE_MODE === "grok-read-only") {
   console.log(JSON.stringify({ type: "end", sessionId: "grok-session-1" }));
   process.exit(0);
 }
-if (["pi-success", "pi-error"].includes(process.env.SMOKE_MODE)) {
+if (["gemini-success", "gemini-error", "gemini-read-only-write"].includes(process.env.SMOKE_MODE)) {
+  let brief = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (chunk) => { brief += chunk; });
+  process.stdin.on("end", () => {
+    const failed = process.env.SMOKE_MODE === "gemini-error";
+    if (process.env.SMOKE_CAPTURE_FILE) {
+      fs.writeFileSync(process.env.SMOKE_CAPTURE_FILE, JSON.stringify({ args, brief }));
+    }
+    if (process.env.SMOKE_MODE === "gemini-read-only-write") {
+      fs.writeFileSync("gemini-read-only-violation.txt", "written by fake gemini\n");
+    }
+    console.log(JSON.stringify({
+      type: "init",
+      session_id: "gemini-session-1",
+      model: "gemini-2.5-pro",
+    }));
+    console.log(JSON.stringify({
+      type: "message",
+      role: "assistant",
+      content: failed ? "fake gemini failed" : "fake gemini completed",
+      session_id: "gemini-session-1",
+    }));
+    console.log(JSON.stringify({
+      type: "result",
+      session_id: "gemini-session-1",
+      status: failed ? "error" : "success",
+      stats: { input_tokens: 7, output_tokens: 2 },
+      ...(failed ? { error: { message: "fake gemini provider failure" } } : {}),
+    }));
+    process.exit(0);
+  });
+}
+else if (["pi-success", "pi-error"].includes(process.env.SMOKE_MODE)) {
   let brief = "";
   process.stdin.setEncoding("utf8");
   process.stdin.on("data", (chunk) => { brief += chunk; });

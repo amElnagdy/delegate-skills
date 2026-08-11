@@ -16,6 +16,7 @@ import { runTimeoutTree } from "./timeout-tree.mjs";
 import { runAbort } from "./abort.mjs";
 import { runDelegateSetup } from "./delegate-setup.mjs";
 import { runAider } from "./aider.mjs";
+import { runGemini } from "./gemini.mjs";
 
 export const runners = [
   ["package-shape", runPackageShape],
@@ -36,4 +37,5 @@ export const runners = [
   ["timeout-tree", runTimeoutTree],
   ["abort", runAbort],
   ["delegate-setup", runDelegateSetup],
+  ["gemini", runGemini],
 ];

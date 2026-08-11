@@ -76,6 +76,7 @@ Skip setup when you want one implementer or one-off dials. Pick the skill for a 
 | [`pi-delegate`](skills/pi-delegate/SKILL.md) | [Pi](https://github.com/earendil-works/pi-mono) (`pi`) | full local tools — no sandbox, no permission modes [^none]; project trust opt-in | `--read-only` (`read,grep,find,ls`) | `--resume-last`, `--session <id>` |
 | [`qoder-delegate`](skills/qoder-delegate/SKILL.md) | [Qoder](https://docs.qoder.com/en/cli/quick-start) (`qodercli`) | `auto` permission mode; bypass opt-in | `--permission-mode plan` | `--resume-last`, `--resume <id>` |
 | [`vibe-delegate`](skills/vibe-delegate/SKILL.md) | [Mistral Vibe](https://github.com/mistralai/mistral-vibe) (`vibe`) | `accept-edits`; `--full-access` opt-in | `--plan-only` (`plan` agent) | `--resume-last`, `--session <id>` |
+| [`gemini-delegate`](skills/gemini-delegate/SKILL.md) | [Google Gemini CLI](https://github.com/google-gemini/gemini-cli) (`gemini`) | `auto_edit` approval mode; `--sandbox` opt-in | `--read-only` (`plan` approval mode; verify Git diff) | `--resume-last`, `--resume <index>` |
 
 [^none]: No CLI-enforced read-only mode. `touchedFiles` and the diff, not a flag, are the guarantee.
 
@@ -237,6 +238,10 @@ Per skill — platform, CLI version, and what the run exercised:
   `--session`, and `--resume-last` runs are contributor-reported.
 - `qoder-delegate` — macOS, `qodercli` 1.0.47, by the contributor: Lite edit run, `accept_edits`,
   explicit model and 32768-token context window, no commit.
+- `gemini-delegate` — contract-tested against the public Gemini CLI v0.54.4 headless contract:
+  non-TTY stdin brief delivery with `--output-format stream-json`, result/session/model/stats capture, approval-mode
+  plan/read-only mapping, resume-last mapping, bounded version preflight, missing binary, and
+  whole-process-tree timeout/abort cleanup. No authenticated live Gemini run is claimed.
 - `codex-delegate`, `opencode-delegate`, `vibe-delegate` — contract-tested only: argument validation,
   bounded version preflight, missing binary, result parsing, and whole-process-tree timeout/abort
   cleanup. No end-to-end run is recorded here.
