@@ -225,9 +225,12 @@ Per skill — platform, CLI version, and what the run exercised:
 - `zcode-delegate` — Windows, `zcode` 0.16.1: read-only (`plan`) run leaving a clean tree with the
   Git tripwire false; write run under `yolo` creating the briefed file and reporting it in
   `touchedFiles`; `--session` resume with an attached delta brief, which recalled the earlier turn;
-  single-document `--json` parsing past the AI SDK's stdout banner; `--version` preflight; and
-  discovery resolving the CLI from the app bundle rather than PATH. `build`/`edit` rejection,
-  the missing-CLI path, and the timeout/abort matrix are contract-tested. No macOS or Linux run.
+  single-document `--json` parsing; `--version` preflight; and discovery resolving the CLI from the
+  app bundle rather than PATH. Contract-tested: `build`/`edit` rejection, the missing-CLI path,
+  tolerance of the AI SDK banner that ZCode can print on stdout ahead of the JSON (observed in
+  direct CLI probes; exercised in the suite by the fake), and the timeout matrix. The abort matrix
+  is POSIX-only — Windows delivers no catchable SIGTERM — so for this relay it first runs in CI.
+  No macOS or Linux run is recorded.
 - `codex-delegate`, `opencode-delegate`, `vibe-delegate` — contract-tested only: argument validation,
   bounded version preflight, missing binary, result parsing, and whole-process-tree timeout/abort
   cleanup. No end-to-end run is recorded here.

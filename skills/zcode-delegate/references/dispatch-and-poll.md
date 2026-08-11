@@ -107,3 +107,8 @@ If the document cannot be parsed at all:
   `sess_`-prefixed; copy them from a prior `result.json`, not from memory.
 - **`completed` but `touchedFiles` is empty on a write run** — read `finalMessage`. ZCode may have
   reported that it could not proceed. That is a real outcome, not a relay bug.
+- **`(no final message captured)` on a resumed plan-mode run** — ZCode has been observed returning
+  `"response": ""` while doing substantial work (658 output tokens across 602 events in one measured
+  run). The relay reports what ZCode sent, so an empty report here is the CLI's, not a parse failure:
+  `parseWarning` will be absent and `usage` non-zero. Read `outputPath` and the working tree rather
+  than concluding nothing happened.
