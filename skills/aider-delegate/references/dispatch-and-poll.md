@@ -101,7 +101,7 @@ Everything lands in the run directory (temp by default, so the repo under review
 | Field | Meaning |
 | --- | --- |
 | `status` | `completed`, `failed`, `timeout`, `aborted`, or `aider_unavailable`. |
-| `exitCode` | Aider's exit code, or 128+signal, or 127 when the binary is missing. |
+| `exitCode` | Aider's exit code, or 128+signal, or 127 when the binary is missing. An exit-0 model/endpoint failure detected in the report is remapped to `1`. |
 | `signal` | The signal that killed the child, else `null`. |
 | `aiderVersion` | What `aider --version` reported. |
 | `finalMessage` | Aider's own report. |

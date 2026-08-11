@@ -14,6 +14,7 @@ import { runReadOnlyTripwire } from "./read-only-tripwire.mjs";
 import { runTimeoutTree } from "./timeout-tree.mjs";
 import { runAbort } from "./abort.mjs";
 import { runDelegateSetup } from "./delegate-setup.mjs";
+import { runAider } from "./aider.mjs";
 
 export const runners = [
   ["package-shape", runPackageShape],
@@ -28,6 +29,7 @@ export const runners = [
   ["qoder", runQoder],
   ["pi", runPi],
   ["claude", runClaude],
+  ["aider", runAider],
   ["read-only-tripwire", runReadOnlyTripwire],
   ["timeout-tree", runTimeoutTree],
   ["abort", runAbort],

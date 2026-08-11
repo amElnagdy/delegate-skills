@@ -34,6 +34,10 @@
  * run stays quiet and leaves no artifacts of its own in the tree:
  *   --yes-always         Aider's own autonomy term; headless runs cannot answer
  *                        a confirmation prompt.
+ *   --no-suggest-shell-commands
+ *                        The other half of --yes-always: Aider's
+ *                        --suggest-shell-commands defaults to True, and under
+ *                        --yes-always a suggestion runs on the host unread.
  *   --no-gitignore       Aider otherwise writes `.aider*` into .gitignore on
  *                        startup, dirtying the tree the reviewer is about to read.
  *   --no-analytics       No telemetry from the dispatched run. Aider's own
@@ -89,7 +93,8 @@
  * Exit codes: a pre-run usage error (bad/missing args, empty brief) exits 2
  * before any run and writes no result file; a missing `aider` binary exits 127
  * with one; otherwise the exit code mirrors Aider's own (0 success, non-zero
- * failure). If the child dies on a signal, the exit code is 128 plus the signal
+ * failure), except an exit-0 model/endpoint failure detected in the report exits
+ * 1. If the child dies on a signal, the exit code is 128 plus the signal
  * number and `result.json` records the signal. Once the brief validates,
  * `result.json` is written on every outcome - completed, failed, timeout (the
  * --timeout watchdog fired), aborted (the relay itself was killed and forwarded
