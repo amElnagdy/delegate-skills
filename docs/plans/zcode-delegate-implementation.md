@@ -304,6 +304,18 @@ git commit -m "feat(zcode-delegate): parse args and reject headless-unusable mod
 - Consumes: `opts.zcodePath` from Task 2.
 - Produces: `resolveZcode(opts) -> { command, prefixArgs, source } | null`. `command` is an absolute path or a bare binary name; `prefixArgs` is `[]` for a binary or `[bundlePath]` when `command` is `process.execPath`. `source` is one of `"path"`, `"flag"`, `"env"`, `"bundle"`.
 
+> **Why the unavailable test cannot clear `PATH`.** Every sibling proves "missing binary" by running
+> with `PATH: ""`. That is **invalid for zcode**: with `PATH` empty, bundle auto-discovery still finds
+> an installed ZCode desktop app, so the run would succeed on any developer machine that has ZCode
+> and fail only in CI — the worst kind of flake. Instead, an explicitly-named CLI that does not exist
+> resolves to **unavailable** (127 *with* a result file), not a usage error. That is both the honest
+> reading ("the CLI you named isn't there" is the same condition as "couldn't find one") and
+> deterministic on every machine. Only malformed usage — `--zcode-path` with no value — is exit 2.
+>
+> For the same reason, **do not** add `zcode` to the hardcoded list in `test/relay/preflight.mjs`:
+> that loop's unavailable sub-test is `PATH`-based. zcode carries its own preflight checks in its own
+> module, exactly as `qoder` does.
+
 - [ ] **Step 1: Write the failing test**
 
 Append to `test/relay/zcode.mjs`, inside `runZcode`:
@@ -312,8 +324,14 @@ Append to `test/relay/zcode.mjs`, inside `runZcode`:
   const missingOutDir = join(h.scratch, "out-unavailable-zcode");
   const missing = spawnSync(process.execPath, [
     h.relayPath("zcode"), "--brief", h.briefPath, "--cd", workDir, "--out-dir", missingOutDir,
-  ], { env: { ...process.env, PATH: "", ZCODE_CLI: "" }, encoding: "utf8" });
-  h.check("zcode unavailable: missing binary writes the structured result",
+  ], {
+    // Deterministic on every machine: naming a CLI that does not exist is the
+    // unavailable condition. Clearing PATH would not be - bundle discovery
+    // would still find an installed ZCode desktop app.
+    env: { ...h.baseEnv, ZCODE_CLI: join(h.scratch, "no-such-zcode.cjs") },
+    encoding: "utf8",
+  });
+  h.check("zcode unavailable: an explicitly named missing CLI writes the structured result",
     missing.status === 127 &&
     existsSync(join(missingOutDir, "result.json")) &&
     h.result(missingOutDir).status === "zcode_unavailable");
@@ -351,15 +369,14 @@ function asTarget(file, source) {
     : { command: file, prefixArgs: [], source };
 }
 
+/** null means unavailable (127 with a result file), never a usage error. */
 function resolveZcode(opts) {
-  if (opts.zcodePath) {
-    if (!existsSync(opts.zcodePath)) fail(`--zcode-path not found: ${opts.zcodePath}`);
-    return asTarget(resolve(opts.zcodePath), "flag");
-  }
-  const fromEnv = (process.env.ZCODE_CLI || "").trim();
-  if (fromEnv) {
-    if (!existsSync(fromEnv)) fail(`ZCODE_CLI not found: ${fromEnv}`);
-    return asTarget(resolve(fromEnv), "env");
+  // An explicitly named CLI wins, and a named-but-missing one is "unavailable" -
+  // the same condition as finding none, so it stays a 127 with a result file.
+  const named = opts.zcodePath || (process.env.ZCODE_CLI || "").trim();
+  if (named) {
+    if (!existsSync(named)) return null;
+    return asTarget(resolve(named), opts.zcodePath ? "flag" : "env");
   }
   if (onPath("zcode")) return { command: "zcode", prefixArgs: [], source: "path" };
   for (const candidate of bundleCandidates()) {
@@ -568,12 +585,40 @@ Take `gitTripwireState(opts.cd)` before dispatch when `opts.mode === "plan"`, an
 
 `makeResultWriter` emits: `schema: "delegate-relay.result.v1"`, `lane`, `laneSource`, `workdir`, `mode`, `readOnly`, `disallowedTools`, `session`, `resumeLast`, `zcodeVersion`, `zcodeSource` (from `resolveZcode`), `startedAt`, `finishedAt`, `briefPath`, `outputPath`, `finalPath`, plus the per-outcome `status`, `exitCode`, `signal`, `sessionId`, `finalMessage`, `touchedFiles`, `usage`, `contextWindow`, `readOnlyViolation`. Write atomically via temp + rename.
 
-- [ ] **Step 6: Run parity and the full suite**
+- [ ] **Step 6: Add zcode's own preflight checks**
+
+zcode is deliberately absent from `test/relay/preflight.mjs` (see Task 3), so add the equivalent to
+`test/relay/zcode.mjs`, mirroring the `qoder` module:
+
+```js
+  for (const [mode, expectedStatus, expectedExit] of [
+    ["zcode-version-hang", "timeout", 124],
+    ["zcode-version-fail", "failed", 7],
+  ]) {
+    const preflightOutDir = join(h.scratch, `out-${mode}`);
+    const preflight = spawnSync(process.execPath, [
+      h.relayPath("zcode"), "--brief", h.briefPath, "--cd", workDir,
+      "--out-dir", preflightOutDir, "--timeout", "1s",
+    ], { env: { ...h.baseEnv, SMOKE_MODE: mode }, encoding: "utf8", timeout: 15_000 });
+    const value = existsSync(join(preflightOutDir, "result.json")) ? h.result(preflightOutDir) : {};
+    h.check(`zcode preflight: ${mode} is explicit and prevents dispatch`,
+      preflight.status === expectedExit &&
+      value.status === expectedStatus &&
+      value.error?.includes("version preflight") &&
+      value.error?.includes("was not dispatched"));
+  }
+```
+
+The shared fake already routes any `*-version-hang` / `*-version-fail` `SMOKE_MODE` by suffix, so no
+fixture change is needed. Keep the copied `reportVersionFailure` wording containing both
+`version preflight` and `was not dispatched`.
+
+- [ ] **Step 7: Run parity and the full suite**
 
 Run: `node test/relay-parity.mjs && node test/relay-isolated.mjs && node test/relay-smoke.mjs`
 Expected: PASS, including the timeout and abort matrices now covering zcode.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add skills/zcode-delegate/scripts/relay.mjs test/relay-parity.mjs test/relay-isolated.mjs
@@ -747,7 +792,8 @@ Write down platform, CLI version, and exactly which runs happened. Anything not 
 
 - [ ] **Step 1: README table row**
 
-Add to the "Delegate directly" table, alphabetically between `qoder` and `vibe`:
+The table is alphabetical by skill name (`agy` → `vibe`), so `zcode-delegate` goes **last, after the
+`vibe` row**:
 
 | [`zcode-delegate`](skills/zcode-delegate/SKILL.md) | [Z.AI ZCode](https://zcode.z.ai) (`zcode`) | `--mode yolo` | `--read-only` (`--mode plan`) | `--resume-last`, `--session <id>` |
 
@@ -765,7 +811,10 @@ Add to the vocabulary table:
 
 | `mode` (`build`/`edit`/`plan`/`yolo`), `session`, `goal` (`--target`), `app-server`, `plugins`, `skills` | ZCode's own terms — use verbatim when discussing `zcode` | don't paraphrase them; `build`/`edit` are not usable headlessly |
 
-Also update the intro sentence's skill count and list, and the pre-publish bullet listing which relays need `shell:true` on win32.
+Also update `AGENTS.md:5`, which currently reads "Ten implementer skills ship today:" — make it
+"Eleven" and add `zcode-delegate` (Z.AI ZCode) to the list that follows. Update the pre-publish
+bullet listing which relays need `shell:true` on win32: zcode needs it **only** when resolved to a
+`.cmd`/`.bat` shim, never for a `node <bundle>` launch.
 
 - [ ] **Step 5: Version lockstep**
 
