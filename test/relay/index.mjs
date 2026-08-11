@@ -14,6 +14,7 @@ import { runReadOnlyTripwire } from "./read-only-tripwire.mjs";
 import { runTimeoutTree } from "./timeout-tree.mjs";
 import { runAbort } from "./abort.mjs";
 import { runDelegateSetup } from "./delegate-setup.mjs";
+import { runZcode } from "./zcode.mjs";
 
 export const runners = [
   ["package-shape", runPackageShape],
@@ -31,5 +32,6 @@ export const runners = [
   ["read-only-tripwire", runReadOnlyTripwire],
   ["timeout-tree", runTimeoutTree],
   ["abort", runAbort],
+  ["zcode", runZcode],
   ["delegate-setup", runDelegateSetup],
 ];

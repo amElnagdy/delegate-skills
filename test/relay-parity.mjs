@@ -4,8 +4,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const RELAYS = ["claude", "codex", "opencode", "agy", "grok", "kimi", "qoder", "vibe", "cursor", "pi"];
-const READ_ONLY_TRIPWIRE_RELAYS = ["claude", "grok"];
+const RELAYS = ["claude", "codex", "opencode", "agy", "grok", "kimi", "qoder", "vibe", "cursor", "pi", "zcode"];
+const READ_ONLY_TRIPWIRE_RELAYS = ["claude", "grok", "zcode"];
 const SYMBOLS = [
   ["MAX_TIMER_MS", "const", RELAYS],
   ["parseDuration", "function", RELAYS],
@@ -27,7 +27,7 @@ const SYMBOLS = [
   ["fingerprintDirtyPaths", "function", READ_ONLY_TRIPWIRE_RELAYS],
   ["changedDirtyPaths", "function", READ_ONLY_TRIPWIRE_RELAYS],
   ["readOnlyVerdict", "function", READ_ONLY_TRIPWIRE_RELAYS],
-  ["MAX_BUFFERED_CHARS", "const", ["claude", "cursor", "grok", "kimi", "opencode", "pi", "qoder", "vibe"]],
+  ["MAX_BUFFERED_CHARS", "const", ["claude", "cursor", "grok", "kimi", "opencode", "pi", "qoder", "vibe", "zcode"]],
   ["makeEventScanner", "function", ["claude", "cursor", "grok", "kimi", "opencode", "pi", "qoder"]],
 ];
 let failed = 0;
