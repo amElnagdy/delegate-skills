@@ -10,7 +10,7 @@ description: >-
 license: MIT
 compatibility: Requires Node 18+. No implementer CLIs are required — the skill discovers what is available.
 metadata:
-  version: 0.4.2
+  version: 0.4.3
 ---
 
 # Delegate Setup

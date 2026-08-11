@@ -74,11 +74,21 @@ Skip setup when you want one implementer or one-off dials. Pick the skill for a 
 | [`pi-delegate`](skills/pi-delegate/SKILL.md) | [Pi](https://github.com/earendil-works/pi-mono) (`pi`) | full local tools — no sandbox, no permission modes [^none]; project trust opt-in | `--read-only` (`read,grep,find,ls`) | `--resume-last`, `--session <id>` |
 | [`qoder-delegate`](skills/qoder-delegate/SKILL.md) | [Qoder](https://docs.qoder.com/en/cli/quick-start) (`qodercli`) | `auto` permission mode; bypass opt-in | `--permission-mode plan` | `--resume-last`, `--resume <id>` |
 | [`vibe-delegate`](skills/vibe-delegate/SKILL.md) | [Mistral Vibe](https://github.com/mistralai/mistral-vibe) (`vibe`) | `accept-edits`; `--full-access` opt-in | `--plan-only` (`plan` agent) | `--resume-last`, `--session <id>` |
+| [`zcode-delegate`](skills/zcode-delegate/SKILL.md) | [Z.AI ZCode](https://zcode.z.ai) (`zcode`) [^zcode] | `--mode yolo` | `--read-only` (`plan` mode) | `--resume-last`, `--session <id>` |
 
 [^none]: No CLI-enforced read-only mode. `touchedFiles` and the diff, not a flag, are the guarantee.
 
 [^grok]: `grok` cannot be prevented from writing headlessly. The relay reports a tri-state
 `readOnlyViolation` tripwire for detected Git-visible changes; it does not enforce or attribute them.
+
+[^zcode]: ZCode ships its CLI **inside the desktop app** — there is no `zcode` on PATH, no npm
+package, and the public docs cover only the GUI. The relay resolves it from PATH, then
+`--zcode-path`/`ZCODE_CLI`, then the installed app bundle. Of ZCode's four documented modes only
+`plan` and `yolo` work headlessly: `build` and `edit` have no permission client there, so they block
+every write tool and exit 0 having changed nothing, and the relay rejects them rather than report
+that as success. ZCode offers `--disallowed-tools` but no `--allowed-tools`, so capability can be
+subtracted, never enumerated. `zcode login` fails on 0.16.1 (`OAuth response is not valid JSON`), so
+the key comes from `ZCODE_API_KEY` / `ANTHROPIC_API_KEY` / `ZAI_API_KEY`.
 
 Each skill name links to its `SKILL.md`, which owns that implementer's prerequisites, flags, and
 caveats. Building one for another CLI? [Claim it first](../../issues?q=is%3Aissue+label%3Aimplementer),
@@ -212,6 +222,12 @@ Per skill — platform, CLI version, and what the run exercised:
   `--session`, and `--resume-last` runs are contributor-reported.
 - `qoder-delegate` — macOS, `qodercli` 1.0.47, by the contributor: Lite edit run, `accept_edits`,
   explicit model and 32768-token context window, no commit.
+- `zcode-delegate` — Windows, `zcode` 0.16.1: read-only (`plan`) run leaving a clean tree with the
+  Git tripwire false; write run under `yolo` creating the briefed file and reporting it in
+  `touchedFiles`; `--session` resume with an attached delta brief, which recalled the earlier turn;
+  single-document `--json` parsing past the AI SDK's stdout banner; `--version` preflight; and
+  discovery resolving the CLI from the app bundle rather than PATH. `build`/`edit` rejection,
+  the missing-CLI path, and the timeout/abort matrix are contract-tested. No macOS or Linux run.
 - `codex-delegate`, `opencode-delegate`, `vibe-delegate` — contract-tested only: argument validation,
   bounded version preflight, missing binary, result parsing, and whole-process-tree timeout/abort
   cleanup. No end-to-end run is recorded here.

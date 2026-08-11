@@ -2,10 +2,11 @@
 
 This repo is a [Skills CLI](https://github.com/vercel-labs/skills) package of **delegation skills** —
 skills that let an orchestrating agent drive a separate CLI coding agent as an implementer, then review
-and land the result. Ten implementer skills ship today: `claude-delegate` (Claude Code),
+and land the result. Eleven implementer skills ship today: `claude-delegate` (Claude Code),
 `codex-delegate` (OpenAI Codex), `opencode-delegate` (OpenCode), `agy-delegate` (Google Antigravity),
 `grok-delegate` (Grok Build), `kimi-delegate` (Kimi Code), `qoder-delegate` (Qoder CLI),
-`vibe-delegate` (Mistral Vibe), `cursor-delegate` (Cursor Agent CLI), and `pi-delegate` (Pi CLI);
+`vibe-delegate` (Mistral Vibe), `cursor-delegate` (Cursor Agent CLI), `pi-delegate` (Pi CLI), and
+`zcode-delegate` (Z.AI ZCode);
 siblings like `gemini-delegate` can be added later without renaming the repo. One **utility** skill
 ships alongside them: `delegate-setup` (configure fleet lanes — setup only, never dispatches).
 
@@ -37,6 +38,7 @@ jargon. Use these terms; don't invent synonyms.
 | `session`, `-c`, `--resume`, `permission mode` (`default`/`accept_edits`/`auto`/`bypass_permissions`/`dont_ask`/`plan`), `print mode`, `stream-json`, `model`, `context window` | Qoder CLI's own terms — use verbatim when discussing Qoder | don't paraphrase them |
 | `--prompt`, `--output` (`streaming`/`json`/`text`), `--agent` (`plan`/`accept-edits`/`auto-approve`), `--max-turns`, `--max-price`, `--max-tokens`, `--trust`, `--resume`, `--continue`, `--enabled-tools`, `--disabled-tools` | Mistral Vibe's own terms — use verbatim when discussing `vibe` | don't invent a Vibe sandbox enum; `--trust` is not a permission mode |
 | `session`, `--continue`, `--session`, `print mode`, `--mode json`, `tools`, `context files`, `project trust` | Pi's own terms — use verbatim when discussing `pi` | don't paraphrase them |
+| `mode` (`build`/`edit`/`plan`/`yolo`), `session` (`sess_…`), `goal` (`--target`), `--attach`, `app-server`, `plugins`, `skills` | ZCode's own terms — use verbatim when discussing `zcode` | don't call `mode` a sandbox or a permission mode; never present `build`/`edit` as usable headlessly |
 
 Banned on sight: coined umbrella terms in user-facing surfaces (README headings, `skills.sh.json`
 titles); any reference to the author's local machine or config; model/version pins (`GPT-5.x` →
@@ -84,7 +86,9 @@ the skill's `relay.mjs`.
   `shell:true` on win32 to resolve the `.cmd` shim (which is why their spaceable args are quoted and
   value flags token-validated); the `claude` and `cursor-agent` launches serialize a pre-joined
   command string through the shell on win32 for the same shim reason; `agy`, `kimi`, current
-  `qodercli`, and `vibe` installs use native binaries. Each changed launch still needs its own Windows
+  `qodercli`, and `vibe` installs use native binaries. `zcode` is resolved rather than assumed —
+  PATH, then `--zcode-path`/`ZCODE_CLI`, then the desktop app's bundled `zcode.cjs` — so it takes
+  `shell:true` only when it resolved to a `.cmd`/`.bat` shim, never for a `node <bundle>` launch. Each changed launch still needs its own Windows
   smoke before claiming support. Upstream Vibe works on Windows but officially supports and targets
   UNIX; this repository's native Windows relay launch is unverified.
 - Keep the README's "Verification status" honest — claim only what's been run.
