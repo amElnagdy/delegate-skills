@@ -233,6 +233,37 @@ export const IMPLEMENTERS = Object.freeze([
     supports: ["provider", "model", "timeout", "readOnly"],
     winShell: true,
   },
+  {
+    key: "zcode",
+    skill: "zcode-delegate",
+    binary: "zcode",
+    versionArgs: ["--version"],
+    // ZCode ships its CLI inside the desktop app rather than on PATH or npm, so
+    // discovery falls back to the installed bundle. Consulted only when `binary`
+    // is absent from PATH; the bundle is a Node bundle, hence the node launcher.
+    locate: {
+      launcher: "node",
+      candidates: {
+        win32: ["%LOCALAPPDATA%/Programs/ZCode/resources/glm/zcode.cjs"],
+        darwin: [
+          "/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs",
+          "~/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs",
+        ],
+        // Linux ships an AppImage with no fixed install path: nothing honest to guess.
+        linux: [],
+      },
+    },
+    // No auth-status command exists, and `zcode login` is broken on 0.16.1
+    // (ZaiCliOAuthError), so auth stays unknown rather than guessed.
+    authProbe: null,
+    // No --model flag: the model is chosen in the CLI's own config file.
+    modelProbe: null,
+    // ~/.zcode/cli holds sess_* directories under several subdirectories, but their
+    // counts disagree, so none is proven one-per-session. Unknown, not guessed.
+    usageProbe: null,
+    supports: ["permissionMode", "timeout", "readOnly"],
+    winShell: false,
+  },
 ]);
 
 /** Prototype-free map so names like "toString" cannot pass as implementers. */
@@ -254,6 +285,13 @@ export const QODER_PERMISSION = Object.freeze([
   "dont_ask",
   "plan",
 ]);
+/**
+ * ZCode's --mode, carried as the `permissionMode` dial. `build` and `edit` are
+ * deliberately absent: a headless run has no permission client, so they block
+ * every write tool and exit 0 having changed nothing. The relay rejects them for
+ * the same reason, so a lane must not be able to select one either.
+ */
+export const ZCODE_MODE = Object.freeze(["plan", "yolo"]);
 /** Positive h/m/s duration, same shape relays accept. */
 export const TIMEOUT_RE = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/;
 

@@ -37,6 +37,7 @@ import {
   MODEL_TOKEN,
   QODER_PERMISSION,
   TIMEOUT_RE,
+  ZCODE_MODE,
 } from "./implementers.mjs";
 
 /** Same ceiling relays use for --timeout (Node setTimeout max ~24.8 days). */
@@ -234,6 +235,11 @@ function validateDialValue(implementer, field, value, laneName, label) {
   }
   if (field === "permissionMode" && implementer === "qoder" && !QODER_PERMISSION.includes(value)) {
     return `${label}: lane ${laneName}.permissionMode must be one of: ${QODER_PERMISSION.join(", ")}`;
+  }
+  // ZCode carries --mode here. build/edit are excluded on purpose: headless runs
+  // have no permission client, so they change nothing and still exit 0.
+  if (field === "permissionMode" && implementer === "zcode" && !ZCODE_MODE.includes(value)) {
+    return `${label}: lane ${laneName}.permissionMode must be one of: ${ZCODE_MODE.join(", ")}`;
   }
   if (field === "variant") {
     // OpenCode appends --variant on win32 shell:true; reject cmd metacharacters.
