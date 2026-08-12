@@ -19,7 +19,7 @@
  * job — after it reviews the diff and re-runs the project gates.
  *
  * Finding the CLI: ZCode ships its CLI inside the desktop app rather than on
- * PATH or npm, so the relay resolves it as PATH → --zcode-path/ZCODE_CLI → the
+ * PATH or npm, so the relay resolves it as --zcode-path/ZCODE_CLI → PATH → the
  * installed app bundle, and records which route won in result.json.
  *
  * Usage:
@@ -353,7 +353,7 @@ function asTarget(file, source) {
 }
 
 /**
- * Resolve the ZCode CLI: PATH → --zcode-path/ZCODE_CLI → installed app bundle.
+ * Resolve the ZCode CLI: --zcode-path/ZCODE_CLI → PATH → installed app bundle.
  * Returns null when none is found, which the caller reports as
  * zcode_unavailable (127 WITH a result file) — never a usage error. A CLI named
  * explicitly that does not exist is the same condition as finding none, so it

@@ -82,13 +82,13 @@ Skip setup when you want one implementer or one-off dials. Pick the skill for a 
 `readOnlyViolation` tripwire for detected Git-visible changes; it does not enforce or attribute them.
 
 [^zcode]: ZCode ships its CLI **inside the desktop app** — there is no `zcode` on PATH, no npm
-package, and the public docs cover only the GUI. The relay resolves it from PATH, then
-`--zcode-path`/`ZCODE_CLI`, then the installed app bundle. Of ZCode's four documented modes only
-`plan` and `yolo` work headlessly: `build` and `edit` have no permission client there, so they block
-every write tool and exit 0 having changed nothing, and the relay rejects them rather than report
-that as success. ZCode offers `--disallowed-tools` but no `--allowed-tools`, so capability can be
-subtracted, never enumerated. `zcode login` fails on 0.16.1 (`OAuth response is not valid JSON`), so
-the key comes from `ZCODE_API_KEY` / `ANTHROPIC_API_KEY` / `ZAI_API_KEY`.
+package, and the public docs cover only the GUI. The relay resolves it from
+`--zcode-path`/`ZCODE_CLI`, then PATH, then the installed app bundle. Of ZCode's four documented
+modes only `plan` and `yolo` work headlessly: `build` and `edit` have no permission client there, so
+they block every write tool and exit 0 having changed nothing, and the relay rejects them rather
+than report that as success. ZCode offers `--disallowed-tools` but no `--allowed-tools`, so
+capability can be subtracted, never enumerated. Where `zcode login` fails with `OAuth response is
+not valid JSON`, the key comes from `ZCODE_API_KEY` / `ANTHROPIC_API_KEY` / `ZAI_API_KEY` instead.
 
 Each skill name links to its `SKILL.md`, which owns that implementer's prerequisites, flags, and
 caveats. Building one for another CLI? [Claim it first](../../issues?q=is%3Aissue+label%3Aimplementer),
@@ -232,8 +232,10 @@ Per skill — platform, CLI version, and what the run exercised:
   dispatch. Contract-tested: `build`/`edit` rejection, the missing-CLI path, tolerance of the AI SDK
   banner that ZCode can print on stdout ahead of the JSON (observed in direct CLI probes; exercised
   in the suite by the fake), and the timeout matrix. The abort matrix is POSIX-only — Windows
-  delivers no catchable SIGTERM — so for this relay it first runs in CI. No macOS or Linux run is
-  recorded.
+  delivers no catchable SIGTERM — so for this relay it first runs in CI. `zcode-delegate` is also
+  absent from the shared read-only tripwire scenario matrix, which runs `claude` and `grok` only —
+  its tripwire helpers are parity-enforced byte-identical, but no zcode-specific worktree-state run
+  is recorded. No macOS or Linux run is recorded.
 - `codex-delegate`, `opencode-delegate`, `vibe-delegate` — contract-tested only: argument validation,
   bounded version preflight, missing binary, result parsing, and whole-process-tree timeout/abort
   cleanup. No end-to-end run is recorded here.
