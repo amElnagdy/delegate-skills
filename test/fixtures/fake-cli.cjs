@@ -91,6 +91,9 @@ if (process.env.SMOKE_MODE === "agy-permission-denied") {
   process.exit(0);
 }
 if (process.env.SMOKE_MODE === "agy-analysis") {
+  if (process.env.SMOKE_ARGS_FILE) fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify(args));
+  const logAt = args.indexOf("--log-file");
+  if (logAt !== -1) fs.writeFileSync(args[logAt + 1], "fake agy log\n");
   console.log("fake agy analysis completed");
   process.exit(0);
 }

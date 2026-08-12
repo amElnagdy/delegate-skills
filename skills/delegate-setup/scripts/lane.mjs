@@ -109,7 +109,7 @@ function normalizeDials(implementerKey, raw) {
     dials.planOnly = true;
     delete dials.readOnly;
   }
-  // claude / cursor / pi keep readOnly as a boolean on opts
+  // agy / claude / cursor / pi keep readOnly as a boolean on opts
   return dials;
 }
 

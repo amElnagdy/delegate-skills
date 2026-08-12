@@ -32,12 +32,14 @@ Options:
 | `--cd <dir>` | Working root for Antigravity (default: current directory). |
 | `--lane <name>` | Fleet lane from `delegate-setup` config. Applies that lane's dials; fails if the lane's `implementer` is not this relay. Explicit dial flags win. |
 | `--model <name>` | Antigravity model label. Optional; a fresh run can use Antigravity's configured default. |
+| `--effort <level>` | Reasoning effort: `low`, `medium`, or `high` (passed as agy's own `--effort`). |
 | `--project <id>` | Use an existing Antigravity project. |
 | `--new-project` | Force a fresh Antigravity project. This is the default for fresh dispatches. |
 | `--resume-last` | Continue the most recent Antigravity conversation; send only the delta brief. |
 | `--conversation <id>` | Continue a specific Antigravity conversation; send only the delta brief. |
 | `--sandbox` | Enable Antigravity's terminal sandbox for the run. |
-| `--dangerously-skip-permissions` | Pass Antigravity's permission-bypass flag. Never use this unless the human explicitly accepts it. |
+| `--read-only` | Run in plan mode (`--mode plan`), removing write and edit paths; mutually exclusive with `--dangerously-skip-permissions`. |
+| `--dangerously-skip-permissions` | Pass Antigravity's permission-bypass flag; mutually exclusive with `--read-only`. Never use this unless the human explicitly accepts it. |
 | `--print-timeout <duration>` | Timeout agy itself applies to print mode (default: `30m`). |
 | `--timeout <dur>` | Relay-side watchdog (e.g. `30m`); overrides the default of `--print-timeout` plus a 60s grace. On expiry the agy process tree is killed and `result.json` gets `status: "timeout"`. Set it explicitly when agy may hang past its own print timeout. Malformed, zero, and out-of-range durations are rejected; the maximum is `596h31m23s`. |
 | `--add-dir <dir>` | Add an extra workspace directory. Repeatable; relative paths resolve against `--cd`. Fresh runs always add the `--cd` repo (absolute path) as a workspace dir. Edits inside extra workspaces are not reported in `touchedFiles`. |
@@ -60,10 +62,11 @@ touched-files report shows only Antigravity's edits and nothing of the helper's 
 - `finalMessage` - Antigravity's stdout response
 - `touchedFiles` - `git status --porcelain` lines in the working root: your review starting point.
   `null` (not `[]`) when git cannot report; `[]` means git ran and the tree is clean
+- `readOnlyViolation` - `true` when fingerprints prove a working-tree change, `false` when coverage is complete and proves none, and `null` when fingerprinting was incomplete or the run was not `--read-only`
 - `briefPath` / `finalPath` / `logPath` / `stderrPath` - the exact brief, final message, Antigravity
   log, and stderr capture
-- `workdir`, `model`, `project` (the `--project` you passed, vs `projectId` parsed from the log),
-  `sandbox`, `dangerouslySkipPermissions`, `resumed` (true for a `--resume-last` or `--conversation`
+- `workdir`, `model`, `effort`, `project` (the `--project` you passed, vs `projectId` parsed from the log),
+  `sandbox`, `readOnly`, `dangerouslySkipPermissions`, `resumed` (true for a `--resume-last` or `--conversation`
   run), `startedAt`, `finishedAt`
 - `stderrTail` - last ~20 stderr lines; present on every run that did not complete (`failed`, `timeout`, `aborted`), except a launch failure, which reports `failed` with no `stderrTail`; also present when `finalMessage` is empty so diagnostics are not discarded
 - `error` - present on a launch failure, `timeout`, `aborted`, headless permission denial, or silent no-op

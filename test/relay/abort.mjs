@@ -12,7 +12,8 @@ if (h.WIN) {
     const grandPidFile = join(h.scratch, `grandpid-abort-${skill}`);
     const workDir = h.freshRepo(`work-abort-${skill}`);
     const lateFile = join(workDir, "late-file.txt");
-    const child = h.runRelay(skill, workDir, outDir, h.EXTRA_ARGS[skill], { SMOKE_PID_FILE: pidFile, SMOKE_GRAND_PID_FILE: grandPidFile, SMOKE_MODE: "abort", SMOKE_LATE_FILE: lateFile });
+    const extraArgs = skill === "agy" ? [...h.EXTRA_ARGS[skill], "--read-only"] : h.EXTRA_ARGS[skill];
+    const child = h.runRelay(skill, workDir, outDir, extraArgs, { SMOKE_PID_FILE: pidFile, SMOKE_GRAND_PID_FILE: grandPidFile, SMOKE_MODE: "abort", SMOKE_LATE_FILE: lateFile });
     let stderr = "";
     child.stderr.on("data", (d) => { stderr += d; });
     h.check(`${skill} aborted: the fake implementer came up`, await h.until(() => existsSync(pidFile), 10_000));
@@ -29,6 +30,10 @@ if (h.WIN) {
       h.check(`${skill} aborted: status is "aborted" (got ${r.status})`, r.status === "aborted");
       h.check(`${skill} aborted: the file flushed during shutdown is in touchedFiles`,
         Array.isArray(r.touchedFiles) && r.touchedFiles.some((f) => f.includes("late-file.txt")));
+      if (skill === "agy") {
+        h.check("agy aborted read-only: late shutdown write sets the final violation verdict",
+          r.readOnlyViolation === true);
+      }
     }
     h.check(`${skill} aborted: the implementer's own subprocess is dead (whole tree felled)`,
       grandPid !== null && await h.until(() => !h.alive(grandPid), 20_000));

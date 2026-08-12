@@ -50,7 +50,7 @@ later-edited project config fails closed until it is reviewed and written again 
 | `cline` | cline-delegate | `cline` | provider, model, timeout |
 | `codex` | codex-delegate | `codex` | model, effort, sandbox, timeout, readOnly |
 | `opencode` | opencode-delegate | `opencode` | model, **variant**, timeout, readOnly |
-| `agy` | agy-delegate | `agy` | model, timeout |
+| `agy` | agy-delegate | `agy` | model, effort, timeout, readOnly |
 | `grok` | grok-delegate | `grok` | model, effort, sandbox, timeout, readOnly |
 | `kimi` | kimi-delegate | `kimi` | model, timeout |
 | `qoder` | qoder-delegate | `qodercli` | model, permissionMode, timeout, readOnly |

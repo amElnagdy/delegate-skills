@@ -27,6 +27,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  AGY_EFFORT,
   ALL_DIALS,
   CLAUDE_EFFORT,
   CODEX_SANDBOX,
@@ -215,6 +216,9 @@ function validateDialValue(implementer, field, value, laneName, label) {
     return null;
   }
   if (field === "effort") {
+    if (implementer === "agy" && !AGY_EFFORT.includes(value)) {
+      return `${label}: lane ${laneName}.effort must be one of: ${AGY_EFFORT.join(", ")}`;
+    }
     if (implementer === "claude" && !CLAUDE_EFFORT.includes(value)) {
       return `${label}: lane ${laneName}.effort must be one of: ${CLAUDE_EFFORT.join(", ")}`;
     }
