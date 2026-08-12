@@ -77,7 +77,7 @@
  */
 
 import {spawn, execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync, renameSync, readFileSync, existsSync, appendFileSync, statSync, readlinkSync, lstatSync, realpathSync } from "node:fs";
+import { mkdirSync, writeFileSync, renameSync, readFileSync, readdirSync, existsSync, appendFileSync, statSync, readlinkSync, lstatSync, openSync, readSync, closeSync, realpathSync } from "node:fs";
 import {join, resolve, basename, dirname, sep, isAbsolute, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { constants, tmpdir, homedir } from "node:os";
