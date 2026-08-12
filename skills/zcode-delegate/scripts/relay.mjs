@@ -44,7 +44,6 @@
  *                           prior result.json). Mutually exclusive with --resume-last.
  *   --zcode-path <file>     Path to the ZCode CLI (a .cjs bundle or a binary/shim).
  *                           Overrides PATH and bundle discovery; ZCODE_CLI does the same.
- *   --skip-git-repo-check   Allow running outside a git repository.
  *   --timeout <dur>         Relay-side watchdog (default: off). Durations use h/m/s
  *                           strings like 30m or 2h. On expiry the ZCode child is killed
  *                           and result.json gets status "timeout". ZCode has no timeout
@@ -163,7 +162,6 @@ function parseArgs(argv) {
     resumeLast: false,
     session: null,
     zcodePath: null,
-    skipGitRepoCheck: false,
     timeout: null,
     outDir: null,
   };
@@ -190,7 +188,6 @@ function parseArgs(argv) {
       case "--resume-last": opts.resumeLast = true; break;
       case "--session": opts.session = next(); break;
       case "--zcode-path": opts.zcodePath = resolve(next()); break;
-      case "--skip-git-repo-check": opts.skipGitRepoCheck = true; break;
       case "--timeout": opts.timeout = next(); flagged.add("timeout"); break;
       case "--out-dir": opts.outDir = resolve(next()); break;
       default:
@@ -275,7 +272,7 @@ function headerComment() {
   // The leading block comment doubles as --help text.
   const src = readFileSync(new URL(import.meta.url), "utf8");
   const match = src.match(/\/\*\*([\s\S]*?)\*\//);
-  if (!match) return "relay.mjs — dispatch a brief to codex exec\n";
+  if (!match) return "relay.mjs — dispatch a brief to the ZCode CLI\n";
   return match[1].replace(/^\s*\* ?/gm, "").trim() + "\n";
 }
 
@@ -298,8 +295,8 @@ function readBrief(opts) {
 }
 
 function versionProbeTimeout(opts) {
-  // The watchdog is only armed once codex is running, so the preflight needs a bound of
-  // its own: a `codex --version` that never returns would wedge the relay here, before
+  // The watchdog is only armed once ZCode is running, so the preflight needs a bound of
+  // its own: a `zcode --version` that never returns would wedge the relay here, before
   // any result.json exists, and --timeout could not reach it.
   const timeoutMs = opts.timeout === null ? null : parseDuration(opts.timeout);
   return timeoutMs === null ? VERSION_PROBE_TIMEOUT_MS : Math.min(timeoutMs, VERSION_PROBE_TIMEOUT_MS);
@@ -384,7 +381,7 @@ function needsShell(target) {
 /**
  * The command as the launcher must receive it. Under shell:true Node joins
  * [file, ...args] into one `cmd /c "..."` string WITHOUT quoting the file, so a
- * resolved shim under e.g. C:\\Program Files\\... splits at the space and cmd
+ * resolved shim under e.g. C:\Program Files\... splits at the space and cmd
  * reports "not recognized" — which zcodeVersion would then classify as "not
  * installed", sending the caller to reinstall a CLI that is already there.
  * Pre-quoting keeps the boundary intact. Only a shim needs it; a `node <bundle>`
@@ -729,7 +726,7 @@ function parseZcodeOutput(stdout) {
 function prepareRunDir(opts, brief) {
   const startedAt = new Date().toISOString();
   // Default the run dir to system temp so the repo under review stays pristine —
-  // the touched-files report must show only Codex's edits, not relay's artifacts.
+  // the touched-files report must show only ZCode's edits, not relay's artifacts.
   const outDir = opts.outDir || join(tmpdir(), "delegate-relay", `${basename(opts.cd) || "repo"}-${timestamp()}`);
   mkdirSync(outDir, { recursive: true });
   const run = {
@@ -848,7 +845,7 @@ function dispatchToZcode(opts, run, target, writeResult, beforeTree, beforeFinge
   });
 
   child.stderr.on("data", (chunk) => {
-    process.stderr.write(chunk); // surface Codex progress live for the orchestrator
+    process.stderr.write(chunk); // surface ZCode progress live for the orchestrator
     const text = stderrDecoder.write(chunk);
     for (const line of text.split("\n")) {
       if (line.trim()) stderrTail.push(line.trimEnd());
@@ -882,7 +879,7 @@ function dispatchToZcode(opts, run, target, writeResult, beforeTree, beforeFinge
 
   // The relay's own death must still produce a result: without this, a kill from the
   // orchestrator's side (its command timeout, a stopped task, a closed terminal) writes
-  // no result.json and leaves the codex child running or dying mid-edit with nothing
+  // no result.json and leaves the ZCode child running or dying mid-edit with nothing
   // recording why. SIGTERM/SIGHUP registration is a no-op on Windows; SIGINT works there.
   for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) {
     process.on(sig, () => {

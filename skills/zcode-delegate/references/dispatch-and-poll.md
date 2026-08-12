@@ -39,7 +39,6 @@ If no CLI is found — including when you name one explicitly that does not exis
 | `--zcode-path <file>` | Point at the CLI explicitly. |
 | `--timeout <dur>` | Relay-side watchdog (default: off). `30m`, `2h`. ZCode has no timeout flag of its own. |
 | `--out-dir <dir>` | Where to write run artifacts (default: a fresh dir under the system temp dir). |
-| `--skip-git-repo-check` | Allow running outside a git repository. |
 | `-h, --help` | Show help. |
 
 ### Why `build` and `edit` are rejected
