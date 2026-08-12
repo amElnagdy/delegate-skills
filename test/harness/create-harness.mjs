@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, mkdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { mkdtempSync, readFileSync, mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { join, delimiter } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
@@ -65,6 +65,9 @@ export function createHarness() {
     baseEnv: null,
     slowWriteNodeOptions: null,
     freshRepo: null,
+    committedRepo: null,
+    gitOnlyPath: null,
+    consoleSignalHelper: null,
     runRelay: null,
     result: null,
     cleanup() {
@@ -78,6 +81,21 @@ export function createHarness() {
     spawnSync("git", ["-C", dir, "init", "-q"], { encoding: "utf8" });
     return dir;
   };
+
+  h.committedRepo = (name) => {
+    const dir = h.freshRepo(name);
+    writeFileSync(join(dir, "seed.txt"), "seed\n");
+    spawnSync("git", ["-C", dir, "config", "user.email", "smoke@example.invalid"], { encoding: "utf8" });
+    spawnSync("git", ["-C", dir, "config", "user.name", "Relay Smoke"], { encoding: "utf8" });
+    spawnSync("git", ["-C", dir, "add", "seed.txt"], { encoding: "utf8" });
+    spawnSync("git", ["-C", dir, "commit", "-qm", "seed"], { encoding: "utf8" });
+    return dir;
+  };
+
+  const gitName = WIN ? "git.exe" : "git";
+  h.gitOnlyPath = (process.env.PATH || "").split(delimiter)
+    .filter((dir) => dir && existsSync(join(dir, gitName)))
+    .join(delimiter);
 
   h.runRelay = (skill, workDir, outDir, extraArgs, extraEnv) =>
     spawn(process.execPath, [h.relayPath(skill), "--brief", h.briefPath, "--cd", workDir, "--out-dir", outDir, ...extraArgs], {

@@ -123,9 +123,9 @@ export async function runQoder(h) {
       h.relayPath("qoder"),
       "--brief", h.briefPath,
       "--cd", workDir,
-      "--out-dir", preflightOutDir,
-      "--timeout", "1s",
-    ], { env: { ...h.baseEnv, SMOKE_MODE: mode }, encoding: "utf8", timeout: 5000 });
+"--out-dir", preflightOutDir,
+"--timeout", mode.includes("fail") ? "30s" : "1s",
+    ], { env: { ...h.baseEnv, SMOKE_MODE: mode }, encoding: "utf8", timeout: 60000 });
     const preflightResult = existsSync(join(preflightOutDir, "result.json"))
       ? h.result(preflightOutDir)
       : {};

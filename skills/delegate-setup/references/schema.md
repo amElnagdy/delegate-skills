@@ -63,6 +63,7 @@ later-edited project config fails closed until it is reviewed and written again 
 | `copilot` | copilot-delegate | `copilot` | model, effort, timeout, readOnly |
 | `warp` | warp-delegate | `oz` | model, timeout |
 | `zcode` | zcode-delegate | `zcode` | permissionMode, timeout, readOnly |
+| `kiro` | kiro-delegate | `kiro-cli` | model, timeout |
 
 ZCode carries its `--mode` as `permissionMode`, and only `plan` and `yolo` are accepted: ZCode also
 documents `build` and `edit`, but a headless run has no permission client, so those two block every

@@ -8,9 +8,12 @@ if (h.WIN) {
 } else {
   for (const skill of h.SKILLS) {
     const outDir = join(h.scratch, `out-abort-${skill}`);
-    const pidFile = join(h.scratch, `pid-abort-${skill}`);
-    const grandPidFile = join(h.scratch, `grandpid-abort-${skill}`);
-    const workDir = h.freshRepo(`work-abort-${skill}`);
+    // Kiro requires a verifiable HEAD and scrubs SMOKE_* from the implementer
+    // environment, so it runs in a committed repo and its native fake re-derives
+    // these pid files from its cwd (same pattern as the timeout-tree matrix).
+    const workDir = skill === "kiro" ? h.committedRepo("work-abort-kiro") : h.freshRepo(`work-abort-${skill}`);
+    const pidFile = skill === "kiro" ? join(workDir, "smoke.pid") : join(h.scratch, `pid-abort-${skill}`);
+    const grandPidFile = skill === "kiro" ? join(workDir, "smoke-grand.pid") : join(h.scratch, `grandpid-abort-${skill}`);
     const lateFile = join(workDir, "late-file.txt");
     const extraArgs = skill === "agy" ? [...h.EXTRA_ARGS[skill], "--read-only"] : h.EXTRA_ARGS[skill];
     const child = h.runRelay(skill, workDir, outDir, extraArgs, { SMOKE_PID_FILE: pidFile, SMOKE_GRAND_PID_FILE: grandPidFile, SMOKE_MODE: "abort", SMOKE_LATE_FILE: lateFile });
