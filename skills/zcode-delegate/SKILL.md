@@ -74,7 +74,8 @@ ZCode sees **only** what you send — no repo memory, no chat history. Everythin
 in the brief: the goal, the current state, what to change, what to leave untouched, the project's
 **actual** gate commands (discover them from the repo's CLAUDE.md/AGENTS.md/Makefile — do not
 assume), and a report contract. Tell ZCode it will **not** commit. One task per brief. The relay
-delivers the brief as an attached file, so length is not a constraint. Full guidance and a template:
+delivers the brief as an attached file, so the command line no longer bounds its length — the
+model's context window still does. Full guidance and a template:
 [references/writing-the-brief.md](references/writing-the-brief.md).
 
 ### 2. Dispatch
