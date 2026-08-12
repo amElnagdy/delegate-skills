@@ -47,6 +47,7 @@ later-edited project config fails closed until it is reviewed and written again 
 | Key | Skill | Binary | Supported dials |
 | --- | --- | --- | --- |
 | `claude` | claude-delegate | `claude` | model, effort, timeout, readOnly |
+| `cline` | cline-delegate | `cline` | provider, model, timeout |
 | `codex` | codex-delegate | `codex` | model, effort, sandbox, timeout, readOnly |
 | `opencode` | opencode-delegate | `opencode` | model, **variant**, timeout, readOnly |
 | `agy` | agy-delegate | `agy` | model, timeout |
@@ -59,7 +60,8 @@ later-edited project config fails closed until it is reviewed and written again 
 
 OpenCode uses `variant` for reasoning intensity, not `effort`. Do not write `effort` on an `opencode` lane.
 OpenCode lanes **require** `model` in `provider/model` form, with a non-empty provider before the first
-`/` and at least one non-`/` character after it.
+`/` and at least one non-`/` character after it. Cline accepts `provider` and `model` as separate
+dials and does not impose that shape.
 
 Boolean dials: `readOnly`, `force`. All other dials are non-empty strings. Duration strings for
 `timeout` use `h`/`m`/`s` (e.g. `30m`) and must fit the relay watchdog ceiling (~24.8 days).
