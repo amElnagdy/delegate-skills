@@ -36,9 +36,9 @@ designed-for, not yet proven.)
    with `--zcode-path <file>` or the `ZCODE_CLI` environment variable. On Linux the app is an
    AppImage with no fixed install path, so one of those two is required.
 2. **A model provider is configured for the CLI.** The CLI keeps its own config at
-   `~/.zcode/cli/config.json`, separate from the desktop app's. `zcode login` is the intended path,
-   but on 0.16.1 it fails with `OAuth response is not valid JSON`. Until that is fixed upstream,
-   supply the key by environment instead — `ZCODE_API_KEY`, `ANTHROPIC_API_KEY`, or `ZAI_API_KEY`.
+   `~/.zcode/cli/config.json`, separate from the desktop app's. `zcode login` is the intended path;
+   where it fails with `OAuth response is not valid JSON`, supply the key by environment instead —
+   `ZCODE_API_KEY`, `ANTHROPIC_API_KEY`, or `ZAI_API_KEY`.
 3. You are in (or will point `--cd` at) the target git repository.
 
 The relay records the CLI version and how it was resolved into `result.json`, so a surprising

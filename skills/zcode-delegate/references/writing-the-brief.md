@@ -11,9 +11,10 @@ The relay writes your brief to `brief.md` in its run directory and passes it wit
 
 That matters in two ways:
 
-- **Length is not a constraint.** ZCode has no stdin delivery, so a brief passed as prompt text
-  would be bounded by the command line (about 32 767 characters on Windows). Attaching sidesteps
-  that entirely — write the brief the task deserves.
+- **The command line stops bounding the brief.** ZCode has no stdin delivery, so a brief passed as
+  prompt text would be limited by the command line (about 32 767 characters on Windows). Attaching
+  sidesteps that entirely — write the brief the task deserves. The configured model's context window
+  still applies, so this buys room, not an unlimited budget.
 - **The brief is a document, not a chat message.** Structure it with headings. ZCode reads it as a
   file.
 
@@ -106,8 +107,11 @@ Give a second opinion on the approach below. Do not change any files.
 For each contested point, defend or concede, and say which evidence moved you.
 ```
 
-Then verify `touchedFiles` came back empty — plan mode's refusal is measured by the relay's
-tripwire, not guaranteed by a sandbox.
+Then verify the result: `touchedFiles` is `[]` and `readOnlyViolation` is `false`. Plan mode's
+refusal is measured by the relay's Git tripwire, not guaranteed by a sandbox, and
+`readOnlyViolation` is tri-state — `true` means Git-visible changes were detected, `false` means
+none were, and `null` means the tripwire could not tell, which calls for inspecting the tree
+yourself rather than assuming either.
 
 ## Delta briefs for rework
 
