@@ -7,7 +7,7 @@ description: >-
   small enough to do inline, or when the user wants code written directly without delegation.
 license: MIT
 metadata:
-  version: 0.4.3
+  version: 0.4.2
 ---
 
 # Qoder Delegate

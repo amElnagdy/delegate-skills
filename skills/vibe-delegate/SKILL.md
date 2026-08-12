@@ -9,7 +9,7 @@ description: >-
   directly without delegating.
 license: MIT
 metadata:
-  version: 0.4.3
+  version: 0.4.2
 ---
 
 # Vibe Delegate

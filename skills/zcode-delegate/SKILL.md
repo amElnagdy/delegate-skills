@@ -10,7 +10,7 @@ description: >-
 license: MIT
 compatibility: Requires the `zcode` CLI (Z.AI ZCode) with a configured model provider, Node 18+, and git. ZCode ships its CLI inside the desktop app rather than on PATH or npm — see Prerequisites. The orchestrating agent must be able to run shell commands and read files. Shell examples assume bash/zsh (macOS/Linux, or Git Bash/WSL on Windows).
 metadata:
-  version: 0.4.3
+  version: 0.4.2
 ---
 
 # ZCode Delegate

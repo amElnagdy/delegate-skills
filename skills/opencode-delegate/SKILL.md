@@ -10,7 +10,7 @@ description: >-
 license: MIT
 compatibility: Requires the `opencode` CLI installed and authenticated, Node 18+, and git. The orchestrating agent must be able to run shell commands and read files. Shell examples assume bash/zsh (macOS/Linux, or Git Bash/WSL on Windows).
 metadata:
-  version: 0.4.3
+  version: 0.4.2
 ---
 
 # OpenCode Delegate
