@@ -8,7 +8,7 @@ description: >-
   through agy while staying the reviewer. DO NOT USE for tasks small enough to do inline, or when the
   user wants the code written directly without delegating.
 license: MIT
-compatibility: Requires the `agy` CLI installed and authenticated, Node.js, and git. The orchestrating agent must be able to run shell commands and read files. Shell examples assume bash/zsh (macOS/Linux, or Git Bash/WSL on Windows).
+compatibility: Requires the `agy` CLI installed and authenticated, Node.js, and git. The orchestrator must be able to run shell commands and read files. Shell examples assume bash/zsh (macOS/Linux, or Git Bash/WSL on Windows).
 metadata:
   version: 0.4.2
 ---
