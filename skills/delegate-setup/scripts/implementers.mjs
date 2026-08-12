@@ -233,6 +233,17 @@ export const IMPLEMENTERS = Object.freeze([
     supports: ["provider", "model", "timeout", "readOnly"],
     winShell: true,
   },
+  {
+    key: "kiro",
+    skill: "kiro-delegate",
+    binary: "kiro-cli",
+    versionArgs: ["--version"],
+    authProbe: null,
+    modelProbe: null,
+    usageProbe: null,
+    supports: ["model", "timeout"],
+    winShell: false,
+  },
 ]);
 
 /** Prototype-free map so names like "toString" cannot pass as implementers. */

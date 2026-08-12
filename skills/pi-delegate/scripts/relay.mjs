@@ -252,7 +252,6 @@ function readBrief(opts) {
 function killChild(child, signal = "SIGTERM") {
   if (!child || !child.pid) return;
   if (process.platform === "win32") {
-    if (signal !== "SIGTERM") return;
     try {
       execFileSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
         stdio: ["ignore", "ignore", "inherit"],

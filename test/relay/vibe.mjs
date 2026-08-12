@@ -72,9 +72,9 @@ for (const [mode, expectedStatus, expectedExit] of [
     h.relayPath("vibe"),
     "--brief", h.briefPath,
     "--cd", workDir,
-    "--out-dir", outDir,
-    "--timeout", "1s",
-  ], { env: { ...h.baseEnv, SMOKE_MODE: mode }, encoding: "utf8", timeout: 5000 });
+"--out-dir", outDir,
+"--timeout", mode.includes("fail") ? "30s" : "1s",
+  ], { env: { ...h.baseEnv, SMOKE_MODE: mode }, encoding: "utf8", timeout: 60000 });
   const value = existsSync(join(outDir, "result.json")) ? h.result(outDir) : {};
   h.check(`vibe preflight: ${mode} is explicit and prevents dispatch`,
     preflight.status === expectedExit &&

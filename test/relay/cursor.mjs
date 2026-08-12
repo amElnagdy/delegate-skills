@@ -95,22 +95,39 @@ for (const [flag, bad] of [
 }
 for (const [mode, expectedStatus, expectedExit] of [
   ["cursor-version-hang", "timeout", 124],
+  ["cursor-version-hang-tree", "timeout", 124],
   ["cursor-version-fail", "failed", 7],
 ]) {
   const outDir = join(h.scratch, `out-${mode}`);
+  const versionGrandPidFile = join(cursorNegativeWorkDir, `${mode}-grand.pid`);
   const preflight = spawnSync(process.execPath, [
     h.relayPath("cursor"),
     "--brief", h.briefPath,
     "--cd", cursorNegativeWorkDir,
     "--out-dir", outDir,
-    "--timeout", "1s",
-  ], { env: { ...h.baseEnv, SMOKE_MODE: mode }, encoding: "utf8", timeout: 5000 });
+    "--timeout", mode === "cursor-version-hang" ? "1s" : "30s",
+  ], {
+    env: {
+      ...h.baseEnv,
+      SMOKE_MODE: mode,
+      ...(mode === "cursor-version-hang-tree" ? {
+        SMOKE_VERSION_PID_FILE: join(cursorNegativeWorkDir, `${mode}.pid`),
+        SMOKE_VERSION_GRAND_PID_FILE: versionGrandPidFile,
+      } : {}),
+    },
+    encoding: "utf8",
+    timeout: 60000,
+  });
   const value = existsSync(join(outDir, "result.json")) ? h.result(outDir) : {};
   h.check(`cursor preflight: ${mode} is explicit and prevents dispatch`,
     preflight.status === expectedExit &&
     value.status === expectedStatus &&
     value.error?.includes("version preflight") &&
     value.error?.includes("was not dispatched"));
+  if (mode === "cursor-version-hang-tree") {
+    const grandPid = existsSync(versionGrandPidFile) ? Number(readFileSync(versionGrandPidFile, "utf8")) : null;
+    h.check("cursor preflight: version timeout kills probe grandchild", grandPid !== null && await h.until(() => !h.alive(grandPid), 10000));
+  }
 }
 if (!h.WIN) {
   const outDir = join(h.scratch, "out-abort-preflight-cursor");
@@ -145,10 +162,26 @@ if (!h.WIN) {
     "--brief", h.briefPath,
     "--cd", cursorNegativeWorkDir,
     "--out-dir", outDir,
-  ], { env: { ...process.env, PATH: "" }, encoding: "utf8" });
+  ], { env: { ...process.env, PATH: h.gitOnlyPath, Path: h.gitOnlyPath }, encoding: "utf8", timeout: 60000 });
+  const missingResult = existsSync(join(outDir, "result.json")) ? h.result(outDir) : {};
   h.check("cursor unavailable: structured result replaces stale artifacts",
     missing.status === 127 &&
-    h.result(outDir).status === "cursor_agent_unavailable" &&
+    missingResult.status === "cursor_agent_unavailable" &&
+    missingResult.exitCode === 127 &&
     !existsSync(join(outDir, "final.txt")));
+}
+{
+  const gitStatusWork = h.committedRepo("work-cursor-git-status-unavailable");
+  writeFileSync(join(gitStatusWork, ".git", "index"), "CORRUPT");
+  const gitStatusOut = join(h.scratch, "out-cursor-git-status-unavailable");
+  const gitStatusRun = spawnSync(process.execPath, [
+    h.relayPath("cursor"),
+    "--brief", h.briefPath,
+    "--cd", gitStatusWork,
+    "--out-dir", gitStatusOut,
+  ], { env: { ...h.baseEnv, SMOKE_MODE: "cursor-success", SMOKE_CAPTURE_FILE: join(h.scratch, "capture-cursor-git-status.json") }, encoding: "utf8", timeout: 60000 });
+  const gitStatusValue = existsSync(join(gitStatusOut, "result.json")) ? h.result(gitStatusOut) : {};
+  h.check("cursor git status unavailable fails closed",
+    gitStatusRun.status === 1 && gitStatusValue.status === "failed" && gitStatusValue.exitCode === 1);
 }
 }

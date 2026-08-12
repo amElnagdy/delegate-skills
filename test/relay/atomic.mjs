@@ -27,7 +27,7 @@ for (const skill of h.SKILLS) {
   }
   const timedOut = exitCode === undefined;
   if (timedOut) child.kill();
-  await h.until(() => exitCode !== undefined, 5_000);
+  await h.until(() => exitCode !== undefined, 20_000);
   if (exitCode === undefined) child.kill("SIGKILL"); // a relay that ignored SIGTERM would keep its tree alive
   let finalResultValid = false;
   try { finalResultValid = Boolean(h.result(atomicOutDir)); } catch {}

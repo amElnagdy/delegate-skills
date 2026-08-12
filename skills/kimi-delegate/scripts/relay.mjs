@@ -204,7 +204,6 @@ function readBrief(opts) {
 function killChild(child, signal = "SIGTERM") {
   if (!child || !child.pid) return;
   if (process.platform === "win32") {
-    if (signal !== "SIGTERM") return;
     try {
       execFileSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
         stdio: ["ignore", "ignore", "inherit"],
@@ -232,22 +231,63 @@ function versionProbeTimeout(opts) {
   return Math.min(parseDuration(opts.timeout), VERSION_PROBE_TIMEOUT_MS);
 }
 
-function kimiVersion(probeTimeoutMs) {
-  try {
-    const out = execFileSync("kimi", ["--version"], {
-      encoding: "utf8",
-      timeout: probeTimeoutMs,
-      killSignal: "SIGKILL",
-    }).trim();
-    return { version: out || "unknown", error: null };
-  } catch (err) {
-    // Only a missing binary means "unavailable"; any other version-probe
-    // failure must not masquerade as exit 127.
-    if (err && err.code === "ENOENT") return { version: null, error: null };
-    // A hung probe we killed, or a real non-zero exit, means kimi is installed but not
-    // usable. Dispatching anyway would send the brief to a CLI already known to be broken.
-    return { version: null, error: err };
-  }
+function runVersionProbe(binary, args, timeoutMs, shell = process.platform === "win32") {
+  return new Promise((resolve) => {
+    const child = spawn(binary, args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      shell,
+      windowsHide: true,
+    });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      // A shell-backed .cmd launch has a wrapper plus the actual CLI. Kill the
+      // wrapper's whole tree, not just the process Node started directly.
+      killChild(child, "SIGKILL");
+    }, timeoutMs);
+    const finish = (error, status = null, signal = null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) {
+        error.stdout = stdout;
+        error.stderr = stderr;
+        if (Number.isInteger(status)) error.status = status;
+        error.signal = signal;
+        resolve({ version: null, error });
+        return;
+      }
+      resolve({ version: stdout.trim() || "unknown", error: null });
+    };
+    child.stdout.on("data", (chunk) => { stdout += chunk.toString("utf8"); });
+    child.stderr.on("data", (chunk) => { stderr += chunk.toString("utf8"); });
+    child.on("error", (error) => finish(error));
+    child.on("close", (status, signal) => {
+      if (timedOut) {
+        const error = new Error("version probe timed out");
+        error.code = "ETIMEDOUT";
+        finish(error, status, signal);
+      } else if (status === 0) {
+        finish(null, status, signal);
+      } else {
+        const error = new Error(`version probe exited with ${status ?? "unknown"}`);
+        finish(error, status, signal);
+      }
+    });
+  });
+}
+
+async function kimiVersion(probeTimeoutMs) {
+  // Kimi's supported Windows install is native, but retaining the same PID-aware
+  // probe also prevents a future shim install from reintroducing this leak.
+  const probe = await runVersionProbe("kimi", ["--version"], probeTimeoutMs, false);
+  if (probe.error?.code === "ENOENT") return { version: null, error: null };
+  // A hung probe we killed, or a real non-zero exit, means kimi is installed but not
+  // usable. Dispatching anyway would send the brief to a CLI already known to be broken.
+  return probe;
 }
 
 function parseDuration(duration) {
@@ -563,7 +603,7 @@ function dispatchToKimi(opts, brief, run, writeResult) {
   });
 }
 
-function main() {
+async function main() {
   const opts = parseArgs(process.argv.slice(2));
   const brief = readBrief(opts);
   if (!brief.trim()) fail("empty brief (pass --brief <file> or pipe the brief on stdin)");
@@ -581,7 +621,7 @@ function main() {
   // somewhere to publish result.json rather than exiting silently.
   const run = prepareRunDir(opts, brief);
   const probeTimeoutMs = versionProbeTimeout(opts);
-  const probe = kimiVersion(probeTimeoutMs);
+  const probe = await kimiVersion(probeTimeoutMs);
   const writeResult = makeResultWriter(opts, probe.version, run);
   if (!probe.version && !probe.error) {
     reportUnavailable(writeResult, run.resultPath);
@@ -624,4 +664,4 @@ function printSummary(result, resultPath) {
   process.stdout.write(`${lines.join("\n")}\n`);
 }
 
-main();
+main().catch((error) => fail(error?.message || String(error)));

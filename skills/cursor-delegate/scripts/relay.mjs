@@ -70,7 +70,7 @@
  * to cursor-agent), or cursor_agent_unavailable.
  */
 
-import {spawn, execSync, execFileSync, spawnSync } from "node:child_process";
+import { spawn, execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync, renameSync, rmSync, readFileSync, existsSync, appendFileSync } from "node:fs";
 import {join, resolve, basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -80,6 +80,7 @@ import { StringDecoder } from "node:string_decoder";
 const DEFAULT_TIMEOUT = "30m";
 const MAX_TIMER_MS = 2_147_483_647;
 const VERSION_PROBE_TIMEOUT_MS = 10_000;
+const GRACE_MS = 2_000;
 const SAFE_MODEL = /^[A-Za-z0-9][A-Za-z0-9._:@/[\],=-]*$/;
 const SAFE_SESSION = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 
@@ -225,7 +226,6 @@ function readBrief(opts) {
 function killChild(child, signal = "SIGTERM") {
   if (!child || !child.pid) return;
   if (process.platform === "win32") {
-    if (signal !== "SIGTERM") return;
     try {
       execFileSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
         stdio: ["ignore", "ignore", "inherit"],
@@ -246,31 +246,100 @@ function killChild(child, signal = "SIGTERM") {
   }
 }
 
-function cursorAgentVersion(timeoutMs) {
+function cursorAgentMissingOnWindowsPath() {
+  if (process.platform !== "win32") return false;
+  // Locale-independent missing-binary check. cmd.exe's command-not-found exit
+  // code is not stable across Windows versions/locales, so resolve with
+  // where.exe instead of parsing stderr.
+  const where = join(process.env.SystemRoot || process.env.WINDIR || "C:\\Windows", "System32", "where.exe");
   try {
-    // On Windows, cursor-agent installs as a .cmd shim; Node's CreateProcess only
-    // auto-appends .exe, never .cmd, so launching it needs a shell there or it
-    // ENOENTs on a working install. A pre-joined string (not shell:true + args)
-    // avoids Node's DEP0190 warning. POSIX is unaffected. (git installs a real
-    // git.exe and must NOT go through a shell — see gitTouchedFiles.)
-    const options = {
-      encoding: "utf8",
-      timeout: Math.min(timeoutMs, VERSION_PROBE_TIMEOUT_MS),
-      killSignal: "SIGKILL",
-    };
-    const out = process.platform === "win32"
-      ? execSync("cursor-agent --version", options).trim()
-      : execFileSync("cursor-agent", ["--version"], options).trim();
-    return { version: out || "unknown", error: null };
-  } catch (error) {
-    if (error?.code === "ENOENT") return { version: null, error: null };
-    if (process.platform === "win32" &&
-        /not recognized as an internal or external command/i.test(String(error?.stderr || ""))) {
-      return { version: null, error: null };
-    }
-    return { version: null, error };
+    execFileSync(where, ["cursor-agent"], { encoding: "utf8", timeout: 2_000, stdio: ["ignore", "pipe", "ignore"] });
+    return false;
+  } catch {
+    return true;
   }
 }
+
+function cursorAgentVersion(timeoutMs) {
+  if (cursorAgentMissingOnWindowsPath()) return Promise.resolve({ version: null, error: null });
+  return new Promise((resolveProbe) => {
+    // On Windows, cursor-agent installs as a .cmd shim; Node's CreateProcess
+    // only auto-appends .exe, never .cmd, so it needs a shell there. The command
+    // string is fixed and contains no user input. POSIX spawns detached so
+    // killChild can fell the whole process group.
+    const child = process.platform === "win32"
+      ? spawn("cursor-agent --version", { shell: true, stdio: ["ignore", "pipe", "pipe"] })
+      : spawn("cursor-agent", ["--version"], { detached: true, stdio: ["ignore", "pipe", "pipe"] });
+    activePreflightChild = child;
+    let settled = false;
+    let timedOut = false;
+    let graceTimer = null;
+    let graceExpired = false;
+    let pendingClose = null;
+    let stdout = "";
+    let stderr = "";
+    const outDecoder = new StringDecoder("utf8");
+    const errDecoder = new StringDecoder("utf8");
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      activePreflightChild = null;
+      clearTimeout(timer);
+      if (graceTimer) clearTimeout(graceTimer);
+      stdout += outDecoder.end();
+      stderr += errDecoder.end();
+      resolveProbe({ version: result.version ?? null, error: result.error ?? null, stdout, stderr });
+    };
+    const finishAfterClose = (result) => {
+      if (timedOut && !graceExpired) pendingClose = result;
+      else finish(result);
+    };
+    const forceStop = () => {
+      killChild(child, "SIGKILL");
+      graceExpired = true;
+      if (pendingClose) {
+        const result = pendingClose;
+        pendingClose = null;
+        finish(result);
+      }
+    };
+    const timer = setTimeout(() => {
+      if (settled) return;
+      timedOut = true;
+      killChild(child);
+      graceTimer = setTimeout(forceStop, GRACE_MS);
+    }, Math.min(timeoutMs, VERSION_PROBE_TIMEOUT_MS));
+    child.stdout.on("data", (chunk) => { stdout += outDecoder.write(chunk); });
+    child.stderr.on("data", (chunk) => { stderr += errDecoder.write(chunk); });
+    child.on("error", (error) => finishAfterClose({
+      version: null,
+      error: error?.code === "ENOENT" ? null : error,
+    }));
+    child.on("close", (code, signal) => {
+      if (timedOut) {
+        const error = new Error("cursor-agent version preflight timed out");
+        error.code = "ETIMEDOUT";
+        finishAfterClose({ version: null, error });
+        return;
+      }
+      if (code === 0) {
+        finishAfterClose({ version: stdout.trim() || "unknown", error: null });
+        return;
+      }
+      // cmd.exe's command-not-found code is unreliable; treat it as missing too.
+      if (code === 9009) {
+        finishAfterClose({ version: null, error: null });
+        return;
+      }
+      const error = new Error(`cursor-agent version preflight exited with code ${code ?? "unknown"}`);
+      error.status = code;
+      error.signal = signal;
+      finishAfterClose({ version: null, error });
+    });
+  });
+}
+
+let activePreflightChild = null;
 
 function parseDuration(duration) {
   const match = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/.exec(duration);
@@ -466,6 +535,7 @@ function installPreflightSignalHandlers(opts, run, writeResult) {
     const handler = () => {
       if (!active) return;
       active = false;
+      if (activePreflightChild) killChild(activePreflightChild, "SIGKILL");
       const result = writeResult({
         status: "aborted",
         exitCode: 128 + (constants.signals[sig] || 15),
@@ -652,10 +722,12 @@ function dispatchToCursor(opts, brief, run, writeResult) {
     // is_error true is failed even on exit 0.
     const succeeded = code === 0 && !watchdogFired && !resultIsError;
     const mapped = code ?? (constants.signals[signal] ? 128 + constants.signals[signal] : 1);
-    const exitCode = succeeded ? 0 : mapped === 0 ? 1 : mapped;
     const touched = gitTouchedFiles(opts.cd);
+    const gitStatusUnavailable = touched === null;
+    const status = gitStatusUnavailable ? "failed" : succeeded ? "completed" : watchdogFired ? "timeout" : "failed";
+    const exitCode = gitStatusUnavailable ? 1 : succeeded ? 0 : mapped === 0 ? 1 : mapped;
     const result = writeResult({
-      status: succeeded ? "completed" : watchdogFired ? "timeout" : "failed",
+      status,
       exitCode,
       signal: signal ?? null,
       sessionId,
@@ -664,9 +736,10 @@ function dispatchToCursor(opts, brief, run, writeResult) {
       usage,
       finalMessage: assembleFinal(),
       touchedFiles: touched,
-      ...(succeeded ? {} : { stderrTail: stderrTail.slice(-20) }),
+      ...(!succeeded || gitStatusUnavailable ? { stderrTail: stderrTail.slice(-20) } : {}),
       ...(watchdogFired ? { error: `cursor-agent did not finish within --timeout ${opts.timeout}; killed by the relay watchdog` } : {}),
       ...(resultIsError && !watchdogFired ? { error: "cursor-agent reported an error result (is_error: true in its result event)" } : {}),
+      ...(gitStatusUnavailable ? { error: "git status could not be reported; inspect the working tree directly" } : {}),
     });
     printSummary(result, run.resultPath);
     process.exit(result.exitCode);
@@ -682,10 +755,7 @@ async function main() {
   const run = prepareRunDir(opts, brief);
   let writeResult = makeResultWriter(opts, null, run);
   const clearPreflightSignals = installPreflightSignalHandlers(opts, run, writeResult);
-  const probe = cursorAgentVersion(timeoutMs);
-  // Synchronous child-process calls defer JavaScript signal handlers. Yield once
-  // so a signal received during the bounded probe becomes "aborted" before dispatch.
-  await new Promise((resolve) => setImmediate(resolve));
+  const probe = await cursorAgentVersion(timeoutMs);
   writeResult = makeResultWriter(opts, probe.version, run);
   if (!probe.version && !probe.error) {
     clearPreflightSignals();

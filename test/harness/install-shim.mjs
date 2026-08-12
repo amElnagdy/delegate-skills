@@ -22,7 +22,7 @@ export function installShim(h) {
       join(windir, "Microsoft.NET", "Framework64", "v4.0.30319", "csc.exe"),
       join(windir, "Microsoft.NET", "Framework", "v4.0.30319", "csc.exe"),
     ].find((p) => existsSync(p));
-    h.check("windows: the in-box C# compiler exists (builds the native fake for agy/kimi/qoder/vibe)", Boolean(csc));
+      h.check("windows: the in-box C# compiler exists (builds the native fake for agy/kimi/qoder/vibe/kiro)", Boolean(csc));
     if (csc) {
       const csFile = join(shimDir, "fake-cli.cs");
       copyFileSync(join(fixturesDir, "fake-cli.cs"), csFile);
@@ -32,9 +32,16 @@ export function installShim(h) {
         copyFileSync(join(shimDir, "kimi.exe"), join(shimDir, "agy.exe"));
         copyFileSync(join(shimDir, "kimi.exe"), join(shimDir, "qodercli.exe"));
         copyFileSync(join(shimDir, "kimi.exe"), join(shimDir, "vibe.exe"));
+        copyFileSync(join(shimDir, "kimi.exe"), join(shimDir, "kiro-cli.exe"));
       } else {
         console.error(`${compiled.stdout ?? ""}${compiled.stderr ?? ""}`);
       }
+      const signalSource = join(fixturesDir, "console-signal-helper.cs");
+      const signalHelper = join(shimDir, "console-signal-helper.exe");
+      const signalCompiled = spawnSync(csc, ["/nologo", "/target:exe", `/out:${signalHelper}`, signalSource], { encoding: "utf8" });
+      h.check("windows: console signal helper compiled", signalCompiled.status === 0);
+      if (signalCompiled.status !== 0) console.error(`${signalCompiled.stdout ?? ""}${signalCompiled.stderr ?? ""}`);
+      h.consoleSignalHelper = signalCompiled.status === 0 ? signalHelper : null;
     }
   } else {
     for (const skill of SKILLS) {

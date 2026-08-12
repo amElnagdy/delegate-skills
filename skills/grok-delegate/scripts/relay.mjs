@@ -222,7 +222,6 @@ function parseDuration(duration) {
 function killChild(child, signal = "SIGTERM") {
   if (!child || !child.pid) return;
   if (process.platform === "win32") {
-    if (signal !== "SIGTERM") return;
     try {
       execFileSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
         stdio: ["ignore", "ignore", "inherit"],
@@ -277,39 +276,66 @@ function versionProbeTimeout(opts) {
   return timeoutMs === null ? VERSION_PROBE_TIMEOUT_MS : Math.min(timeoutMs, VERSION_PROBE_TIMEOUT_MS);
 }
 
-function grokVersion(probeTimeoutMs) {
+function runVersionProbe(binary, args, timeoutMs, shell = process.platform === "win32") {
+  return new Promise((resolve) => {
+    const child = spawn(binary, args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      shell,
+      windowsHide: true,
+    });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      // A shell-backed .cmd launch has a wrapper plus the actual CLI. Kill the
+      // wrapper's whole tree, not just the process Node started directly.
+      killChild(child, "SIGKILL");
+    }, timeoutMs);
+    const finish = (error, status = null, signal = null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) {
+        error.stdout = stdout;
+        error.stderr = stderr;
+        if (Number.isInteger(status)) error.status = status;
+        error.signal = signal;
+        resolve({ version: null, error });
+        return;
+      }
+      resolve({ version: stdout.trim() || "unknown", error: null });
+    };
+    child.stdout.on("data", (chunk) => { stdout += chunk.toString("utf8"); });
+    child.stderr.on("data", (chunk) => { stderr += chunk.toString("utf8"); });
+    child.on("error", (error) => finish(error));
+    child.on("close", (status, signal) => {
+      if (timedOut) {
+        const error = new Error("version probe timed out");
+        error.code = "ETIMEDOUT";
+        finish(error, status, signal);
+      } else if (status === 0) {
+        finish(null, status, signal);
+      } else {
+        const error = new Error(`version probe exited with ${status ?? "unknown"}`);
+        finish(error, status, signal);
+      }
+    });
+  });
+}
+
+async function grokVersion(probeTimeoutMs) {
   // On Windows, npm installs `grok` as a .cmd shim; Node's CreateProcess only
   // auto-appends .exe, never .cmd, so launching it needs shell:true there or it
   // ENOENTs on a working install. POSIX is unaffected. (git installs a real
   // git.exe and must NOT get this flag — see gitTouchedFiles.)
-  const probe = (argv, timeout = probeTimeoutMs) => {
-    try {
-      const version = execFileSync("grok", argv, {
-        encoding: "utf8",
-        shell: process.platform === "win32",
-        timeout,
-        killSignal: "SIGKILL",
-      }).trim();
-      return { version: version || "unknown", error: null };
-    } catch (error) {
-      if (error?.code === "ENOENT") return { version: null, error: null };
-      // shell:true routes a missing binary through cmd.exe, which reports it as a non-zero
-      // exit rather than ENOENT; that is still "not installed", not a broken install.
-      if (process.platform === "win32" &&
-          /not recognized as an internal or external command/i.test(String(error?.stderr || ""))) {
-        return { version: null, error: null };
-      }
-      // Anything else — a hung probe we killed, or a real non-zero exit — means grok is
-      // installed but not usable. Reporting that as "unavailable" would send the caller
-      // off to reinstall a binary that is already there.
-      return { version: null, error };
-    }
-  };
+  const probe = (argv, timeout = probeTimeoutMs) => runVersionProbe("grok", argv, timeout);
   // Prefer `grok version` (documented subcommand); fall back to `--version` for builds that
   // only answer the flag. A missing binary and a hung probe are both conclusive, though:
   // retrying either would only spend the bound a second time.
   const startedAt = performance.now();
-  const documented = probe(["version"]);
+  const documented = await probe(["version"]);
   if (documented.version || !documented.error || documented.error.code === "ETIMEDOUT") return documented;
   const remainingMs = Math.floor(probeTimeoutMs - (performance.now() - startedAt));
   if (remainingMs <= 0) return { version: null, error: { code: "ETIMEDOUT" } };
@@ -702,7 +728,7 @@ function dispatchToGrok(opts, run, writeResult) {
   });
 }
 
-function main() {
+async function main() {
   const opts = parseArgs(process.argv.slice(2));
   const brief = readBrief(opts);
   if (!brief.trim()) fail("empty brief (pass --brief <file> or pipe the brief on stdin)");
@@ -711,7 +737,7 @@ function main() {
   // somewhere to publish result.json rather than exiting silently.
   const run = prepareRunDir(opts, brief);
   const probeTimeoutMs = versionProbeTimeout(opts);
-  const probe = grokVersion(probeTimeoutMs);
+  const probe = await grokVersion(probeTimeoutMs);
   const writeResult = makeResultWriter(opts, probe.version, run);
 
   if (!probe.version && !probe.error) {
@@ -764,4 +790,4 @@ function printSummary(result, resultPath) {
   process.stdout.write(`${lines.join("\n")}\n`);
 }
 
-main();
+main().catch((error) => fail(error?.message || String(error)));

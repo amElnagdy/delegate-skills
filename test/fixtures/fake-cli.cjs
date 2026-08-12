@@ -1,8 +1,28 @@
 const fs = require("node:fs");
+const path = require("node:path");
 const args = process.argv.slice(2);
+const testContext = process.env.SMOKE_MODE || process.cwd();
 // Every probe form one relay or another uses: --version, grok's \`version\` subcommand, and
 // agy's \`changelog\`. Treating them alike lets any relay's hang/fail mode be driven by name.
 const versionProbe = args.includes("--version") || args[0] === "version" || args[0] === "changelog";
+if (versionProbe && process.env.SMOKE_VERSION_PID_FILE) {
+  const versionPidFile = process.env.SMOKE_VERSION_PID_FILE;
+  fs.writeFileSync(versionPidFile, String(process.pid));
+}
+if (versionProbe && /-version-hang-tree$/.test(testContext)) {
+  const grand = require("node:child_process").spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+  const grandPidFile = process.env.SMOKE_VERSION_GRAND_PID_FILE || path.join(process.cwd(), "smoke-version-grand.pid");
+  fs.writeFileSync(grandPidFile, String(grand.pid));
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
+}
+if (args[0] === "chat" && args[1] === "--help") {
+  if (/-version-hang$/.test(testContext)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
+  if (/-version-fail(?:-silent)?$/.test(testContext)) process.exit(7);
+  console.log(/-help-missing$/.test(testContext)
+    ? "--no-interactive --trust-tools --resume-id"
+    : "--no-interactive --trust-tools --resume-id --wrap");
+  process.exit(0);
+}
 if (versionProbe && process.env.SMOKE_MODE === "grok-version-fallback-budget") {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 700);
   if (args[0] === "version") {
@@ -11,11 +31,11 @@ if (versionProbe && process.env.SMOKE_MODE === "grok-version-fallback-budget") {
   }
   console.log("fake-cli 0.0.0-smoke");
   process.exit(0);
-} else if (versionProbe && /-version-hang$/.test(process.env.SMOKE_MODE || "")) {
+} else if (versionProbe && /-version-hang$/.test(testContext)) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
-} else if (versionProbe && /-version-fail-silent$/.test(process.env.SMOKE_MODE || "")) {
+} else if (versionProbe && /-version-fail-silent$/.test(testContext)) {
   process.exit(7);
-} else if (versionProbe && /-version-fail$/.test(process.env.SMOKE_MODE || "")) {
+} else if (versionProbe && /-version-fail$/.test(testContext)) {
   console.error("fake version failure");
   process.exit(7);
 } else if (versionProbe) {
@@ -54,6 +74,19 @@ if (process.env.SMOKE_MODE === "vibe-success") {
   fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify(args));
   console.log(JSON.stringify({ role: "assistant", content: "working" }));
   console.log(JSON.stringify({ role: "assistant", content: "fake vibe completed" }));
+  process.exit(0);
+}
+if (process.env.KIRO_FAKE_MODE === "split") {
+  console.log("fake kiro completed");
+  process.stderr.write("partial-api-");
+  setTimeout(() => {
+    process.stderr.write("secret-value\n");
+    process.exit(0);
+  }, 200);
+}
+if (args.includes("--resume-id")) {
+  fs.writeFileSync(process.env.SMOKE_ARGS_FILE || "smoke-args.json", JSON.stringify(args));
+  console.log("fake kiro completed\nSession: 11111111-1111-4111-8111-111111111111");
   process.exit(0);
 }
 if (["pi-success", "pi-error"].includes(process.env.SMOKE_MODE)) {
@@ -150,8 +183,8 @@ if (["pi-success", "pi-error"].includes(process.env.SMOKE_MODE)) {
     ? "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"
     : "setInterval(() => {}, 1000)";
   const grand = require("node:child_process").spawn(process.execPath, ["-e", grandProgram], { stdio: "ignore" });
-  fs.writeFileSync(process.env.SMOKE_GRAND_PID_FILE, String(grand.pid));
-  fs.writeFileSync(process.env.SMOKE_PID_FILE, String(process.pid)); // written last: its existence means both pid files are readable
+  fs.writeFileSync(process.env.SMOKE_GRAND_PID_FILE || path.join(process.cwd(), "smoke-grand.pid"), String(grand.pid));
+  fs.writeFileSync(process.env.SMOKE_PID_FILE || path.join(process.cwd(), "smoke.pid"), String(process.pid)); // written last: its existence means both pid files are readable
   if (process.env.SMOKE_MODE === "abort") {
     process.on("SIGTERM", () => { fs.writeFileSync(process.env.SMOKE_LATE_FILE, "flushed during shutdown"); process.exit(0); });
   } else if (process.env.SMOKE_MODE === "timeout-yield") {

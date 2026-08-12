@@ -74,6 +74,7 @@ Skip setup when you want one implementer or one-off dials. Pick the skill for a 
 | [`pi-delegate`](skills/pi-delegate/SKILL.md) | [Pi](https://github.com/earendil-works/pi-mono) (`pi`) | full local tools — no sandbox, no permission modes [^none]; project trust opt-in | `--read-only` (`read,grep,find,ls`) | `--resume-last`, `--session <id>` |
 | [`qoder-delegate`](skills/qoder-delegate/SKILL.md) | [Qoder](https://docs.qoder.com/en/cli/quick-start) (`qodercli`) | `auto` permission mode; bypass opt-in | `--permission-mode plan` | `--resume-last`, `--resume <id>` |
 | [`vibe-delegate`](skills/vibe-delegate/SKILL.md) | [Mistral Vibe](https://github.com/mistralai/mistral-vibe) (`vibe`) | `accept-edits`; `--full-access` opt-in | `--plan-only` (`plan` agent) | `--resume-last`, `--session <id>` |
+| [`kiro-delegate`](skills/kiro-delegate/SKILL.md) | Kiro CLI (`kiro-cli`) | `--trust-tools`; `--trust-all-tools` opt-in | — [^none] | `--resume`, `--resume-id <UUID>` |
 
 [^none]: No CLI-enforced read-only mode. `touchedFiles` and the diff, not a flag, are the guarantee.
 
@@ -215,6 +216,11 @@ Per skill — platform, CLI version, and what the run exercised:
 - `codex-delegate`, `opencode-delegate`, `vibe-delegate` — contract-tested only: argument validation,
   bounded version preflight, missing binary, result parsing, and whole-process-tree timeout/abort
   cleanup. No end-to-end run is recorded here.
+- `kiro-delegate` — contract-tested on Windows: sanitized environment, Git boundary, capability
+  preflight, result contract, session extraction, timeout tree cleanup, and a real console `CTRL+C`
+  abort harness; authenticated Windows smoke against Kiro CLI 2.16.2 (model `qwen3-coder-next`)
+  completed a minimal write task with an unchanged HEAD and no secret leakage. Authenticated runs on
+  other platforms and CLI versions remain unverified.
 - `delegate-setup` — contract-tested: discover JSON shape, config validate/write/load, whole-lane
   project overlay, global write without creating `.delegate/`, and `--lane` resolve / wrong-skill /
   flag-override against relays. The smoke suite runs live discovery against installed CLIs

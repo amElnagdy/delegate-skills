@@ -12,6 +12,10 @@ import { runClaude } from "./claude.mjs";
 import { runTimeoutTree } from "./timeout-tree.mjs";
 import { runAbort } from "./abort.mjs";
 import { runDelegateSetup } from "./delegate-setup.mjs";
+import { runKiro } from "./kiro.mjs";
+import { runKiroPreflight } from "./kiro-preflight.mjs";
+import { runKiroTimeout } from "./kiro-timeout.mjs";
+import { runKiroConsoleAbort } from "./kiro-console-abort.mjs";
 
 export const runners = [
   ["package-shape", runPackageShape],
@@ -28,4 +32,8 @@ export const runners = [
   ["timeout-tree", runTimeoutTree],
   ["abort", runAbort],
   ["delegate-setup", runDelegateSetup],
+  ["kiro", runKiro],
+  ["kiro-preflight", runKiroPreflight],
+  ["kiro-timeout", runKiroTimeout],
+  ["kiro-console-abort", runKiroConsoleAbort],
 ];

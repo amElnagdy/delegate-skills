@@ -14,12 +14,15 @@ const TIMEOUT_CASES = [
   { skill: "cursor", flags: ["--timeout", "6s"], exitDeadline: 45_000 },
   { skill: "vibe", flags: ["--timeout", "6s"], exitDeadline: 45_000 },
   { skill: "agy", flags: ["--timeout", "6s"], exitDeadline: 45_000 },
+  { skill: "kiro", flags: ["--timeout", "6s"], exitDeadline: 45_000 },
 ];
 async function driveTimeout({ skill, flags, exitDeadline }, mode, extraEnv, tag) {
   const outDir = join(h.scratch, `out-${tag}-${skill}`);
-  const pidFile = join(h.scratch, `pid-${tag}-${skill}`);
-  const grandPidFile = join(h.scratch, `grandpid-${tag}-${skill}`);
-  const workDir = h.freshRepo(`work-${tag}-${skill}`);
+  const workDir = skill === "kiro" ? h.committedRepo(`work-${tag}-${skill}`) : h.freshRepo(`work-${tag}-${skill}`);
+  // Kiro intentionally sanitizes SMOKE_* environment variables; its native fake
+  // therefore uses these fallback files inside the committed throwaway worktree.
+  const pidFile = skill === "kiro" ? join(workDir, "smoke.pid") : join(h.scratch, `pid-${tag}-${skill}`);
+  const grandPidFile = skill === "kiro" ? join(workDir, "smoke-grand.pid") : join(h.scratch, `grandpid-${tag}-${skill}`);
   const child = h.runRelay(skill, workDir, outDir, [...flags, ...h.EXTRA_ARGS[skill]], { SMOKE_PID_FILE: pidFile, SMOKE_GRAND_PID_FILE: grandPidFile, SMOKE_MODE: mode, ...extraEnv });
   let stderr = "";
   child.stderr.on("data", (d) => { stderr += d; });
