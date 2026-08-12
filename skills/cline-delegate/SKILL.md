@@ -109,7 +109,7 @@ briefs remain dangerous in act mode because commands run as the current user.
 
 Delegation is something the human opts into. Once briefed, cline works as a tool you approved use
 of. The boundary is: **do not accept conclusions from the self-report**; verify everything on
-disk. For anything touching credentials, production data, or irreversible operations, dispatch to
+disk. For anything touching credentials, production data, or irreversible operations, stop and ask
 the human first instead of encoding it in a brief.
 
 ## References
