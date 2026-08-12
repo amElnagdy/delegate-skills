@@ -381,12 +381,25 @@ function needsShell(target) {
   return process.platform === "win32" && /\.(?:cmd|bat)$/i.test(target.command);
 }
 
+/**
+ * The command as the launcher must receive it. Under shell:true Node joins
+ * [file, ...args] into one `cmd /c "..."` string WITHOUT quoting the file, so a
+ * resolved shim under e.g. C:\\Program Files\\... splits at the space and cmd
+ * reports "not recognized" — which zcodeVersion would then classify as "not
+ * installed", sending the caller to reinstall a CLI that is already there.
+ * Pre-quoting keeps the boundary intact. Only a shim needs it; a `node <bundle>`
+ * launch is a real executable and must stay unquoted.
+ */
+function launchCommand(target) {
+  return needsShell(target) ? `"${target.command}"` : target.command;
+}
+
 function zcodeVersion(target, probeTimeoutMs) {
   try {
     // A .cmd shim on win32 needs shell:true — Node's CreateProcess only
     // auto-appends .exe, never .cmd, so it would ENOENT on a working install.
     // A `node <bundle>` launch is a real executable and must NOT get the flag.
-    const version = execFileSync(target.command, [...target.prefixArgs, "--version"], {
+    const version = execFileSync(launchCommand(target), [...target.prefixArgs, "--version"], {
       encoding: "utf8",
       shell: needsShell(target),
       timeout: probeTimeoutMs,
@@ -804,7 +817,7 @@ function dispatchToZcode(opts, run, target, writeResult, beforeTree, beforeFinge
   // holds only the mode enum, a pattern-checked session id and tool denylist,
   // and file paths, with spaceable values quoted when the shell is involved.
   // detached on POSIX: the child leads a new process group so killChild can fell the whole tree
-  const child = spawn(target.command, [...target.prefixArgs, ...argv], {
+  const child = spawn(launchCommand(target), [...target.prefixArgs, ...argv], {
     cwd: opts.cd,
     stdio: ["ignore", "pipe", "pipe"],
     shell: needsShell(target),
