@@ -375,6 +375,15 @@ function gitWorktreeFingerprint(cwd) {
   }
 }
 
+function readOnlyVerdict(opts, beforeState, afterState) {
+  // Three-valued on purpose: true when fingerprints prove a change, false when coverage
+  // is complete and proves none, null when the fingerprint could not be taken or the run
+  // was not read-only.
+  if (!opts.readOnly) return null;
+  if (beforeState === null || afterState === null) return null;
+  return beforeState !== afterState;
+}
+
 function timestamp() {
   return new Date().toISOString().replace(/[:.]/g, "-");
 }
@@ -559,10 +568,7 @@ function dispatchToAgy(opts, brief, run, writeResult, watchdogMs) {
       const finalMessage = stdout.trim();
       if (finalMessage) writeFileSync(run.finalPath, finalMessage, "utf8");
       const afterState = gitWorktreeFingerprint(opts.cd);
-      const worktreeChanged = beforeState !== null && afterState !== null && beforeState !== afterState;
-      const readOnlyViolation = opts.readOnly
-        ? (beforeState === null || afterState === null ? null : worktreeChanged)
-        : null;
+      const readOnlyViolation = readOnlyVerdict(opts, beforeState, afterState);
       const abortedFields = {
         status: "aborted",
         exitCode: 128 + (constants.signals[sig] || 15),
@@ -613,10 +619,7 @@ function dispatchToAgy(opts, brief, run, writeResult, watchdogMs) {
     const finalMessage = stdout.trim();
     if (finalMessage) writeFileSync(run.finalPath, finalMessage, "utf8");
     const afterState = gitWorktreeFingerprint(opts.cd);
-    const worktreeChanged = beforeState !== null && afterState !== null && beforeState !== afterState;
-    const readOnlyViolation = opts.readOnly
-      ? (beforeState === null || afterState === null ? null : worktreeChanged)
-      : null;
+    const readOnlyViolation = readOnlyVerdict(opts, beforeState, afterState);
     const result = writeResult({
       status: "failed",
       exitCode: 1,
@@ -648,9 +651,7 @@ function dispatchToAgy(opts, brief, run, writeResult, watchdogMs) {
     // as an unconfirmed no-op. On a read-only run an unchanged tree is expected.
     const afterState = gitWorktreeFingerprint(opts.cd);
     const worktreeChanged = beforeState !== null && afterState !== null && beforeState !== afterState;
-    const readOnlyViolation = opts.readOnly
-      ? (beforeState === null || afterState === null ? null : worktreeChanged)
-      : null;
+    const readOnlyViolation = readOnlyVerdict(opts, beforeState, afterState);
     const silentNoop = !opts.readOnly && code === 0 && !finalMessage && !worktreeChanged;
     // A timed-out run is failed even if agy handles SIGTERM by exiting 0 -
     // orchestrators key off status and the relay exit code.
