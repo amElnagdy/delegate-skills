@@ -33,18 +33,33 @@ nvm alias default "$NODE_MAJOR" >/dev/null
 
 NODE_BIN_DIR="$(dirname "$(nvm which "$NODE_MAJOR")")"
 
-if [ -d "$SHIM_DIR" ] && [ -w "$SHIM_DIR" ]; then
-  for bin in node npm npx corepack; do
-    if [ -x "$NODE_BIN_DIR/$bin" ]; then
-      ln -sf "$NODE_BIN_DIR/$bin" "$SHIM_DIR/$bin"
-    fi
-  done
-else
-  echo "install: $SHIM_DIR is not writable; leaving PATH to nvm's default node" >&2
+if [ ! -d "$SHIM_DIR" ] || [ ! -w "$SHIM_DIR" ]; then
+  echo "install: $SHIM_DIR is missing or not writable; cannot install Node shims" >&2
+  exit 1
 fi
 
-echo "install: node $(node --version) resolved from $(command -v node)"
-node --version | grep -q "^v${NODE_MAJOR}\." || {
-  echo "install: expected Node ${NODE_MAJOR}.x on PATH but found $(node --version)" >&2
+for bin in node npm npx corepack; do
+  if [ ! -x "$NODE_BIN_DIR/$bin" ]; then
+    echo "install: required executable $NODE_BIN_DIR/$bin is missing or not executable" >&2
+    exit 1
+  fi
+  if [ -e "$SHIM_DIR/$bin" ] && [ ! -L "$SHIM_DIR/$bin" ]; then
+    echo "install: refusing to overwrite non-symlink $SHIM_DIR/$bin" >&2
+    exit 1
+  fi
+done
+
+for bin in node npm npx corepack; do
+  ln -sfn "$NODE_BIN_DIR/$bin" "$SHIM_DIR/$bin"
+  if [ ! -L "$SHIM_DIR/$bin" ] || [ "$(readlink "$SHIM_DIR/$bin")" != "$NODE_BIN_DIR/$bin" ]; then
+    echo "install: failed to link $SHIM_DIR/$bin to $NODE_BIN_DIR/$bin" >&2
+    exit 1
+  fi
+done
+
+SHIM_NODE_VERSION="$("$SHIM_DIR/node" --version)"
+echo "install: node $SHIM_NODE_VERSION resolved from $SHIM_DIR/node"
+printf '%s\n' "$SHIM_NODE_VERSION" | grep -q "^v${NODE_MAJOR}\." || {
+  echo "install: expected Node ${NODE_MAJOR}.x at $SHIM_DIR/node but found $SHIM_NODE_VERSION" >&2
   exit 1
 }
