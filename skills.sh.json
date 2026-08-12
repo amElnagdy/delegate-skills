@@ -15,7 +15,8 @@
         "qoder-delegate",
         "vibe-delegate",
         "cursor-delegate",
-        "pi-delegate"
+        "pi-delegate",
+        "aider-delegate"
       ]
     },
     {

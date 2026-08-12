@@ -70,6 +70,22 @@ if (process.env.SMOKE_GIT_RENAME_FROM && process.env.SMOKE_GIT_RENAME_TO) {
     "mv", "-f", process.env.SMOKE_GIT_RENAME_FROM, process.env.SMOKE_GIT_RENAME_TO,
   ]);
 }
+if (process.env.SMOKE_MODE === "aider-success") {
+  fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify(args));
+  // Mentions OPENAI_API_KEY in prose so a bare-substring matcher would false-fail.
+  console.log("Applied the edit and updated docs to explain OPENAI_API_KEY setup.");
+  console.log("If OPENAI_API_KEY is not set, the tool exits.");
+  console.log("Unable to connect without following the documented placeholder key steps.");
+  process.exit(0);
+}
+if (process.env.SMOKE_MODE === "aider-auth-fail") {
+  console.log("litellm.AuthenticationError: Authentication Error, Invalid API key");
+  process.exit(0);
+}
+if (process.env.SMOKE_MODE === "aider-exit-nonzero") {
+  console.error("fake aider nonzero exit");
+  process.exit(7);
+}
 if (process.env.SMOKE_MODE === "agy-permission-denied") {
   console.error('jetski: no output produced — a tool required the "write_file" permission that headless\nmode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow\nin settings.json (e.g. write_file(<target>)). Alternatively, re-run with\n--dangerously-skip-permissions to auto-approve all tools.');
   process.exit(0);
