@@ -36,13 +36,17 @@
  *   --cd <dir>              Working root for Antigravity (default: current directory).
  *   --lane <name>           Fleet lane from delegate-setup config (dials apply; explicit flags win).
  *   --model <name>          Antigravity model label (default: agy's configured default).
+ *   --effort <level>        Reasoning effort: low, medium, or high (passed as agy's own --effort).
  *   --project <id>          Use an existing Antigravity project.
  *   --new-project           Force a fresh Antigravity project (default for fresh runs).
  *   --resume-last           Continue the most recent Antigravity conversation; send only the delta brief.
  *   --conversation <id>     Continue a specific Antigravity conversation; send only the delta brief.
  *   --sandbox               Enable Antigravity's terminal sandbox for this run.
+ *   --read-only             Run in plan mode (`--mode plan`), removing write and edit paths.
+ *                           Mutually exclusive with --dangerously-skip-permissions.
  *   --dangerously-skip-permissions
  *                           Auto-approve Antigravity tool permission requests. Use only with human approval.
+ *                           Mutually exclusive with --read-only.
  *   --print-timeout <dur>   Timeout agy itself applies to print mode (default: 30m).
  *   --timeout <dur>         Relay-side watchdog, h/m/s like 30m (default: --print-timeout
  *                           plus a 60s grace). On expiry the agy process tree is killed and
@@ -55,8 +59,8 @@
  *
  * Result: written to <out-dir>/result.json and summarized on stdout -
  *   status, exitCode, agyVersion, projectId, conversationId, finalMessage
- *   (Antigravity's own report), touchedFiles (git porcelain, null if git can't report), and the
- *   paths to brief.txt, final.txt, agy.log, and stderr.txt.
+ *   (Antigravity's own report), touchedFiles (git porcelain, null if git can't report),
+ *   readOnlyViolation (on --read-only), and the paths to brief.txt, final.txt, agy.log, and stderr.txt.
  *
  * Exit codes: a pre-run usage error (bad/missing args, empty brief) exits 2
  * before any run and writes no result file; a missing `agy` binary exits 127;
@@ -135,11 +139,13 @@ function parseArgs(argv) {
     brief: null,
     cd: process.cwd(),
     model: null,
+    effort: null,
     project: null,
     newProject: false,
     resumeLast: false,
     conversation: null,
     sandbox: false,
+    readOnly: false,
     dangerouslySkipPermissions: false,
     printTimeout: DEFAULT_PRINT_TIMEOUT,
     timeout: null,
@@ -164,11 +170,13 @@ function parseArgs(argv) {
       case "--cd": opts.cd = resolve(next()); break;
       case "--lane": opts.lane = next(); break;
       case "--model": opts.model = next(); flagged.add("model"); break;
+      case "--effort": opts.effort = next(); flagged.add("effort"); break;
       case "--project": opts.project = next(); break;
       case "--new-project": opts.newProject = true; break;
       case "--resume-last": opts.resumeLast = true; break;
       case "--conversation": opts.conversation = next(); break;
       case "--sandbox": opts.sandbox = true; flagged.add("sandbox"); break;
+      case "--read-only": opts.readOnly = true; flagged.add("readOnly"); break;
       case "--dangerously-skip-permissions": opts.dangerouslySkipPermissions = true; break;
       case "--print-timeout": opts.printTimeout = next(); break;
       case "--timeout": opts.timeout = next(); flagged.add("timeout"); break;
@@ -179,6 +187,12 @@ function parseArgs(argv) {
     }
   }
   applyFleetLane(opts, flagged);
+  if (opts.effort !== null && !["low", "medium", "high"].includes(opts.effort)) {
+    fail(`invalid --effort "${opts.effort}" (expected: low, medium, high)`);
+  }
+  if (opts.readOnly && opts.dangerouslySkipPermissions) {
+    fail("--read-only and --dangerously-skip-permissions are mutually exclusive; pass only one");
+  }
   if (opts.resumeLast && opts.conversation) {
     fail("--resume-last and --conversation are mutually exclusive; pass only one");
   }
@@ -403,6 +417,8 @@ function buildArgv(opts, brief, run) {
     for (const dir of opts.addDirs) argv.push("--add-dir", dir);
   }
   if (opts.model) argv.push("--model", opts.model);
+  if (opts.effort) argv.push("--effort", opts.effort);
+  if (opts.readOnly) argv.push("--mode", "plan");
   if (opts.sandbox) argv.push("--sandbox");
   if (opts.dangerouslySkipPermissions) argv.push("--dangerously-skip-permissions");
   if (opts.printTimeout) argv.push("--print-timeout", opts.printTimeout);
@@ -449,8 +465,11 @@ function makeResultWriter(opts, version, run) {
       tool: "agy",
       workdir: opts.cd,
       model: opts.model,
+      effort: opts.effort,
       project: opts.project,
       sandbox: opts.sandbox,
+      readOnly: opts.readOnly,
+      readOnlyViolation: null,
       dangerouslySkipPermissions: opts.dangerouslySkipPermissions,
       resumed: Boolean(opts.resumeLast || opts.conversation),
       agyVersion: version,
@@ -539,12 +558,18 @@ function dispatchToAgy(opts, brief, run, writeResult, watchdogMs) {
       if (sigkillTimer) clearTimeout(sigkillTimer);
       const finalMessage = stdout.trim();
       if (finalMessage) writeFileSync(run.finalPath, finalMessage, "utf8");
+      const afterState = gitWorktreeFingerprint(opts.cd);
+      const worktreeChanged = beforeState !== null && afterState !== null && beforeState !== afterState;
+      const readOnlyViolation = opts.readOnly
+        ? (beforeState === null || afterState === null ? null : worktreeChanged)
+        : null;
       const abortedFields = {
         status: "aborted",
         exitCode: 128 + (constants.signals[sig] || 15),
         signal: sig,
         finalMessage,
         touchedFiles: gitTouchedFiles(opts.cd),
+        readOnlyViolation,
         stderrTail: stderrTail.slice(-20),
         error: `the relay was killed by ${sig}; agy was terminated with it — inspect the working tree before re-dispatching`,
       };
@@ -587,12 +612,18 @@ function dispatchToAgy(opts, brief, run, writeResult, watchdogMs) {
     if (sigkillTimer) clearTimeout(sigkillTimer);
     const finalMessage = stdout.trim();
     if (finalMessage) writeFileSync(run.finalPath, finalMessage, "utf8");
+    const afterState = gitWorktreeFingerprint(opts.cd);
+    const worktreeChanged = beforeState !== null && afterState !== null && beforeState !== afterState;
+    const readOnlyViolation = opts.readOnly
+      ? (beforeState === null || afterState === null ? null : worktreeChanged)
+      : null;
     const result = writeResult({
       status: "failed",
       exitCode: 1,
       signal: null,
       finalMessage,
       touchedFiles: gitTouchedFiles(opts.cd),
+      readOnlyViolation,
       error: String(err && err.message ? err.message : err),
     });
     printSummary(result, run.resultPath);
@@ -613,11 +644,14 @@ function dispatchToAgy(opts, brief, run, writeResult, watchdogMs) {
     const stderr = readFileSync(run.stderrPath, "utf8");
     const diagnostics = stderr.split("\n").map((line) => line.trimEnd()).filter(Boolean).slice(-20);
     const permissionDenied = /no output produced\s+[—-]\s+a tool required the "([^"]+)" permission that headless\s+mode cannot prompt for, so it was auto-denied/i.exec(stderr);
-    // agy-delegate has no read-only dispatch mode: a report-only analysis can complete
-    // without edits, but a write-capable coding dispatch with neither evidence is a no-op.
+    // On a write-capable dispatch with neither a final message nor edits, treat exit 0
+    // as an unconfirmed no-op. On a read-only run an unchanged tree is expected.
     const afterState = gitWorktreeFingerprint(opts.cd);
     const worktreeChanged = beforeState !== null && afterState !== null && beforeState !== afterState;
-    const silentNoop = code === 0 && !finalMessage && !worktreeChanged;
+    const readOnlyViolation = opts.readOnly
+      ? (beforeState === null || afterState === null ? null : worktreeChanged)
+      : null;
+    const silentNoop = !opts.readOnly && code === 0 && !finalMessage && !worktreeChanged;
     // A timed-out run is failed even if agy handles SIGTERM by exiting 0 -
     // orchestrators key off status and the relay exit code.
     const succeeded = code === 0 && !watchdogFired && !permissionDenied && !silentNoop;
@@ -628,6 +662,7 @@ function dispatchToAgy(opts, brief, run, writeResult, watchdogMs) {
       signal: signal ?? null,
       finalMessage,
       touchedFiles,
+      readOnlyViolation,
       ...(!succeeded || !finalMessage ? { stderrTail: diagnostics } : {}),
       ...(watchdogFired
         ? {

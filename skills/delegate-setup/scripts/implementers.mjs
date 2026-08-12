@@ -127,7 +127,7 @@ export const IMPLEMENTERS = Object.freeze([
       entry: "file",
       match: /\.db$/,
     },
-    supports: ["model", "timeout"],
+    supports: ["model", "effort", "timeout", "readOnly"],
     winShell: false,
   },
   {
