@@ -5,6 +5,7 @@ import { join } from "node:path";
 export async function runTimeoutTree(h) {
 const TIMEOUT_CASES = [
   { skill: "claude", flags: ["--timeout", "6s"], exitDeadline: 45_000 },
+  { skill: "cline", flags: ["--timeout", "6s"], exitDeadline: 45_000 },
   { skill: "codex", flags: ["--timeout", "6s"], exitDeadline: 45_000 },
   { skill: "opencode", flags: ["--timeout", "6s"], exitDeadline: 45_000 },
   { skill: "grok", flags: ["--timeout", "6s"], exitDeadline: 45_000 },
