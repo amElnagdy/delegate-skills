@@ -6,6 +6,7 @@
       "description": "Delegate a coding task to a CLI implementer agent, then review the diff and commit it yourself.",
       "skills": [
         "claude-delegate",
+        "cline-delegate",
         "codex-delegate",
         "opencode-delegate",
         "agy-delegate",
@@ -14,7 +15,8 @@
         "qoder-delegate",
         "vibe-delegate",
         "cursor-delegate",
-        "pi-delegate"
+        "pi-delegate",
+        "aider-delegate"
       ]
     },
     {

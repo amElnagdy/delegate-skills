@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const RELAYS = ["claude", "codex", "opencode", "agy", "grok", "kimi", "qoder", "vibe", "cursor", "pi"];
+const RELAYS = ["claude", "cline", "codex", "opencode", "agy", "grok", "kimi", "qoder", "vibe", "cursor", "pi", "aider"];
 const READ_ONLY_TRIPWIRE_RELAYS = ["claude", "grok"];
 const SYMBOLS = [
   ["MAX_TIMER_MS", "const", RELAYS],
@@ -27,8 +27,8 @@ const SYMBOLS = [
   ["fingerprintDirtyPaths", "function", READ_ONLY_TRIPWIRE_RELAYS],
   ["changedDirtyPaths", "function", READ_ONLY_TRIPWIRE_RELAYS],
   ["readOnlyVerdict", "function", READ_ONLY_TRIPWIRE_RELAYS],
-  ["MAX_BUFFERED_CHARS", "const", ["claude", "cursor", "grok", "kimi", "opencode", "pi", "qoder", "vibe"]],
-  ["makeEventScanner", "function", ["claude", "cursor", "grok", "kimi", "opencode", "pi", "qoder"]],
+  ["MAX_BUFFERED_CHARS", "const", ["claude", "cline", "cursor", "grok", "kimi", "opencode", "pi", "qoder", "vibe"]],
+  ["makeEventScanner", "function", ["claude", "cline", "cursor", "grok", "kimi", "opencode", "pi", "qoder"]],
 ];
 let failed = 0;
 const check = (name, condition) => {
