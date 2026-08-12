@@ -17,7 +17,8 @@
         "cursor-delegate",
         "pi-delegate",
         "aider-delegate",
-        "copilot-delegate"
+        "copilot-delegate",
+        "warp-delegate"
       ]
     },
     {

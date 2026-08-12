@@ -35,6 +35,7 @@ export function installShim(h) {
         // aider's pip install puts a native aider.exe in Scripts, and the relay spawns it
         // without a shell, so a .cmd shim would never be found the way the real one is.
         copyFileSync(join(shimDir, "kimi.exe"), join(shimDir, "aider.exe"));
+        copyFileSync(join(shimDir, "kimi.exe"), join(shimDir, "oz.exe"));
       } else {
         console.error(`${compiled.stdout ?? ""}${compiled.stderr ?? ""}`);
       }
