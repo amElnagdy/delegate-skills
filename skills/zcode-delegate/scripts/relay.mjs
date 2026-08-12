@@ -138,7 +138,7 @@ function applyFleetLane(opts, flagged) {
     if (field === "sandbox" && (flagged.has("sandbox") || flagged.has("readOnly"))) continue;
     if (field === "permissionMode" && (flagged.has("permissionMode") || flagged.has("readOnly"))) continue;
     if (field === "planOnly" && (flagged.has("planOnly") || flagged.has("readOnly"))) continue;
-    if (field === "readOnly" && flagged.has("readOnly")) continue;
+    if (field === "readOnly" && (flagged.has("readOnly") || flagged.has("mode"))) continue;
     if (field === "force" && flagged.has("force")) continue;
     opts[field] = value;
     if (field === "sandbox") opts.sandboxConfigured = true;
