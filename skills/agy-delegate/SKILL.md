@@ -8,7 +8,7 @@ description: >-
   through agy while staying the reviewer. DO NOT USE for tasks small enough to do inline, or when the
   user wants the code written directly without delegating.
 license: MIT
-compatibility: Requires the `agy` CLI installed and authenticated, Node 18+, and git. The orchestrating agent must be able to run shell commands and read files. Shell examples assume bash/zsh (macOS/Linux, or Git Bash/WSL on Windows). Windows launch is not yet verified for this relay.
+compatibility: Requires the `agy` CLI installed and authenticated, Node 18+, and git. The orchestrating agent must be able to run shell commands and read files. Shell examples assume bash/zsh (macOS/Linux, or Git Bash/WSL on Windows).
 metadata:
   version: 0.4.2
 ---
@@ -29,8 +29,8 @@ Code; treat other orchestrators as designed-for, not yet proven.
 - The task is small enough to just do inline - delegation overhead is not worth it.
 - The `agy` CLI is not installed or not authenticated. Install it from Antigravity's CLI docs and run
   the first-launch setup.
-- You want to write the code yourself, or you only need a review without edits. This relay does not
-  expose a proven CLI-enforced read-only mode yet.
+- You want to write the code yourself, or you only need Antigravity's opinion on code you wrote (a
+  `--read-only` dispatch covers review without edits, but a plain review may not need delegation at all).
 
 ## Prerequisites (check once)
 
@@ -69,6 +69,8 @@ below is this skill's installed directory - the folder containing this `SKILL.md
 ```bash
 node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 # choose a model label:                 add --model "<label from agy models>"
+# reasoning effort (low, medium, high): add --effort high
+# read-only (plan mode — no edits):     add --read-only
 # enable Antigravity terminal sandbox:  add --sandbox
 # resume the most recent conversation:  add --resume-last  (delta brief only)
 # see all options:                      node .../relay.mjs --help
@@ -116,13 +118,17 @@ diff holds:
 
 Antigravity owns its own permission policy. The relay does not bypass it by default. Use
 `--dangerously-skip-permissions` only when the human explicitly accepts that Antigravity may
-auto-approve tool permission requests. Use `--sandbox` when you want Antigravity's terminal sandbox
-enabled for the run. Antigravity's own help says `--dangerously-skip-permissions` auto-approves all
-tool permission requests without prompting, including a request to act outside the sandbox. Do not
-treat `--sandbox` as an enforced boundary when the flags are combined; treat the run as full access.
+auto-approve tool permission requests. `--read-only` runs `agy` in plan mode (`--mode plan`),
+removing write and edit paths, and is mutually exclusive with `--dangerously-skip-permissions`.
+Use `--sandbox` when you want Antigravity's terminal sandbox enabled for the run.
+Antigravity's own help says `--dangerously-skip-permissions` auto-approves all tool permission
+requests without prompting, including a request to act outside the sandbox. Do not treat
+`--sandbox` as an enforced boundary when the flags are combined; treat the run as full access.
 If headless `--print` auto-denies a write, the relay reports `status: "failed"` and exits non-zero.
-Settings allow-rules are not documented here as a fix because they have not been demonstrated to
-apply to this headless path. Do not add the bypass flag without explicit human approval.
+The relay fingerprints the working tree before and after a `--read-only` run to report
+`readOnlyViolation` in `result.json`. Settings allow-rules are not documented here as a fix
+because they have not been demonstrated to apply to this headless path. Do not add the bypass
+flag without explicit human approval.
 
 ## Authorization model
 

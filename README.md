@@ -64,7 +64,7 @@ Skip setup when you want one implementer or one-off dials. Pick the skill for a 
 
 | Skill | Implementer CLI | Write access (default) | Read-only run | Resume |
 | --- | --- | --- | --- | --- |
-| [`agy-delegate`](skills/agy-delegate/SKILL.md) | Google Antigravity (`agy`) | Antigravity's own `permissions`; bypass opt-in | — [^none] | `--resume-last`, `--conversation <id>` |
+| [`agy-delegate`](skills/agy-delegate/SKILL.md) | Google Antigravity (`agy`) | Antigravity's own `permissions`; bypass opt-in | `--read-only` (`plan` mode) | `--resume-last`, `--conversation <id>` |
 | [`claude-delegate`](skills/claude-delegate/SKILL.md) | [Claude Code](https://code.claude.com/docs/en/overview) (`claude`) | `acceptEdits` + explicit tool surface | `--read-only` (`plan` mode) | `--resume-last`, `--session <id>` |
 | [`codex-delegate`](skills/codex-delegate/SKILL.md) | [OpenAI Codex](https://github.com/openai/codex) (`codex`) | `--sandbox workspace-write` | `--read-only` | `--resume-last`, `--session <id>` |
 | [`cursor-delegate`](skills/cursor-delegate/SKILL.md) | [Cursor Agent](https://cursor.com/cli) (`cursor-agent`) | `--force`; `--no-force` withholds command approval | `--read-only` (plan mode) | `--resume-last`, `--session <id>` |
@@ -191,8 +191,13 @@ are verified, along with each implementer-specific guard.
 
 Per skill — platform, CLI version, and what the run exercised:
 
-- `agy-delegate` — macOS, `agy` 1.0.16: headless edit run, `--print=` delivery, absolute `--add-dir`
-  workspace pin.
+- `agy-delegate` — Windows 10, native, `agy` 1.1.12: headless `--print` write run editing one briefed
+  file; `--read-only` `--effort high` run whose brief ordered an immediate file write, in a directory
+  the permission rules allowed: agy refused, wrote nothing, and `result.json` reported effort high,
+  `readOnly` true, `readOnlyViolation` false; argument validation for a bad `--effort` value and for
+  `--read-only` combined with `--dangerously-skip-permissions`, both exiting 2; resume by
+  `--conversation` with a delta brief. macOS, `agy` 1.0.16: headless edit run, `--print=` delivery,
+  absolute `--add-dir` workspace pin.
 - `claude-delegate` — macOS, `claude` 2.1.220: write run under `acceptEdits`; plan mode refusing an
   edit, with the Git tripwire true on a violation and false on a clean run;
   `--session`/`--resume-last` resume; `claude_unavailable`/127 and usage errors exiting 2 without a
@@ -220,7 +225,7 @@ Per skill — platform, CLI version, and what the run exercised:
   flag-override against relays. The smoke suite runs live discovery against installed CLIs
   (versions vary by machine). Native Windows discover smoke not yet claimed.
 
-Not yet verified: native Windows launches for `agy`, `claude`, `grok`, `kimi`, `pi`, `qoder`, and
+Not yet verified: native Windows launches for `claude`, `grok`, `kimi`, `pi`, `qoder`, and
 `vibe` (the `codex`/`opencode`/`grok` `.cmd` shim handling is in place and quoted; Cursor serializes a
 pre-joined, quoted command; Qoder and Vibe target their documented native executables). Claude's own
 shell sandbox is unsupported on native Windows regardless of launch mechanics, and upstream Vibe
