@@ -16,9 +16,12 @@ discard.
 
 1. **Read `result.json` first.** Check `status` and `exitCode` before anything else. A `timeout` or
    `aborted` status means the tree may be mid-edit and incoherent.
-2. **Start from `touchedFiles`.** It is the porcelain list of what moved. `null` means git could not
-   report — inspect the tree by hand. `[]` on a run that claimed edits is a contradiction worth
-   chasing.
+2. **Start from `touchedFiles`.** It is `git status --porcelain` taken after the run: post-run,
+   git-visible worktree state, not a log of what the agent did. It cannot show an ignored file, an
+   edit the run made and then reverted, or a write outside the repository, and it includes anything
+   already dirty before dispatch. Start there, but do not read it as the complete set. `null` means
+   git could not report — inspect the tree by hand. `[]` on a run that claimed edits is a
+   contradiction worth chasing.
 3. **Re-run the gates yourself.** Do not accept "tests pass" from `finalMessage`. Run the project's
    actual lint, typecheck, build, and test commands and read the output.
 4. **Read the whole diff against the brief.** `git diff` and `git diff --staged`. Ask of each hunk:
@@ -59,7 +62,22 @@ If `conversationId` is `null`, the stream did not carry one; dispatch a fresh ru
 restates the corrected requirements.
 
 Discard rather than rework when the diff misunderstood the goal, wanders far outside the brief, or
-would take longer to correct than to redo. `git checkout -- .` and rewrite the brief.
+would take longer to correct than to redo.
+
+Discard against a known baseline, never with a blanket revert. `git checkout -- .` is the wrong
+reach: it leaves staged and untracked files behind, so the tree stays dirty for the next dispatch,
+and it destroys any uncommitted work of your own that predates the run. Dispatch from a clean tree —
+commit or `git stash` your own changes first — so that everything dirty afterwards is Warp's, then
+drop exactly what the run introduced, reading the paths off `touchedFiles`:
+
+```bash
+git restore --staged --worktree -- <tracked paths>   # the ' M' / 'M ' entries
+git clean -f -- <untracked paths>                    # the '??' entries
+```
+
+If dispatching from a clean tree is not an option, give Warp its own `git worktree` instead: then
+discarding is `git worktree remove --force`, and your work was never in reach. Either way, rewrite
+the brief before dispatching again.
 
 ## Landing
 
@@ -79,6 +97,10 @@ agreed contract. Two limits stay with you:
   bump, a schema change, an interface the brief did not mention — ask rather than expanding the
   mandate yourself.
 
-Also surface the things unique to this implementer: whether the run uploaded a workspace snapshot
-(`snapshotDisabled: false`) if the repository is sensitive, and the `runUrl` when someone will want
-to inspect the run in Warp.
+Snapshot egress is a decision you make **before** dispatch, not something you report after it. `oz
+agent run` uploads an end-of-run workspace snapshot by default, so reading `snapshotDisabled: false`
+off a finished run tells you only that the upload already happened. If the repository is sensitive,
+pass `--no-snapshot` on the dispatch and confirm `snapshotDisabled: true` in `result.json` before
+going further. Keep reporting the field either way — it is the evidence of which way the run went.
+
+Also surface the `runUrl` when someone will want to inspect the run in Warp.

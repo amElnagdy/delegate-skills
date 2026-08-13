@@ -79,7 +79,9 @@ Skip setup when you want one implementer or one-off dials. Pick the skill for a 
 | [`copilot-delegate`](skills/copilot-delegate/SKILL.md) | [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-cli) (`copilot`) | `--allow-all-tools` opt-in; headless auto-deny otherwise | `--read-only` (`--mode plan`) | `--resume-last`, `--session <id>` |
 | [`warp-delegate`](skills/warp-delegate/SKILL.md) | [Warp Agent CLI](https://docs.warp.dev/cli/) (`oz`) | full local tools — no sandbox, no permission modes [^none] | — [^none] | `--conversation <id>` |
 
-[^none]: No CLI-enforced read-only mode. `touchedFiles` and the diff, not a flag, are the guarantee.
+[^none]: No CLI-enforced read-only mode. `touchedFiles` and the diff are what you review against, not
+a guarantee: they are post-run `git status` in the workspace, so they cannot show ignored files,
+reverted edits, or writes outside the repository.
 
 [^aider]: Aider is the one implementer here that commits by default. Its `--auto-commits` and
 `--dirty-commits` both default to `True`, the second of which commits your pre-existing uncommitted

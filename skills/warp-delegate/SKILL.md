@@ -123,8 +123,10 @@ Treat Warp's final message and gate claims as claims:
 - Run relevant guard skills if installed.
 - Round-trip migrations and grep for dangling references after removals or renames.
 
-Because there is no read-only mode to fall back on, the diff is the **only** record of what the run
-touched. See [references/review-and-land.md](references/review-and-land.md).
+Because there is no read-only mode to fall back on, the diff is the **only** record you get - and it
+records what git can see in the workspace afterwards, not everything the run did. Dispatch from a
+clean tree so the two are as close as they can be. See
+[references/review-and-land.md](references/review-and-land.md).
 
 ### 5. Land it
 
@@ -143,7 +145,11 @@ would imply an enforcement that does not exist. The controls you actually have a
    Treat this as *aim*, not a fence: on oz 0.2026.05.27 shell commands did run in the pinned
    workspace, but the agent's file tool resolved bare relative paths against `$HOME`. Name absolute
    paths in the brief - see [references/writing-the-brief.md](references/writing-the-brief.md).
-2. **Review the diff.** `touchedFiles` plus `git diff` is the record of what changed.
+2. **Review the diff.** `touchedFiles` is `git status --porcelain` taken after the run - post-run,
+   git-visible worktree state, not a log of what the agent did. It cannot show an ignored file, an
+   edit the run made and then reverted, or a write outside the repository (see item 1), and it
+   carries anything that was already dirty before dispatch. Dispatch from a clean tree so those are
+   the same set, and treat the diff as the best available record, not a complete one.
 3. **Snapshot egress.** `--no-snapshot` forwards Warp's flag so the end-of-run workspace snapshot is
    not uploaded. Without it, the upload is Warp's default.
 
