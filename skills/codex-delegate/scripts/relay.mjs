@@ -59,6 +59,18 @@
  *   (Codex's own report), touchedFiles (git porcelain, null if git can't report), and the paths to
  *   events.jsonl and final.txt.
  *
+ * Usage limits: when the run ends in Codex's terminal `turn.failed` event carrying a
+ * recognized usage-limit signature, the result stays status "failed" (the status set is a
+ * closed enum orchestrators switch on) and gains two additive fields:
+ *   failureClass: "usage_limit"
+ *   limit: { kind, retryAt, resetsAt, evidence: { source, code, excerpt, artifactLine } }
+ * kind is quota_exhausted | rate_limited | unknown. retryAt/resetsAt are null unless the
+ * provider stated a zoned absolute time or a well-defined duration — never guessed. The
+ * classification is fail-closed: only the terminal event is inspected, only against
+ * provider-specific codes and message templates, and anything ambiguous stays an
+ * unclassified "failed". A usage limit is not a task failure — do not rework the brief;
+ * inspect touchedFiles, then wait for the reset or re-dispatch on another lane.
+ *
  * Exit codes: a pre-run usage error (bad/missing args, empty brief) exits 2
  * before any run and writes no result file; a missing `codex` binary exits 127;
  * otherwise the exit code mirrors Codex's own (0 success, non-zero failure).
@@ -72,7 +84,7 @@
  */
 
 import {spawn, execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync, renameSync, readFileSync, existsSync, appendFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, renameSync, readFileSync, existsSync, appendFileSync, rmSync } from "node:fs";
 import {join, resolve, basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { constants, tmpdir } from "node:os";
@@ -88,6 +100,135 @@ const SAFE_ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const SAFE_MODEL = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
 
 const IMPLEMENTER_KEY = "codex";
+
+// Bound the evidence excerpt: a provider error can carry a very long body, and the
+// orchestrator only needs enough to audit the match. The full raw event stays in
+// events.jsonl, which evidence.artifactLine points at.
+const MAX_EVIDENCE_CHARS = 400;
+
+// Codex's usage-limit signatures, pinned to codex-cli 0.147.0. Every entry below was
+// read out of the shipped binary's string table (see test/fixtures/usage-limit/codex.json
+// for the capture bundle and its provenance); nothing here is inferred. Codes absent from
+// that binary — `rate_limit_exceeded`, `insufficient_quota` — are deliberately NOT listed:
+// an unverified signature is exactly the false positive this classification must avoid.
+// Codex calls its plan quota a "rate limit" internally (hence rate_limit_reached →
+// quota_exhausted); rate_limit_error is the transient-throttle case.
+const USAGE_LIMIT_CODES = new Map([
+  ["usage_limit_exceeded", "quota_exhausted"],
+  ["usage_limit_reached", "quota_exhausted"],
+  ["rate_limit_reached", "quota_exhausted"],
+  ["workspace_owner_usage_limit_reached", "quota_exhausted"],
+  ["workspace_member_usage_limit_reached", "quota_exhausted"],
+  ["workspace_owner_credits_depleted", "quota_exhausted"],
+  ["workspace_member_credits_depleted", "quota_exhausted"],
+  ["rate_limit_error", "rate_limited"],
+]);
+
+// Exact user-facing templates from the same binary. Matched case-insensitively as whole
+// phrases — never bare "quota"/"429"/"rate limit", which appear in ordinary task prose.
+const USAGE_LIMIT_MESSAGES = [
+  ["you've hit your usage limit", "quota_exhausted"],
+  ["you've reached your usage limit", "quota_exhausted"],
+  ["usage limit reached", "quota_exhausted"],
+  ["you've reached your workspace credit limit", "quota_exhausted"],
+  ["you're out of credits", "quota_exhausted"],
+  ["your workspace is out of credits", "quota_exhausted"],
+];
+
+function safeJson(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function boundedExcerpt(text) {
+  const flat = String(text ?? "").replace(/\s+/g, " ").trim();
+  return flat.length > MAX_EVIDENCE_CHARS ? `${flat.slice(0, MAX_EVIDENCE_CHARS)}…` : flat;
+}
+
+function parseResetTimestamp(value, mode) {
+  // Only a zoned absolute timestamp or a well-defined duration becomes a time. Anything
+  // ambiguous or localized ("resets 3pm") yields null — a guessed reset time would send
+  // the orchestrator back at the wrong moment, which is worse than reporting nothing.
+  if (value === null || value === undefined) return null;
+  if (mode === "absolute") {
+    if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})$/.test(value.trim())) return null;
+    const parsed = new Date(value.trim().replace(" ", "T"));
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+  }
+  if (mode === "duration") {
+    const seconds = typeof value === "number" ? value : typeof value === "string" && /^\d+(\.\d+)?$/.test(value.trim()) ? Number(value) : NaN;
+    if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 30 * 24 * 3600) return null;
+    return new Date(Date.now() + seconds * 1000).toISOString();
+  }
+  return null;
+}
+
+function usageLimitFields(match) {
+  // The additive half of the result contract: status stays "failed" so orchestrators that
+  // switch on the closed status enum keep working; failureClass/limit carry the detail.
+  if (!match) return {};
+  return {
+    failureClass: "usage_limit",
+    limit: {
+      kind: match.kind,
+      retryAt: match.retryAt ?? null,
+      resetsAt: match.resetsAt ?? null,
+      evidence: {
+        source: match.source,
+        code: match.code ?? null,
+        excerpt: boundedExcerpt(match.excerpt),
+        artifactLine: match.artifactLine ?? null,
+      },
+    },
+  };
+}
+
+function classifyUsageLimit(event, artifactLine) {
+  // Codex-specific detector. Only `turn.failed` — the naturally terminal failure event —
+  // is inspected. Codex also emits `item.completed` items of type "error" mid-run for
+  // ordinary warnings (model-metadata fallback, shortened skill descriptions) and keeps
+  // going, so matching on "an error event" would classify healthy runs. Verified against
+  // codex-cli 0.147.0.
+  if (!event || event.type !== "turn.failed") return null;
+  const raw = typeof event.error?.message === "string" ? event.error.message : "";
+  if (!raw) return null;
+
+  // error.message is either a plain string or the provider's HTTP envelope serialized as
+  // JSON: {"type":"error","status":429,"error":{"type":"...","message":"..."}}
+  let code = null;
+  let detail = raw;
+  let resetsAt = null;
+  let retryAt = null;
+  const nested = safeJson(raw);
+  if (nested && typeof nested === "object") {
+    const inner = nested.error && typeof nested.error === "object" ? nested.error : nested;
+    if (typeof inner.type === "string") code = inner.type;
+    else if (typeof inner.code === "string") code = inner.code;
+    if (typeof inner.message === "string") detail = inner.message;
+    resetsAt = parseResetTimestamp(inner.resets_at ?? nested.resets_at, "absolute");
+    retryAt = parseResetTimestamp(inner.retry_after ?? nested.retry_after, "duration");
+  }
+
+  const codeKind = code ? USAGE_LIMIT_CODES.get(code.toLowerCase()) : undefined;
+  const haystack = `${detail}\n${raw}`.toLowerCase();
+  const messageHit = USAGE_LIMIT_MESSAGES.find(([phrase]) => haystack.includes(phrase));
+  // Require a verified code or a verified message template. A bare 429 status is not
+  // enough on its own — fail closed and let the run report a plain "failed".
+  if (!codeKind && !messageHit) return null;
+
+  return {
+    kind: codeKind ?? messageHit?.[1] ?? "unknown",
+    code: code ?? null,
+    source: "events.jsonl",
+    excerpt: detail || raw,
+    artifactLine,
+    resetsAt,
+    retryAt,
+  };
+}
 
 function applyFleetLane(opts, flagged) {
   if (!opts.lane) return;
@@ -386,15 +527,25 @@ function extractThreadId(event) {
   );
 }
 
-function recordEventLine(eventsPath, line) {
+function recordEventLine(eventsPath, line, scan) {
   // Append one stdout line to the event log and pull a thread id from it when the
   // line is a JSON event. Non-JSON progress lines (and a newline-less final line)
   // are preserved in events.jsonl regardless; they just carry no thread id.
+  // scan carries the run's accumulated state: the events.jsonl line number (so a
+  // classification can point at its own evidence), the latest thread id, and the
+  // usage-limit match from the terminal failure event.
   appendFileSync(eventsPath, `${line}\n`, "utf8");
-  try {
-    return extractThreadId(JSON.parse(line));
-  } catch {
-    return null;
+  scan.lineCount += 1;
+  const event = safeJson(line);
+  if (!event || typeof event !== "object") return;
+  const tid = extractThreadId(event);
+  if (tid) scan.threadId = tid;
+  if (event.type === "turn.failed") {
+    scan.limitMatch = classifyUsageLimit(event, scan.lineCount);
+  } else if (event.type === "turn.completed") {
+    // A turn that recovered and completed supersedes an earlier failure: the run did the
+    // work, so it must not be reported as limit-exhausted.
+    scan.limitMatch = null;
   }
 }
 
@@ -411,6 +562,11 @@ function prepareRunDir(opts, brief) {
     briefPath: join(outDir, "brief.txt"),
     resultPath: join(outDir, "result.json"),
   };
+  // A reused --out-dir must not advertise the previous run: a poller that races the
+  // dispatch would read the old result.json as if it were this run's, and a preflight
+  // failure or a run with no stdout would publish a finalPath for someone else's report.
+  rmSync(run.finalPath, { force: true });
+  rmSync(run.resultPath, { force: true });
   writeFileSync(run.briefPath, brief, "utf8");
   writeFileSync(run.eventsPath, "", "utf8");
   return run;
@@ -487,7 +643,7 @@ function dispatchToCodex(opts, brief, run, writeResult, env) {
   // detached on POSIX: the child leads a new process group so killChild can fell the whole tree
   const child = spawn("codex", argv, { cwd: opts.cd, stdio: ["pipe", "pipe", "pipe"], shell: process.platform === "win32", detached: process.platform !== "win32", env });
 
-  let threadId = null;
+  const scan = { lineCount: 0, threadId: null, limitMatch: null };
   let stdoutBuf = "";
   const stderrTail = [];
 
@@ -503,8 +659,7 @@ function dispatchToCodex(opts, brief, run, writeResult, env) {
       const line = stdoutBuf.slice(0, nl);
       stdoutBuf = stdoutBuf.slice(nl + 1);
       if (!line.trim()) continue;
-      const tid = recordEventLine(run.eventsPath, line);
-      if (tid) threadId = tid;
+      recordEventLine(run.eventsPath, line, scan);
     }
   });
 
@@ -555,7 +710,7 @@ function dispatchToCodex(opts, brief, run, writeResult, env) {
         status: "aborted",
         exitCode: 128 + (constants.signals[sig] || 15),
         signal: sig,
-        threadId,
+        threadId: scan.threadId,
         finalMessage,
         touchedFiles: gitTouchedFiles(opts.cd),
         stderrTail: stderrTail.slice(-20),
@@ -578,7 +733,7 @@ function dispatchToCodex(opts, brief, run, writeResult, env) {
     if (settled) return;
     settled = true;
     clearWatchdog();
-    const result = writeResult({ status: "failed", exitCode: 1, signal: null, threadId, finalMessage: "", touchedFiles: gitTouchedFiles(opts.cd), error: String(err && err.message ? err.message : err) });
+    const result = writeResult({ status: "failed", exitCode: 1, signal: null, threadId: scan.threadId, finalMessage: "", touchedFiles: gitTouchedFiles(opts.cd), error: String(err && err.message ? err.message : err) });
     printSummary(result, run.resultPath);
     process.exit(1);
   });
@@ -591,23 +746,32 @@ function dispatchToCodex(opts, brief, run, writeResult, env) {
     // parent is down, sweep the group (no-op where taskkill already felled the tree)
     if (watchdogFired) killChild(child, "SIGKILL");
     if (stdoutBuf.trim()) {
-      const tid = recordEventLine(run.eventsPath, stdoutBuf);
-      if (tid) threadId = tid;
+      // The terminal event can arrive without a trailing newline; scan it before the
+      // outcome is decided so a final-line turn.failed still classifies.
+      recordEventLine(run.eventsPath, stdoutBuf, scan);
     }
     const finalMessage = existsSync(run.finalPath) ? readFileSync(run.finalPath, "utf8").trim() : "";
+    // Outcome precedence: a run the relay itself ended is a timeout (or, in the signal
+    // handler above, aborted) — never a classified provider failure, because the limit
+    // may simply be what codex was about to report when we killed it.
+    const limitMatch = watchdogFired ? null : scan.limitMatch;
     // A timed-out run is never a success even if codex handles SIGTERM by exiting 0 -
-    // orchestrators key off status and the relay exit code.
-    const succeeded = code === 0 && !watchdogFired;
+    // orchestrators key off status and the relay exit code. A usage limit is likewise
+    // never a success: if codex ever exits 0 while its terminal turn.failed carried a
+    // limit signature, normalize to a failure (exit 1 below) rather than report a run
+    // that did no work as completed.
+    const succeeded = code === 0 && !watchdogFired && !limitMatch;
     const mapped = code ?? (constants.signals[signal] ? 128 + constants.signals[signal] : 1);
     const result = writeResult({
       status: succeeded ? "completed" : watchdogFired ? "timeout" : "failed",
       exitCode: succeeded ? 0 : mapped === 0 ? 1 : mapped,
       signal: signal ?? null,
-      threadId,
+      threadId: scan.threadId,
       finalMessage,
       touchedFiles: gitTouchedFiles(opts.cd),
       ...(succeeded ? {} : { stderrTail: stderrTail.slice(-20) }),
       ...(watchdogFired ? { error: `codex did not finish within --timeout ${opts.timeout}; killed by the relay watchdog` } : {}),
+      ...usageLimitFields(limitMatch),
     });
     printSummary(result, run.resultPath);
     process.exit(result.exitCode);
@@ -651,6 +815,11 @@ function printSummary(result, resultPath) {
   lines.push(`relay: ${result.status} (exit ${result.exitCode}${result.signal ? `, killed by ${result.signal}` : ""})  ·  codex ${result.codexVersion ?? "?"}`);
   if (result.signal === "SIGKILL" && result.status === "failed") lines.push("hint: the host killed the process (commonly the OOM killer or a supervisor timeout) — this is not a codex error; check host memory and re-dispatch, or split the task into smaller briefs.");
   if (result.signal === "SIGTERM" && result.status === "failed") lines.push("hint: something outside the relay terminated codex (a supervisor, the session ending, or a manual kill) — when the relay itself does the killing it reports status \"timeout\" or \"aborted\" instead; inspect the working tree before re-dispatching.");
+  if (result.failureClass === "usage_limit") {
+    const when = result.limit?.retryAt || result.limit?.resetsAt;
+    lines.push(`hint: the provider refused on usage limits (${result.limit?.kind ?? "unknown"})${when ? `, earliest retry ${when}` : ""} — this is not a task failure. Do NOT rework the brief: inspect touched files first, then wait for the reset or re-dispatch the same brief on another lane from a clean tree.`);
+    if (result.limit?.evidence?.excerpt) lines.push(`  evidence (${result.limit.evidence.source}:${result.limit.evidence.artifactLine ?? "?"}): ${result.limit.evidence.excerpt}`);
+  }
   if (result.resumeLast) lines.push("mode: resumed most recent session");
   if (result.session) lines.push(`mode: resumed session ${result.session}`);
   if (result.threadId) lines.push(`thread id (resume with: --session ${result.threadId}): ${result.threadId}`);

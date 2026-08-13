@@ -160,3 +160,38 @@ values are quoted.
 
 The relay never commits. Cursor edits the working tree; the orchestrator reviews, re-runs the gates,
 and commits. See [review-and-land.md](review-and-land.md).
+
+## Usage limits
+
+When a run dies because the provider refused on usage limits, the result keeps
+`status: "failed"` — the status set is a closed enum orchestrators switch on — and gains two
+additive fields:
+
+- `failureClass` — `"usage_limit"`; **absent** on every other failure.
+- `limit` — `{ kind, retryAt, resetsAt, evidence }`. `kind` is `quota_exhausted` |
+  `rate_limited` | `unknown`. `retryAt`/`resetsAt` are ISO timestamps or `null` — never
+  guessed, so an ambiguous "resets 3pm" stays `null`. `evidence` is
+  `{ source, code, excerpt, artifactLine }`: a bounded excerpt plus the 1-based line of the
+  artifact it came from, so you can audit the classification instead of trusting it.
+
+A usage limit is **not a task failure**, and the two need opposite responses:
+
+- **Do not rework the brief** — nothing was wrong with it.
+- **Inspect `touchedFiles` first.** A limit can strike mid-edit, so the tree may hold partial work.
+- Wait for the reset, then resume the exact session with `--session <sessionId>` — the handle survives the limit, so partial work is not lost.
+- Or re-dispatch the same brief on another lane **from a clean tree** — rerouting on top of
+  half-applied changes duplicates or corrupts them.
+
+Classification is deliberately fail-closed: only Cursor's terminal failure is inspected, only
+against signatures verified against the real CLI or its version-pinned source and recorded in
+`test/fixtures/usage-limit/`, and anything ambiguous stays an unclassified `failed`. A missed
+classification costs you a diagnosis you can still make; a false one would tell you to wait out a
+real bug. **A limit whose signature this relay does not recognize looks like a plain `failed`** —
+check the diagnostics before concluding the brief was at fault.
+
+Precedence: a run the relay itself ended is never classified — the watchdog reports `timeout` and
+a kill reports `aborted`, even if a limit was already seen. A limit arriving with a zero exit code
+is still normalized to a failure, because a run that did no work is not a completion.
+
+The full contract, shared by every relay in this package, is in
+[`docs/relay-result-contract.md`](https://github.com/amElnagdy/delegate-skills/blob/master/docs/relay-result-contract.md).

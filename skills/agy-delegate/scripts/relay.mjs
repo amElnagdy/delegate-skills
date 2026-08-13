@@ -47,6 +47,13 @@
  *   --dangerously-skip-permissions
  *                           Auto-approve Antigravity tool permission requests. Use only with human approval.
  *                           Mutually exclusive with --read-only.
+ *   --preflight-usage       Before dispatching, ask agy for the account's quota with
+ *                           `agy -p "/usage" --output-format json` - a headless read that
+ *                           starts no agent turn, spends no quota, and leaves no
+ *                           conversation behind. When EVERY quota bucket reads exhausted the
+ *                           brief is not dispatched; otherwise the snapshot is recorded on
+ *                           result.json and the run proceeds unchanged. A probe that fails,
+ *                           times out, or returns an unexpected shape never blocks dispatch.
  *   --print-timeout <dur>   Timeout agy itself applies to print mode (default: 30m).
  *   --timeout <dur>         Relay-side watchdog, h/m/s like 30m (default: --print-timeout
  *                           plus a 60s grace). On expiry the agy process tree is killed and
@@ -60,12 +67,32 @@
  * Result: written to <out-dir>/result.json and summarized on stdout -
  *   status, exitCode, agyVersion, projectId, conversationId, finalMessage
  *   (Antigravity's own report), touchedFiles (git porcelain, null if git can't report),
- *   readOnlyViolation (on --read-only), and the paths to brief.txt, final.txt, agy.log, and stderr.txt.
+ *   readOnlyViolation (on --read-only), usagePreflight (null unless --preflight-usage), and
+ *   the paths to brief.txt, final.txt, agy.log, and stderr.txt.
+ *
+ * Usage limits: this relay ships NO terminal-error matcher, deliberately. agy's quota
+ * message is produced by Google's Antigravity backend, not by the CLI - no such literal
+ * ships in the 1.1.12 binary - so there is no version-pinnable signature to match and any
+ * classification from the error text would be a guess. What agy does have is a headless,
+ * side-effect-free quota query, so classification here is opt-in and happens BEFORE
+ * dispatch. With --preflight-usage, and only when every quota bucket reads exhausted, the
+ * relay refuses to dispatch and writes:
+ *   status: "failed"                      (the status set is a closed enum; this is additive)
+ *   failureClass: "usage_limit"
+ *   limit: { kind: "quota_exhausted", retryAt, resetsAt, evidence: { source, code, excerpt, artifactLine } }
+ * resetsAt is the soonest bucket reset agy stated; retryAt stays null because agy states no
+ * retry time and a guessed one is worse than silence. Otherwise the snapshot (bucket id,
+ * remaining fraction, reset time) is recorded on the result and the run proceeds. The relay
+ * never judges whether the REMAINING quota is "enough" for this brief - that is unknowable
+ * before the run. It reports the provider's own numbers and blocks only on true exhaustion.
+ * A usage limit is not a task failure: do not rework the brief; wait for the reset or
+ * re-dispatch on another lane.
  *
  * Exit codes: a pre-run usage error (bad/missing args, empty brief) exits 2
  * before any run and writes no result file; a missing `agy` binary exits 127;
  * otherwise the exit code mirrors Antigravity's own, except that an exit-zero
- * permission denial or silent write-dispatch no-op is forced to exit 1.
+ * permission denial or silent write-dispatch no-op is forced to exit 1. A
+ * --preflight-usage refusal never dispatches at all and exits 1.
  * If the child dies on a signal, the exit code is 128 plus the signal number and
  * `result.json` records the signal.
  * Once the brief validates, `result.json` is written on every outcome -
@@ -77,7 +104,7 @@
 
 import {spawn, execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, writeFileSync, renameSync, readFileSync, readlinkSync, lstatSync, existsSync, appendFileSync, realpathSync } from "node:fs";
+import { mkdirSync, writeFileSync, renameSync, readFileSync, readlinkSync, lstatSync, existsSync, appendFileSync, realpathSync, rmSync } from "node:fs";
 import {join, resolve, basename, dirname, relative, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { constants, tmpdir } from "node:os";
@@ -88,7 +115,161 @@ const MAX_TIMER_MS = 2_147_483_647;
 const MAX_TIMER_DURATION = "596h31m23s";
 const VERSION_PROBE_TIMEOUT_MS = 10_000;
 
+// agy's headless quota query, live-captured on agy 1.1.12. It answers from cached account
+// state: the response carries conversation_id "", num_turns 0 and every token counter 0, so
+// it starts no agent turn, spends no quota, and leaves no conversation behind that a later
+// --resume-last could latch onto. That is the whole reason it qualifies as a preflight -
+// a canary dispatch would fail all three tests.
+const USAGE_PREFLIGHT_ARGS = ["-p", "/usage", "--output-format", "json"];
+const USAGE_PREFLIGHT_COMMAND = 'agy -p "/usage" --output-format json';
+// agy only answers /usage without starting an agent turn from 1.1.12 onward. Older builds
+// treated it as an ordinary prompt and spent the very quota this probe exists to protect
+// (antigravity-cli issues #234 on 1.0.3 and #543 on 1.0.16), so the probe is version-gated.
+const USAGE_PREFLIGHT_MIN_VERSION = [1, 1, 12];
+
 const IMPLEMENTER_KEY = "agy";
+
+// Bound the evidence excerpt: a provider response can carry a very long body, and the
+// orchestrator only needs enough to audit the match. The full raw response stays in
+// usage-preflight.json, which evidence.source/artifactLine point at.
+const MAX_EVIDENCE_CHARS = 400;
+
+function safeJson(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function boundedExcerpt(text) {
+  const flat = String(text ?? "").replace(/\s+/g, " ").trim();
+  return flat.length > MAX_EVIDENCE_CHARS ? `${flat.slice(0, MAX_EVIDENCE_CHARS)}…` : flat;
+}
+
+function parseResetTimestamp(value, mode) {
+  // Only a zoned absolute timestamp or a well-defined duration becomes a time. Anything
+  // ambiguous or localized ("resets 3pm") yields null — a guessed reset time would send
+  // the orchestrator back at the wrong moment, which is worse than reporting nothing.
+  if (value === null || value === undefined) return null;
+  if (mode === "absolute") {
+    if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})$/.test(value.trim())) return null;
+    const parsed = new Date(value.trim().replace(" ", "T"));
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+  }
+  if (mode === "duration") {
+    const seconds = typeof value === "number" ? value : typeof value === "string" && /^\d+(\.\d+)?$/.test(value.trim()) ? Number(value) : NaN;
+    if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 30 * 24 * 3600) return null;
+    return new Date(Date.now() + seconds * 1000).toISOString();
+  }
+  return null;
+}
+
+function usageLimitFields(match) {
+  // The additive half of the result contract: status stays "failed" so orchestrators that
+  // switch on the closed status enum keep working; failureClass/limit carry the detail.
+  if (!match) return {};
+  return {
+    failureClass: "usage_limit",
+    limit: {
+      kind: match.kind,
+      retryAt: match.retryAt ?? null,
+      resetsAt: match.resetsAt ?? null,
+      evidence: {
+        source: match.source,
+        code: match.code ?? null,
+        excerpt: boundedExcerpt(match.excerpt),
+        artifactLine: match.artifactLine ?? null,
+      },
+    },
+  };
+}
+
+function usagePreflightSupported(version) {
+  // A version we cannot read as a dotted number (a custom build, a `agy changelog` that
+  // printed something unexpected) is NOT treated as old: every documented regression
+  // reports a parseable version, and refusing to probe on an unreadable one would make the
+  // flag silently inert on installs where it is the whole point of the run.
+  const parts = String(version ?? "").trim().match(/^(\d+)\.(\d+)\.(\d+)/);
+  if (!parts) return true;
+  const found = parts.slice(1, 4).map(Number);
+  for (let i = 0; i < USAGE_PREFLIGHT_MIN_VERSION.length; i += 1) {
+    if (found[i] !== USAGE_PREFLIGHT_MIN_VERSION[i]) return found[i] > USAGE_PREFLIGHT_MIN_VERSION[i];
+  }
+  return true;
+}
+
+function queryUsage(opts, run, timeoutMs, version) {
+  // Never throws and never blocks: every failure mode returns a note-bearing snapshot the
+  // caller records and then dispatches anyway. A broken probe must not cost a real run.
+  const checkedAt = new Date().toISOString();
+  const snapshot = (fields) => ({
+    command: USAGE_PREFLIGHT_COMMAND,
+    checkedAt,
+    exhausted: null,
+    buckets: [],
+    artifactPath: null,
+    note: null,
+    ...fields,
+  });
+  if (!usagePreflightSupported(version)) {
+    return snapshot({
+      status: "skipped",
+      note: `agy ${version} predates ${USAGE_PREFLIGHT_MIN_VERSION.join(".")}, where /usage began answering in print mode without starting an agent turn; probing an older build would spend quota, so it was skipped`,
+    });
+  }
+  // Bounded exactly like the version preflight above: the relay watchdog is only armed once
+  // agy is dispatched, so a probe that never returns would wedge the relay here, before any
+  // dispatch and before --timeout could reach it.
+  const bounded = Math.min(timeoutMs, VERSION_PROBE_TIMEOUT_MS);
+  let raw;
+  try {
+    raw = execFileSync("agy", USAGE_PREFLIGHT_ARGS, {
+      cwd: opts.cd,
+      encoding: "utf8",
+      timeout: bounded,
+      killSignal: "SIGKILL",
+      stdio: ["ignore", "pipe", "pipe"],
+      maxBuffer: 8 * 1024 * 1024,
+    });
+  } catch (error) {
+    const detail = String(error?.stderr || error?.message || error).trim().split("\n").slice(-1)[0] || "no detail";
+    return error?.code === "ETIMEDOUT"
+      ? snapshot({ status: "timeout", note: `the usage query did not answer within ${bounded}ms; agy was dispatched anyway` })
+      : snapshot({ status: "unavailable", note: `the usage query failed (${boundedExcerpt(detail)}); agy was dispatched anyway` });
+  }
+  writeFileSync(run.usagePath, raw, "utf8");
+  const groups = safeJson(raw)?.command?.data?.groups;
+  const buckets = [];
+  for (const group of Array.isArray(groups) ? groups : []) {
+    for (const bucket of Array.isArray(group?.buckets) ? group.buckets : []) {
+      buckets.push({
+        group: typeof group?.name === "string" ? group.name : null,
+        id: typeof bucket?.id === "string" ? bucket.id : null,
+        name: typeof bucket?.name === "string" ? bucket.name : null,
+        window: typeof bucket?.window === "string" ? bucket.window : null,
+        // Report the provider's own number, unrounded and uninterpreted.
+        remainingFraction: Number.isFinite(bucket?.remaining_fraction) ? bucket.remaining_fraction : null,
+        resetTime: parseResetTimestamp(bucket?.reset_time, "absolute"),
+      });
+    }
+  }
+  if (!buckets.length) {
+    return snapshot({
+      status: "unparseable",
+      artifactPath: run.usagePath,
+      note: `the usage query returned no command.data.groups[].buckets[]; agy was dispatched anyway`,
+    });
+  }
+  return snapshot({
+    status: "ok",
+    artifactPath: run.usagePath,
+    // Only true exhaustion blocks a dispatch. A bucket whose remaining fraction is missing
+    // or unreadable cannot prove exhaustion, so it keeps the verdict at "dispatch".
+    exhausted: buckets.every((bucket) => bucket.remainingFraction !== null && bucket.remainingFraction <= 0),
+    buckets,
+  });
+}
 
 function applyFleetLane(opts, flagged) {
   if (!opts.lane) return;
@@ -147,6 +328,7 @@ function parseArgs(argv) {
     sandbox: false,
     readOnly: false,
     dangerouslySkipPermissions: false,
+    preflightUsage: false,
     printTimeout: DEFAULT_PRINT_TIMEOUT,
     timeout: null,
     addDirs: [],
@@ -181,6 +363,7 @@ function parseArgs(argv) {
         opts.dangerouslySkipPermissions = true;
         flagged.add("dangerouslySkipPermissions");
         break;
+      case "--preflight-usage": opts.preflightUsage = true; flagged.add("preflightUsage"); break;
       case "--print-timeout": opts.printTimeout = next(); break;
       case "--timeout": opts.timeout = next(); flagged.add("timeout"); break;
       case "--add-dir": opts.addDirs.push(next()); break;
@@ -411,8 +594,21 @@ function prepareRunDir(opts, brief) {
     finalPath: join(outDir, "final.txt"),
     logPath: join(outDir, "agy.log"),
     stderrPath: join(outDir, "stderr.txt"),
+    usagePath: join(outDir, "usage-preflight.json"),
     resultPath: join(outDir, "result.json"),
   };
+  // A reused --out-dir must not advertise the previous run: a poller that races the
+  // dispatch would read the old result.json as if it were this run's, and a run with no
+  // report of its own would publish a finalPath holding someone else's. agy.log matters
+  // most — parseIdsFromLog mines it for the project and conversation ids this run
+  // reports, so a stale log would hand back the PREVIOUS conversation as the resume
+  // handle and point a follow-up brief at the wrong thread. usage-preflight.json is the
+  // evidence a usage_limit classification points at, so a stale one would let this run's
+  // result cite the PREVIOUS run's quota reading.
+  rmSync(run.finalPath, { force: true });
+  rmSync(run.logPath, { force: true });
+  rmSync(run.usagePath, { force: true });
+  rmSync(run.resultPath, { force: true });
   writeFileSync(run.briefPath, brief, "utf8");
   writeFileSync(run.stderrPath, "", "utf8");
   return run;
@@ -477,7 +673,9 @@ function parseIdsFromLog(logPath) {
   };
 }
 
-function makeResultWriter(opts, version, run) {
+function makeResultWriter(opts, version, run, preflight) {
+  // preflight is a holder the caller fills after the probe runs, so every outcome written
+  // from that point on - including the refusal below - carries the same snapshot.
   return (extra) => {
     const ids = parseIdsFromLog(run.logPath);
     const result = {
@@ -494,6 +692,7 @@ function makeResultWriter(opts, version, run) {
       readOnlyViolation: null,
       dangerouslySkipPermissions: opts.dangerouslySkipPermissions,
       resumed: Boolean(opts.resumeLast || opts.conversation),
+      usagePreflight: preflight.usage,
       agyVersion: version,
       projectId: ids.projectId,
       conversationId: ids.conversationId,
@@ -533,6 +732,39 @@ function reportVersionTimeout(writeResult, run, timeoutMs, error) {
     touchedFiles: null,
     ...(stderr ? { stderrTail: stderr.split("\n").slice(-20) } : {}),
     error: message,
+  });
+  printSummary(result, run.resultPath);
+  process.stderr.write(`relay: ${message}\n`);
+  process.exit(result.exitCode);
+}
+
+function reportUsageExhausted(opts, writeResult, run, usage) {
+  // Every bucket the provider reported is at zero, so there is nothing to dispatch INTO.
+  // This is the only condition that may stop a run: "is the remaining quota enough for this
+  // brief" is unknowable before the run and is never asked here.
+  const resets = usage.buckets.map((bucket) => bucket.resetTime).filter(Boolean).sort();
+  const detail = usage.buckets
+    .map((bucket) => `${bucket.group ?? "?"}/${bucket.id ?? "?"} remaining_fraction ${bucket.remainingFraction}${bucket.resetTime ? ` (resets ${bucket.resetTime})` : ""}`)
+    .join("; ");
+  const message = `${USAGE_PREFLIGHT_COMMAND} reports every quota bucket exhausted; agy was not dispatched`;
+  const result = writeResult({
+    status: "failed",
+    exitCode: 1,
+    signal: null,
+    finalMessage: "",
+    touchedFiles: gitTouchedFiles(opts.cd),
+    error: message,
+    ...usageLimitFields({
+      kind: "quota_exhausted",
+      code: null,
+      source: "usage-preflight.json",
+      // The artifact holds exactly one record - the probe's own response - so the pointer
+      // is its first line; the excerpt names the query that produced it.
+      artifactLine: 1,
+      excerpt: `${message}: ${detail}`,
+      resetsAt: resets[0] ?? null,
+      retryAt: null,
+    }),
   });
   printSummary(result, run.resultPath);
   process.stderr.write(`relay: ${message}\n`);
@@ -720,19 +952,32 @@ function main() {
   // past its own print timeout, which is exactly the case the grace window cannot cover.
   const watchdogMs = opts.timeout !== null ? parseDuration(opts.timeout) : printTimeoutMs + 60_000;
   const run = prepareRunDir(opts, brief);
+  const preflight = { usage: null };
   let version;
   try {
     version = agyVersion(watchdogMs);
   } catch (error) {
-    const writeResult = makeResultWriter(opts, "unknown", run);
+    const writeResult = makeResultWriter(opts, "unknown", run, preflight);
     reportVersionTimeout(writeResult, run, watchdogMs, error);
     return;
   }
-  const writeResult = makeResultWriter(opts, version, run);
+  const writeResult = makeResultWriter(opts, version, run, preflight);
 
   if (!version) {
     reportUnavailable(writeResult, run.resultPath);
     return;
+  }
+
+  if (opts.preflightUsage) {
+    // Runs only after agy is known to exist, and only ever stops the run on exhaustion.
+    // Anything else the probe reports - skipped, failed, timed out, unrecognized shape -
+    // is recorded on the result and dispatch continues: a broken probe must never cost a
+    // real run, and the orchestrator can still see that the check did not answer.
+    preflight.usage = queryUsage(opts, run, watchdogMs, version);
+    if (preflight.usage.exhausted === true) {
+      reportUsageExhausted(opts, writeResult, run, preflight.usage);
+      return;
+    }
   }
 
   dispatchToAgy(opts, brief, run, writeResult, watchdogMs);
@@ -744,6 +989,19 @@ function printSummary(result, resultPath) {
   lines.push(`relay: ${result.status} (exit ${result.exitCode}${result.signal ? `, killed by ${result.signal}` : ""})  ·  agy ${result.agyVersion ?? "?"}`);
   if (result.signal === "SIGKILL" && result.status === "failed") lines.push("hint: the host killed the process (commonly the OOM killer or a supervisor timeout) — this is not an agy error; check host memory and re-dispatch, or split the task into smaller briefs.");
   if (result.signal === "SIGTERM" && result.status === "failed") lines.push("hint: something outside the relay terminated agy (a supervisor, the session ending, or a manual kill) — when the relay itself does the killing it reports status \"timeout\" or \"aborted\" instead; inspect the working tree before re-dispatching.");
+  if (result.failureClass === "usage_limit") {
+    const when = result.limit?.retryAt || result.limit?.resetsAt;
+    lines.push(`hint: the provider refused on usage limits (${result.limit?.kind ?? "unknown"})${when ? `, earliest reset ${when}` : ""} — this is not a task failure and the brief was never dispatched. Do NOT rework the brief: wait for the reset, or re-dispatch the same brief on another lane.`);
+    if (result.limit?.evidence?.excerpt) lines.push(`  evidence (${result.limit.evidence.source}:${result.limit.evidence.artifactLine ?? "?"}): ${result.limit.evidence.excerpt}`);
+  }
+  if (result.usagePreflight) {
+    const usage = result.usagePreflight;
+    lines.push(`usage preflight (${usage.command}): ${usage.status}`);
+    for (const bucket of usage.buckets ?? []) {
+      lines.push(`  ${bucket.group ?? "?"} · ${bucket.id ?? "?"} (${bucket.window ?? "?"}): remaining_fraction ${bucket.remainingFraction ?? "?"}${bucket.resetTime ? `, resets ${bucket.resetTime}` : ""}`);
+    }
+    if (usage.note) lines.push(`  ${usage.note}`);
+  }
   if (result.resumed) lines.push("mode: resumed an existing conversation");
   if (result.projectId) lines.push(`project id: ${result.projectId}`);
   if (result.conversationId) lines.push(`conversation id (resume with: --conversation ${result.conversationId}): ${result.conversationId}`);

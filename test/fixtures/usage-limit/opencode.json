@@ -1,0 +1,147 @@
+{
+  "schema": "delegate-usage-limit-capture.v1",
+  "cli": "opencode",
+  "binary": "opencode",
+  "version": "opencode 1.17.11",
+  "platform": "aarch64-apple-darwin",
+  "capturedAt": "2026-08-13",
+
+  "provenance": {
+    "state": "source-backed; live run pending",
+    "envelope": "source-backed",
+    "envelopeMethod": "Event shapes read from the embedded JS bundle of the installed opencode binary (v1.17.11) — the `--format json` writer and the session error event {\"type\":\"error\",\"sessionID\":…,\"error\":{\"name\":…,\"data\":{…}}}. The relay scans stdout by brace depth rather than by line (makeEventScanner), so records may arrive concatenated or split.",
+    "signature": "source-backed",
+    "signatureMethod": "The `parseStreamError` switch in MessageV2.ProviderError, read from the same bundle: it maps a provider body code to a fixed message and hard-codes isRetryable:false. Both listed codes come from that switch.",
+    "liveLimitRun": "pending — no account was exhausted to produce this bundle",
+    "excludedCandidates": [
+      { "code": "GoUsageLimitError", "reason": "opencode Zen template that exists only on the retry status, which `--format json` never emits — matching it would be dead code claiming coverage it cannot have" },
+      { "code": "FreeUsageLimitError", "reason": "same: retry-status only, never reaches this transport" }
+    ]
+  },
+
+  "transport": {
+    "stream": "stdout",
+    "flag": "run --format json",
+    "framing": "JSON objects scanned by brace depth, not by line — records may be concatenated or split mid-object",
+    "terminalFailureEvent": "{\"type\":\"error\"} carrying error.name === \"APIError\"",
+    "terminalFailureField": "error.data.message and error.data.responseBody",
+    "terminalSuccessEvent": "exit code 0 (a step_finish after an error event clears the match)",
+    "observedExitCodeOnError": 1,
+    "warningsAreNotTerminal": "Only APIError is a provider refusal. ProviderAuthError, ContextOverflowError, MessageOutputLengthError and MessageAbortedError are local conditions and must never classify.",
+    "retryCaveat": "OpenCode retries a plain HTTP 429 indefinitely and never forwards its retry status to this stream. An ordinary rate limit therefore STALLS the run — status \"timeout\" under --timeout, or an unbounded hang without one — rather than failing it. Only the non-retryable codes below are terminal here, so this relay's coverage of transient throttling is genuinely nil, not merely unverified."
+  },
+
+  "signatures": {
+    "codes": [
+      { "code": "insufficient_quota", "kind": "quota_exhausted" },
+      { "code": "usage_not_included", "kind": "quota_exhausted" }
+    ],
+    "messages": [
+      { "phrase": "quota exceeded. check your plan and billing details.", "kind": "quota_exhausted" },
+      { "phrase": "to use codex with your chatgpt plan, upgrade to plus", "kind": "quota_exhausted" }
+    ],
+    "resetFields": [
+      { "field": "resets_at", "mode": "absolute" },
+      { "field": "retry_after", "mode": "duration" }
+    ]
+  },
+
+  "hardening": ["proseInTerminalMessage", "nonApiErrorWithLimitText", "unknownCodeQuotaShaped"],
+
+  "scenarios": {
+    "usageLimit": {
+      "expect": { "status": "failed", "failureClass": "usage_limit", "kind": "quota_exhausted", "resetsAt": "2026-08-13T21:00:00.000Z" },
+      "exitCode": 1,
+      "events": [
+        "{\"type\":\"session_start\",\"sessionID\":\"ses_7f3a91c20b4e\"}",
+        "{\"type\":\"step_start\",\"sessionID\":\"ses_7f3a91c20b4e\"}",
+        "{\"type\":\"text\",\"sessionID\":\"ses_7f3a91c20b4e\",\"text\":\"Editing src/billing.ts.\"}",
+        "{\"type\":\"error\",\"sessionID\":\"ses_7f3a91c20b4e\",\"error\":{\"name\":\"APIError\",\"data\":{\"message\":\"Quota exceeded. Check your plan and billing details.\",\"responseBody\":\"{\\\"error\\\":{\\\"code\\\":\\\"insufficient_quota\\\",\\\"message\\\":\\\"You exceeded your current quota.\\\",\\\"resets_at\\\":\\\"2026-08-13T21:00:00Z\\\"}}\"}}}"
+      ]
+    },
+
+    "usageLimitRetryAfter": {
+      "expect": { "status": "failed", "failureClass": "usage_limit", "kind": "quota_exhausted", "retryAtIsSet": true },
+      "exitCode": 1,
+      "events": [
+        "{\"type\":\"session_start\",\"sessionID\":\"ses_aa11bb22cc33\"}",
+        "{\"type\":\"error\",\"sessionID\":\"ses_aa11bb22cc33\",\"error\":{\"name\":\"APIError\",\"data\":{\"message\":\"To use Codex with your ChatGPT plan, upgrade to Plus: https://chatgpt.com/explore/plus.\",\"responseBody\":\"{\\\"error\\\":{\\\"code\\\":\\\"usage_not_included\\\",\\\"message\\\":\\\"Not included in plan.\\\",\\\"retry_after\\\":600}}\"}}}"
+      ]
+    },
+
+    "unrelatedFailure": {
+      "note": "A local condition, not a provider refusal. Must stay unclassified.",
+      "expect": { "status": "failed", "failureClass": null },
+      "exitCode": 1,
+      "events": [
+        "{\"type\":\"session_start\",\"sessionID\":\"ses_bb22cc33dd44\"}",
+        "{\"type\":\"step_start\",\"sessionID\":\"ses_bb22cc33dd44\"}",
+        "{\"type\":\"error\",\"sessionID\":\"ses_bb22cc33dd44\",\"error\":{\"name\":\"ContextOverflowError\",\"data\":{\"message\":\"Context window exceeded for this model.\"}}}"
+      ]
+    },
+
+    "proseThenUnrelatedFailure": {
+      "note": "Adversarial: every trigger word appears in non-terminal text events, then the run dies of an unrelated local error.",
+      "expect": { "status": "failed", "failureClass": null },
+      "exitCode": 1,
+      "events": [
+        "{\"type\":\"session_start\",\"sessionID\":\"ses_cc33dd44ee55\"}",
+        "{\"type\":\"text\",\"sessionID\":\"ses_cc33dd44ee55\",\"text\":\"Added handling for insufficient_quota and usage_not_included: on HTTP 429 we now surface 'Quota exceeded. Check your plan and billing details.' to the caller.\"}",
+        "{\"type\":\"tool\",\"sessionID\":\"ses_cc33dd44ee55\",\"name\":\"edit\",\"output\":\"rate limit quota 429 usage_not_included\"}",
+        "{\"type\":\"error\",\"sessionID\":\"ses_cc33dd44ee55\",\"error\":{\"name\":\"MessageOutputLengthError\",\"data\":{\"message\":\"Output length exceeded.\"}}}"
+      ]
+    },
+
+    "recoveredThenSuccess": {
+      "note": "An APIError limit superseded by a later step_finish and a zero exit: the run did the work.",
+      "expect": { "status": "completed", "failureClass": null },
+      "exitCode": 0,
+      "events": [
+        "{\"type\":\"session_start\",\"sessionID\":\"ses_dd44ee55ff66\"}",
+        "{\"type\":\"error\",\"sessionID\":\"ses_dd44ee55ff66\",\"error\":{\"name\":\"APIError\",\"data\":{\"message\":\"Quota exceeded. Check your plan and billing details.\",\"responseBody\":\"{\\\"error\\\":{\\\"code\\\":\\\"insufficient_quota\\\"}}\"}}}",
+        "{\"type\":\"step_finish\",\"sessionID\":\"ses_dd44ee55ff66\"}",
+        "{\"type\":\"text\",\"sessionID\":\"ses_dd44ee55ff66\",\"text\":\"Done.\"}"
+      ]
+    },
+
+    "usageLimitExitZero": {
+      "note": "Defensive: a limit must never be reported as a completed run, whatever the exit code.",
+      "expect": { "status": "failed", "failureClass": "usage_limit", "exitCode": 1 },
+      "exitCode": 0,
+      "events": [
+        "{\"type\":\"session_start\",\"sessionID\":\"ses_ee55ff66aa77\"}",
+        "{\"type\":\"error\",\"sessionID\":\"ses_ee55ff66aa77\",\"error\":{\"name\":\"APIError\",\"data\":{\"message\":\"Quota exceeded. Check your plan and billing details.\",\"responseBody\":\"{\\\"error\\\":{\\\"code\\\":\\\"insufficient_quota\\\"}}\"}}}"
+      ]
+    },
+
+    "proseInTerminalMessage": {
+      "note": "Hardening: an APIError whose own message quotes the trigger words as task prose, with no verified code or template.",
+      "expect": { "status": "failed", "failureClass": null },
+      "exitCode": 1,
+      "events": [
+        "{\"type\":\"session_start\",\"sessionID\":\"ses_ff66aa77bb88\"}",
+        "{\"type\":\"error\",\"sessionID\":\"ses_ff66aa77bb88\",\"error\":{\"name\":\"APIError\",\"data\":{\"message\":\"Upstream returned 429 while the rate limit quota test was running.\",\"responseBody\":\"{\\\"error\\\":{\\\"code\\\":\\\"server_error\\\"}}\"}}}"
+      ]
+    },
+
+    "nonApiErrorWithLimitText": {
+      "note": "Hardening: a genuine limit code and template carried by a NON-APIError error. Only APIError is a provider refusal.",
+      "expect": { "status": "failed", "failureClass": null },
+      "exitCode": 1,
+      "events": [
+        "{\"type\":\"session_start\",\"sessionID\":\"ses_aa77bb88cc99\"}",
+        "{\"type\":\"error\",\"sessionID\":\"ses_aa77bb88cc99\",\"error\":{\"name\":\"ProviderAuthError\",\"data\":{\"message\":\"Quota exceeded. Check your plan and billing details.\",\"responseBody\":\"{\\\"error\\\":{\\\"code\\\":\\\"insufficient_quota\\\"}}\"}}}"
+      ]
+    },
+
+    "unknownCodeQuotaShaped": {
+      "note": "Hardening: an APIError with a quota-shaped but unverified code and no matching template.",
+      "expect": { "status": "failed", "failureClass": null },
+      "exitCode": 1,
+      "events": [
+        "{\"type\":\"session_start\",\"sessionID\":\"ses_bb88cc99dd00\"}",
+        "{\"type\":\"error\",\"sessionID\":\"ses_bb88cc99dd00\",\"error\":{\"name\":\"APIError\",\"data\":{\"message\":\"Request was throttled.\",\"responseBody\":\"{\\\"error\\\":{\\\"code\\\":\\\"quota_something_else\\\",\\\"message\\\":\\\"Throttled.\\\"}}\"}}}"
+      ]
+    }
+  }
+}

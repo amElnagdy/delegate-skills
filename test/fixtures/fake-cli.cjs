@@ -70,6 +70,90 @@ if (process.env.SMOKE_GIT_RENAME_FROM && process.env.SMOKE_GIT_RENAME_TO) {
     "mv", "-f", process.env.SMOKE_GIT_RENAME_FROM, process.env.SMOKE_GIT_RENAME_TO,
   ]);
 }
+if (process.env.SMOKE_MODE === "agy-usage-preflight") {
+  // agy's headless quota query and the dispatch that follows it are two invocations of the
+  // same binary inside one relay run, so one mode serves both. SMOKE_USAGE_MODE drives the
+  // query; anything else is the dispatch, which must NOT happen when the query says the
+  // account is exhausted — SMOKE_ARGS_FILE existing is the proof that it did.
+  if (args.includes("/usage")) {
+    const usageMode = process.env.SMOKE_USAGE_MODE || "healthy";
+    if (usageMode === "hang") Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
+    if (usageMode === "fail") {
+      console.error("Error: fake usage query failure");
+      process.exit(2);
+    }
+    if (usageMode === "unparseable") {
+      console.log(JSON.stringify({ conversation_id: "", status: "SUCCESS", num_turns: 0, command: { name: "model", data: {} } }));
+      process.exit(0);
+    }
+    const spent = usageMode === "exhausted";
+    const bucket = (id, name, window, remaining, reset) =>
+      ({ id, name, window, remaining_fraction: remaining, reset_time: reset });
+    console.log(JSON.stringify({
+      conversation_id: "",
+      status: "SUCCESS",
+      response: "",
+      duration_seconds: 0,
+      num_turns: 0,
+      usage: { input_tokens: 0, output_tokens: 0, thinking_tokens: 0, cache_read_tokens: 0, total_tokens: 0 },
+      command: {
+        name: "usage",
+        data: {
+          groups: [
+            { name: "Gemini Models", buckets: [
+              bucket("gemini-weekly", "Weekly Limit Remaining", "weekly", spent ? 0 : 0.9833731055259705, "2026-08-18T20:59:10Z"),
+              bucket("gemini-5h", "5 Hour Limit Remaining", "5h", spent ? 0 : 1, "2026-08-13T22:04:33Z"),
+            ] },
+            // The healthy case deliberately leaves this one at zero: a single exhausted
+            // bucket must NOT block a dispatch, only every bucket at once may.
+            { name: "Claude and GPT models", buckets: [
+              bucket("3p-weekly", "Weekly Limit Remaining", "weekly", spent ? 0 : 0.5, "2026-08-17T09:30:00Z"),
+              bucket("3p-5h", "5 Hour Limit Remaining", "5h", 0, "2026-08-13T21:15:00Z"),
+            ] },
+          ],
+        },
+      },
+    }));
+    process.exit(0);
+  }
+  if (process.env.SMOKE_ARGS_FILE) fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify(args));
+  const logAt = args.indexOf("--log-file");
+  if (logAt !== -1) fs.writeFileSync(args[logAt + 1], "fake agy log\n");
+  console.log("fake agy dispatch completed");
+  process.exit(0);
+}
+if (process.env.SMOKE_MODE === "usage-limit") {
+  // Replay a usage-limit capture bundle (test/fixtures/usage-limit/<cli>.json) transport
+  // faithfully: the real event ordering, the real exit code, and — when asked — chunk
+  // boundaries that split a line mid-signature and a final record with no trailing
+  // newline. One mode serves every relay; the bundle and scenario say which CLI and case.
+  const bundle = JSON.parse(fs.readFileSync(process.env.SMOKE_LIMIT_FIXTURE, "utf8"));
+  const scenario = bundle.scenarios[process.env.SMOKE_LIMIT_SCENARIO];
+  if (!scenario) {
+    fs.writeSync(2, `fake-cli: unknown usage-limit scenario ${process.env.SMOKE_LIMIT_SCENARIO}\n`);
+    process.exit(99);
+  }
+  const fd = process.env.SMOKE_LIMIT_STREAM === "stderr" ? 2 : 1;
+  const lines = scenario.events;
+  let payload = lines.join("\n");
+  // Default to a trailing newline; the no-newline variant proves the relay still scans a
+  // terminal event that arrives unterminated.
+  if (process.env.SMOKE_LIMIT_NO_TRAILING_NEWLINE !== "1") payload += "\n";
+  if (process.env.SMOKE_LIMIT_SPLIT === "1") {
+    // Deliberately awkward chunk size: lands mid-token, mid-JSON-escape, and mid-multibyte.
+    const buf = Buffer.from(payload, "utf8");
+    for (let i = 0; i < buf.length; i += 7) fs.writeSync(fd, buf.subarray(i, i + 7));
+  } else {
+    fs.writeSync(fd, payload);
+  }
+  if (process.env.SMOKE_LIMIT_HANG === "1") {
+    // Emit the limit signature, then never exit: lets the matrix drive the precedence
+    // cases where the relay itself ends the run (watchdog timeout, orchestrator kill),
+    // which must outrank any classification.
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
+  }
+  process.exit(scenario.exitCode);
+}
 if (process.env.SMOKE_MODE === "aider-success") {
   fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify(args));
   // Mentions OPENAI_API_KEY in prose so a bare-substring matcher would false-fail.

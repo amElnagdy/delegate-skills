@@ -1,0 +1,124 @@
+{
+  "schema": "delegate-usage-limit-capture.v1",
+  "cli": "grok",
+  "binary": "grok",
+  "version": "@xai-official/grok 1.0.3 (npm latest at capture time); signatures and transport read from xai-org/grok-build @ e5fd4816d43260c15ba785f103990c1ed6cea230 (main), whose workspace changelogs top out at 1.0.3",
+  "platform": "n/a — no local install was used; the npm package ships a launcher plus prebuilt platform binaries, so this bundle is read from the pinned upstream Rust source rather than from a binary or a live run",
+  "capturedAt": "2026-08-13",
+
+  "provenance": {
+    "state": "source-backed; live run pending",
+    "envelope": "source-backed",
+    "envelopeMethod": "Terminal-failure shape read from crates/codegen/xai-grok-pager/src/headless.rs:1300-1325 (the single `Some(Err(err))` arm calls on_error and returns Err, so on_end — and therefore the `end` line — never runs) and headless.rs:357-378, which routes the StreamingJson output format to `reducer.error(...)`. The wire line itself is built by AcpReducer::error in crates/codegen/xai-grok-pager/src/headless/reducer/acp.rs: serde tag `type`, snake_case, so `{\"type\":\"error\",\"message\":\"…\"}`, with merged spend fields when usage was recorded. Exit code 1 on that path per crates/codegen/xai-grok-pager/docs/user-guide/14-headless-mode.md:559-566. The success line (`{\"type\":\"end\",\"sessionId\":…}`, the only AcpLine variant carrying a session id) is from the same reducer, AcpEndLine.",
+    "signature": "source-backed",
+    "signatureMethod": "The three user-facing templates are verbatim constants in crates/codegen/xai-grok-shell/src/sampling/error.rs, selected by format_rate_limited_user_message (error.rs:54-80) when the provider answers HTTP 429. Corroborated end to end by crates/codegen/xai-grok-shell/tests/test_built_binary_e2e.rs:329-379 (test_headless_free_usage_exhausted_prints_paywall_message), which drives the built binary against a mock 429 body {\"code\":\"subscription:free-usage-exhausted\",\"error\":\"You have used all your free usage.\"} and asserts a non-zero exit plus output containing \"reached your free Grok Build usage limit\". No template was taken from prose documentation.",
+    "liveLimitRun": "pending — `grok` is not installed on the machine that produced this bundle, no account was exhausted, and nothing was installed or downloaded to make it. Both the envelope and the signatures are read from version-pinned upstream source of the real headless transport, which is why the state above is `source-backed; live run pending` rather than `live-captured`. A live capture should still be taken before the README claims otherwise.",
+    "typography": "All three templates use U+2019 RIGHT SINGLE QUOTATION MARK (written \\u{2019} in the Rust source), including mid-word in \"team’s\". They are stored here verbatim; the relay folds curly apostrophes to ASCII on both sides so the phrase table stays readable and a purely typographic change upstream cannot silently disable the matcher.",
+    "truncation": "crates/codegen/xai-grok-pager/src/app/effects/helpers.rs:251-281 (sanitize_user_error) rewrites internal service names to \"server\" and truncates to the first 180 chars plus \"...\" when the message exceeds 200. The three constants measure 161 / 181 / 81 chars, so none is truncated and none hits a replacement pattern. The relay matches a leading phrase of each rather than the full sentence, so a later suffix change (or a truncated pass-through detail) cannot break the match.",
+    "excludedCandidates": [
+      { "candidate": "ACP JSON-RPC code -32003 (RATE_LIMITED_ERROR_CODE, sampling/error.rs:19)", "reason": "genuinely structured and set only for real HTTP 429s, but it never reaches this transport: headless.rs:1301 consumes the code to pick the message, and AcpReducer::error serializes only `type` + `message` (+ merged spend). Matching it would mean matching a field that is never on the wire." },
+      { "candidate": "StopFailure hook input `error: \"rate_limit\"` (session/acp_session_impl/turn_end.rs:400-406, docs/user-guide/10-hooks.md)", "reason": "a real structured vocabulary, but consuming it requires the relay to install a hook, which mutates the user's grok config — out of scope for a single-shot dispatcher." },
+      { "candidate": "Non-xAI backends (api_backend = chat_completions | responses | messages, docs/user-guide/11-custom-models.md:62-64, :193-266)", "reason": "on a 429 from those, format_rate_limited_user_message falls through to the pass-through branch and emits the provider's own flattened body (ProviderError::display_message renders \"<slug>: <message>\", e.g. \"rate_limit_error: rate limit exceeded\"). No concrete non-xAI template was verified end to end, and `rate_limit_error` alone is generic wording, so no signature is claimed. Those backends keep reporting an unclassified `failed` — this bundle is therefore `partial`, xAI-only." },
+      { "candidate": "AcpLine::AutoCompactFailed { error } and AcpLine::ImageCompressed { message }", "reason": "error-shaped but not terminal, and they are their own event types. The matcher's terminal-event allowlist is exactly `type == \"error\"`." },
+      { "candidate": "Bare \"429\", \"quota\", \"rate limit\", \"usage limit\"", "reason": "ordinary task prose. A brief about rate limiting makes the implementer emit all of them mid-run — see the proseThenUnrelatedFailure scenario." }
+    ]
+  },
+
+  "transport": {
+    "stream": "stdout",
+    "flag": "--output-format streaming-json",
+    "framing": "one JSON object per line; the relay's scanner is brace-depth based rather than line based, so a record may also arrive split across chunks or without a trailing newline",
+    "terminalFailureEvent": "{\"type\":\"error\"}",
+    "terminalFailureField": "message",
+    "terminalSuccessEvent": "{\"type\":\"end\"}",
+    "observedExitCodeOnTerminalError": 1,
+    "errorCodeOnWire": "none — AcpReducer::error emits only `type` and `message` (plus merged spend fields). The message string is the sole discriminator available on this transport.",
+    "sessionIdOnFailure": "absent. `sessionId` rides only on the `end` line, and the terminal error arm never emits one, so a classified failure carries the session id only when the caller passed --session. Otherwise resume with --resume-last (grok's `--continue`).",
+    "spendOnFailure": "preserved — AcpReducer::error merges attach_result_usage into the error line when usage was recorded, so the relay's existing `usage` capture still reports spend on a limit failure.",
+    "warningsAreNotTerminal": "The `{\"type\":\"error\"}` line is emitted from headless mode's single terminal error arm and is immediately followed by a returned Err, so it is terminal by construction. Other error-shaped lines are separate AcpLine variants (AutoCompactFailed, ImageCompressed) and are not matched. The documented event list is explicitly non-exhaustive (14-headless-mode.md:247), which is the second reason the matcher also requires a verified message template rather than trusting the event type alone."
+  },
+
+  "signatures": {
+    "codes": [],
+    "codesNote": "Grok surfaces no error code on this transport — see provenance.excludedCandidates. The message templates are the whole signature.",
+    "messages": [
+      {
+        "phrase": "you've reached your free grok build usage limit",
+        "kind": "quota_exhausted",
+        "template": "You’ve reached your free Grok Build usage limit for now. Get SuperGrok for much higher limits, or try again later: https://grok.com/supergrok?referrer=grok-build",
+        "source": "xai-grok-shell/src/sampling/error.rs:38 (FREE_USAGE_USER_MESSAGE), selected at error.rs:54-72 when the flattened 429 detail carries FREE_USAGE_EXHAUSTED_ERROR_CODE = \"subscription:free-usage-exhausted\" (error.rs:34, sniffed by is_free_usage_exhausted_error at error.rs:43-45)",
+        "note": "A subscription paywall, not a transient throttle, hence quota_exhausted. Its doc comment (error.rs:36-37) states it deliberately promises no reset duration because the quota window is backend-config-driven."
+      },
+      {
+        "phrase": "you've hit your team's api rate limit",
+        "kind": "rate_limited",
+        "template": "You’ve hit your team’s API rate limit. Ask a team admin to purchase more credits for higher limits, or try again later. See https://docs.x.ai/developers/rate-limits#rate-limit-tiers",
+        "source": "xai-grok-shell/src/sampling/error.rs:28 (RATE_LIMITED_USER_MESSAGE_API_KEY), emitted by format_rate_limited_user_message (error.rs:54-80) when is_api_key_auth is true and the server detail is empty or pushes the consumer upsell (pushes_consumer_subscription_upsell, error.rs:101-105)"
+      },
+      {
+        "phrase": "you've hit the rate limit for your plan",
+        "kind": "rate_limited",
+        "template": "You’ve hit the rate limit for your plan. Upgrade your account or try again later.",
+        "source": "xai-grok-shell/src/sampling/error.rs:22-23 (RATE_LIMITED_USER_MESSAGE_OAUTH), the OAuth/session-auth fallback in format_rate_limited_user_message (error.rs:54-80) when the server supplied no usable 429 detail"
+      }
+    ],
+    "resetFields": [],
+    "resetFieldsNote": "None. No Grok limit template carries a timestamp or a duration, and the error line has no reset field, so retryAt and resetsAt are always null for this CLI. Inventing one would send the orchestrator back at the wrong moment. This is why the shared matrix's usageLimitRetryAfter and usageLimitAmbiguousReset scenarios are deliberately absent below — Grok supplies no such data, and a fabricated scenario would test the fixture rather than the CLI."
+  },
+
+  "scenarios": {
+    "usageLimit": {
+      "note": "Free-plan quota exhaustion, the case the upstream e2e test drives. The terminal error line is verbatim FREE_USAGE_USER_MESSAGE. No reset time is stated anywhere, so expect carries no resetsAt.",
+      "expect": { "status": "failed", "failureClass": "usage_limit", "kind": "quota_exhausted" },
+      "exitCode": 1,
+      "events": [
+        "{\"type\":\"thought\",\"data\":\"Reading the brief and the touched files before editing.\"}",
+        "{\"type\":\"text\",\"data\":\"Starting on the brief.\"}",
+        "{\"type\":\"error\",\"message\":\"You’ve reached your free Grok Build usage limit for now. Get SuperGrok for much higher limits, or try again later: https://grok.com/supergrok?referrer=grok-build\"}"
+      ]
+    },
+
+    "unrelatedFailure": {
+      "note": "Constructed, not captured: a terminal error line whose message is not a limit template. sanitize_user_error rewrites internal service names to \"server\", which is why the wording looks like this. Must stay an unclassified failure.",
+      "expect": { "status": "failed", "failureClass": null },
+      "exitCode": 1,
+      "events": [
+        "{\"type\":\"text\",\"data\":\"Looking at the repository layout.\"}",
+        "{\"type\":\"error\",\"message\":\"Request to server failed: 500 Internal Server Error\"}"
+      ]
+    },
+
+    "proseThenUnrelatedFailure": {
+      "note": "Adversarial: every trigger word — and all three verbatim limit templates — appears in NON-terminal output, because the brief was about handling provider limits. The run then dies of something unrelated. Must stay unclassified.",
+      "expect": { "status": "failed", "failureClass": null },
+      "exitCode": 1,
+      "events": [
+        "{\"type\":\"thought\",\"data\":\"The brief asks for a handler covering HTTP 429, quota exhaustion and rate limit backoff.\"}",
+        "{\"type\":\"text\",\"data\":\"I added a 429 retry path. It now surfaces the provider sentence verbatim: You’ve reached your free Grok Build usage limit for now. Get SuperGrok for much higher limits, or try again later.\"}",
+        "{\"type\":\"text\",\"data\":\"The team branch reports You’ve hit your team’s API rate limit, and the OAuth branch reports You’ve hit the rate limit for your plan. Upgrade your account or try again later.\"}",
+        "{\"type\":\"error\",\"message\":\"Request to server failed: 500 Internal Server Error\"}"
+      ]
+    },
+
+    "recoveredThenSuccess": {
+      "note": "Defensive, not observed: per headless.rs the terminal error arm returns immediately, so nothing follows it. If a build ever emitted a limit-looking error line and then went on to reach grok's success state (the `end` line, exit 0), the run did the work and must be reported as a clean completion.",
+      "expect": { "status": "completed", "failureClass": null },
+      "exitCode": 0,
+      "events": [
+        "{\"type\":\"error\",\"message\":\"You’ve hit the rate limit for your plan. Upgrade your account or try again later.\"}",
+        "{\"type\":\"text\",\"data\":\"Retried once the throttle cleared and finished the edit.\"}",
+        "{\"type\":\"end\",\"sessionId\":\"grok-session-recovered-1\",\"usage\":{\"input_tokens\":11,\"output_tokens\":4,\"total_tokens\":15}}"
+      ]
+    },
+
+    "usageLimitExitZero": {
+      "note": "Defensive: this CLI exits 1 on the terminal error arm (14-headless-mode.md:559-566), but a limit must never be reported as a completed run, so the relay normalizes a zero exit to a failure.",
+      "expect": { "status": "failed", "failureClass": "usage_limit", "kind": "quota_exhausted", "exitCode": 1 },
+      "exitCode": 0,
+      "events": [
+        "{\"type\":\"text\",\"data\":\"Starting on the brief.\"}",
+        "{\"type\":\"error\",\"message\":\"You’ve reached your free Grok Build usage limit for now. Get SuperGrok for much higher limits, or try again later: https://grok.com/supergrok?referrer=grok-build\"}"
+      ]
+    }
+  }
+}

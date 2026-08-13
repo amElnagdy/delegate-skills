@@ -55,6 +55,21 @@
  *   (OpenCode's own report), touchedFiles (git porcelain, null if git can't report), and the
  *   paths to events.jsonl and final.txt.
  *
+ * Usage limits: when the run ends in OpenCode's terminal `{"type":"error"}` event carrying an
+ * APIError with a recognized usage-limit signature, the result stays status "failed" (the status
+ * set is a closed enum orchestrators switch on) and gains two additive fields:
+ *   failureClass: "usage_limit"
+ *   limit: { kind, retryAt, resetsAt, evidence: { source, code, excerpt, artifactLine } }
+ * kind is quota_exhausted | rate_limited | unknown. retryAt/resetsAt are null unless the
+ * provider stated a zoned absolute time or a well-defined duration — never guessed. The
+ * classification is fail-closed: only the terminal error event is inspected, only against
+ * provider-specific codes and message templates, and anything ambiguous stays an unclassified
+ * "failed". OpenCode itself retries an HTTP 429 indefinitely and never forwards its retry status
+ * to this stream, so the ordinary rate limit surfaces as a silently stalled run — status
+ * "timeout" under --timeout, or an unbounded hang without one — not as a classified failure.
+ * A usage limit is not a task failure — do not rework the brief; inspect touchedFiles, then wait
+ * for the reset or re-dispatch on another lane.
+ *
  * Exit codes: a pre-run usage error (bad/missing args, empty brief) exits 2
  * before any run and writes no result file; a missing `opencode` binary exits 127;
  * otherwise the exit code mirrors OpenCode's own (0 success, non-zero failure).
@@ -68,7 +83,7 @@
  */
 
 import {spawn, execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync, renameSync, readFileSync, existsSync, appendFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, renameSync, readFileSync, existsSync, appendFileSync, rmSync } from "node:fs";
 import {join, resolve, basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { constants, tmpdir } from "node:os";
@@ -82,6 +97,32 @@ const MAX_TIMER_MS = 2_147_483_647;
 const SAFE_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
 
 const IMPLEMENTER_KEY = "opencode";
+
+// Bound the evidence excerpt: a provider error can carry a very long body, and the
+// orchestrator only needs enough to audit the match. The full raw event stays in
+// events.jsonl, which evidence.artifactLine points at.
+const MAX_EVIDENCE_CHARS = 400;
+
+// OpenCode's usage-limit signatures, pinned to opencode 1.17.11. Both entries below were read
+// out of the embedded JS bundle of the installed binary — the `parseStreamError` switch in
+// MessageV2.ProviderError, which maps a provider body code to a fixed message and hard-codes
+// `isRetryable: false` (see test/fixtures/usage-limit/opencode.json for the capture bundle and
+// its provenance); nothing here is inferred. That non-retryability is what makes these two
+// terminal at all: OpenCode retries an HTTP 429 indefinitely and never forwards its retry
+// status to `--format json` stdout, so an ordinary rate limit stalls the run instead of failing
+// it. The opencode Zen `GoUsageLimitError`/`FreeUsageLimitError` templates are deliberately NOT
+// listed — they exist only on that retry status, which this transport never emits.
+const USAGE_LIMIT_CODES = new Map([
+  ["insufficient_quota", "quota_exhausted"],
+  ["usage_not_included", "quota_exhausted"],
+]);
+
+// The exact fixed templates the same switch attaches to those codes. Matched case-insensitively
+// as whole phrases — never bare "quota"/"429"/"rate limit", which appear in ordinary task prose.
+const USAGE_LIMIT_MESSAGES = [
+  ["quota exceeded. check your plan and billing details.", "quota_exhausted"],
+  ["to use codex with your chatgpt plan, upgrade to plus", "quota_exhausted"],
+];
 
 function makeEventScanner(onObject) {
   let buf = "";
@@ -142,6 +183,105 @@ function makeEventScanner(onObject) {
       index = 0;
       start = -1;
     }
+  };
+}
+
+function safeJson(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function boundedExcerpt(text) {
+  const flat = String(text ?? "").replace(/\s+/g, " ").trim();
+  return flat.length > MAX_EVIDENCE_CHARS ? `${flat.slice(0, MAX_EVIDENCE_CHARS)}…` : flat;
+}
+
+function parseResetTimestamp(value, mode) {
+  // Only a zoned absolute timestamp or a well-defined duration becomes a time. Anything
+  // ambiguous or localized ("resets 3pm") yields null — a guessed reset time would send
+  // the orchestrator back at the wrong moment, which is worse than reporting nothing.
+  if (value === null || value === undefined) return null;
+  if (mode === "absolute") {
+    if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})$/.test(value.trim())) return null;
+    const parsed = new Date(value.trim().replace(" ", "T"));
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+  }
+  if (mode === "duration") {
+    const seconds = typeof value === "number" ? value : typeof value === "string" && /^\d+(\.\d+)?$/.test(value.trim()) ? Number(value) : NaN;
+    if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 30 * 24 * 3600) return null;
+    return new Date(Date.now() + seconds * 1000).toISOString();
+  }
+  return null;
+}
+
+function usageLimitFields(match) {
+  // The additive half of the result contract: status stays "failed" so orchestrators that
+  // switch on the closed status enum keep working; failureClass/limit carry the detail.
+  if (!match) return {};
+  return {
+    failureClass: "usage_limit",
+    limit: {
+      kind: match.kind,
+      retryAt: match.retryAt ?? null,
+      resetsAt: match.resetsAt ?? null,
+      evidence: {
+        source: match.source,
+        code: match.code ?? null,
+        excerpt: boundedExcerpt(match.excerpt),
+        artifactLine: match.artifactLine ?? null,
+      },
+    },
+  };
+}
+
+function classifyUsageLimit(event, artifactLine) {
+  // OpenCode-specific detector. `opencode run --format json` forwards exactly one error shape —
+  // {"type":"error","sessionID":…,"error":{"name":…,"data":{…}}}, emitted for a session error —
+  // and that same event is what makes the run exit non-zero, so it is the terminal failure event.
+  // Only APIError carries a provider refusal: ProviderAuthError, ContextOverflowError,
+  // MessageOutputLengthError, MessageAbortedError and friends are local conditions and must never
+  // classify. Verified against opencode 1.17.11.
+  if (!event || event.type !== "error") return null;
+  const named = event.error && typeof event.error === "object" ? event.error : null;
+  if (!named || named.name !== "APIError") return null;
+  const data = named.data && typeof named.data === "object" ? named.data : {};
+  const message = typeof data.message === "string" ? data.message : "";
+  const body = typeof data.responseBody === "string" ? data.responseBody : "";
+  if (!message && !body) return null;
+
+  // responseBody is the provider's raw HTTP body; parseStreamError read its
+  // {"error":{"code":"…"}} to choose the fixed message above, so read the same field back for the
+  // code — and for whatever reset the provider happened to state alongside it.
+  let code = null;
+  let resetsAt = null;
+  let retryAt = null;
+  const nested = safeJson(body);
+  if (nested && typeof nested === "object") {
+    const inner = nested.error && typeof nested.error === "object" ? nested.error : nested;
+    if (typeof inner.code === "string") code = inner.code;
+    else if (typeof inner.type === "string") code = inner.type;
+    resetsAt = parseResetTimestamp(inner.resets_at ?? nested.resets_at, "absolute");
+    retryAt = parseResetTimestamp(inner.retry_after ?? nested.retry_after, "duration");
+  }
+
+  const codeKind = code ? USAGE_LIMIT_CODES.get(code.toLowerCase()) : undefined;
+  const haystack = `${message}\n${body}`.toLowerCase();
+  const messageHit = USAGE_LIMIT_MESSAGES.find(([phrase]) => haystack.includes(phrase));
+  // Require a verified code or a verified message template. A 4xx status, or the SDK's own
+  // isRetryable flag, is not enough on its own — fail closed and report a plain "failed".
+  if (!codeKind && !messageHit) return null;
+
+  return {
+    kind: codeKind ?? messageHit?.[1] ?? "unknown",
+    code: code ?? null,
+    source: "events.jsonl",
+    excerpt: message || body,
+    artifactLine,
+    resetsAt,
+    retryAt,
   };
 }
 
@@ -411,6 +551,11 @@ function prepareRunDir(opts, brief) {
     briefPath: join(outDir, "brief.txt"),
     resultPath: join(outDir, "result.json"),
   };
+  // A reused --out-dir must not advertise the previous run: a poller that races the
+  // dispatch would read the old result.json as if it were this run's, and a run with no
+  // report of its own would publish a finalPath holding someone else's.
+  rmSync(run.finalPath, { force: true });
+  rmSync(run.resultPath, { force: true });
   writeFileSync(run.briefPath, brief, "utf8");
   writeFileSync(run.eventsPath, "", "utf8");
   return run;
@@ -506,8 +651,15 @@ function dispatchToOpenCode(opts, brief, run, writeResult) {
   const textParts = new Map(); // part.id -> latest text
   const textOrder = []; // part.ids in first-seen order
   const stderrTail = [];
+  // The run's accumulated classification state: how many JSON objects the scanner has seen
+  // (so a match can point at its own evidence) and the usage-limit match standing at exit.
+  const limitScan = { objectCount: 0, limitMatch: null };
 
   const scan = makeEventScanner((event) => {
+    // `opencode run --format json` writes exactly one JSON object per line (its emitter appends
+    // EOL), and events.jsonl is that stdout stream verbatim — so the running object count is the
+    // object's 1-based line number there, which is what evidence.artifactLine must point at.
+    limitScan.objectCount += 1;
     // Session id: real events carry `sessionID` (camelCase); plugin notify objects
     // carry `session_id` (snake_case). Accept either.
     const sid = event.sessionID || event.session_id;
@@ -523,6 +675,15 @@ function dispatchToOpenCode(opts, brief, run, writeResult) {
     if (event.type === "step_finish" && event.part && typeof event.part.cost === "number") {
       totalCost += event.part.cost;
       sawCost = true;
+    }
+    // Every forwarded error event replaces the standing match, so the last one before exit is
+    // the one that counts and an unrelated error clears an earlier limit. A step that finishes
+    // afterwards supersedes it entirely: the run recovered and went on doing the work, so it
+    // must not be reported as limit-exhausted.
+    if (event.type === "error") {
+      limitScan.limitMatch = classifyUsageLimit(event, limitScan.objectCount);
+    } else if (event.type === "step_finish") {
+      limitScan.limitMatch = null;
     }
   });
 
@@ -625,9 +786,16 @@ function dispatchToOpenCode(opts, brief, run, writeResult) {
     // parent is down, sweep the group (no-op where taskkill already felled the tree)
     if (watchdogFired) killChild(child, "SIGKILL");
     const finalMessage = assembleFinal();
+    // Outcome precedence: a run the relay itself ended is a timeout (or, in the signal handler
+    // above, aborted) — never a classified provider failure, because the limit may simply be
+    // what opencode was about to report when we killed it.
+    const limitMatch = watchdogFired ? null : limitScan.limitMatch;
     // A timed-out run is never a success even if opencode handles SIGTERM by exiting 0 -
-    // orchestrators key off status and the relay exit code.
-    const succeeded = code === 0 && !watchdogFired;
+    // orchestrators key off status and the relay exit code. A usage limit is likewise never a
+    // success: if opencode ever exits 0 while its terminal error event carried a limit
+    // signature, normalize to a failure (exit 1 below) rather than report a run that did no
+    // work as completed.
+    const succeeded = code === 0 && !watchdogFired && !limitMatch;
     const mapped = code ?? (constants.signals[signal] ? 128 + constants.signals[signal] : 1);
     const result = writeResult({
       status: succeeded ? "completed" : watchdogFired ? "timeout" : "failed",
@@ -639,6 +807,7 @@ function dispatchToOpenCode(opts, brief, run, writeResult) {
       cost: sawCost ? Number(totalCost.toFixed(6)) : null,
       ...(succeeded ? {} : { stderrTail: stderrTail.slice(-20) }),
       ...(watchdogFired ? { error: `opencode did not finish within --timeout ${opts.timeout}; killed by the relay watchdog` } : {}),
+      ...usageLimitFields(limitMatch),
     });
     printSummary(result, run.resultPath);
     process.exit(result.exitCode);
@@ -691,6 +860,11 @@ function printSummary(result, resultPath) {
   lines.push(`relay: ${result.status} (exit ${result.exitCode}${result.signal ? `, killed by ${result.signal}` : ""})  ·  opencode ${result.opencodeVersion ?? "?"}`);
   if (result.signal === "SIGKILL" && result.status === "failed") lines.push("hint: the host killed the process (commonly the OOM killer or a supervisor timeout) — this is not an opencode error; check host memory and re-dispatch, or split the task into smaller briefs.");
   if (result.signal === "SIGTERM" && result.status === "failed") lines.push("hint: something outside the relay terminated opencode (a supervisor, the session ending, or a manual kill) — when the relay itself does the killing it reports status \"timeout\" or \"aborted\" instead; inspect the working tree before re-dispatching.");
+  if (result.failureClass === "usage_limit") {
+    const when = result.limit?.retryAt || result.limit?.resetsAt;
+    lines.push(`hint: the provider refused on usage limits (${result.limit?.kind ?? "unknown"})${when ? `, earliest retry ${when}` : ""} — this is not a task failure. Do NOT rework the brief: inspect touched files first, then wait for the reset or re-dispatch the same brief on another lane from a clean tree.`);
+    if (result.limit?.evidence?.excerpt) lines.push(`  evidence (${result.limit.evidence.source}:${result.limit.evidence.artifactLine ?? "?"}): ${result.limit.evidence.excerpt}`);
+  }
   if (result.resumed) lines.push("mode: resumed existing session");
   if (result.sessionId) lines.push(`session id (resume with: --session ${result.sessionId}): ${result.sessionId}`);
   if (typeof result.cost === "number") lines.push(`cost: $${result.cost}`);

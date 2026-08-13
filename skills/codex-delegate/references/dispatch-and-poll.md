@@ -74,6 +74,32 @@ filtered environment is used for preflight and dispatch.
 - `workdir`, `sandbox`, `model`, `effort`, `resumeLast`, `session`, `cleanEnv`, `keepEnv`, `startedAt`, `finishedAt` — `sandbox` is the applied mode, or a note that Codex used its active config on an unqualified resume; `session` is the explicit session id, or `null` for fresh and `--resume-last` runs; `keepEnv` records names only, never values
 - `stderrTail` — last ~20 stderr lines; present on every run that did not complete (`failed`, `timeout`, `aborted`), absent on `completed`, `codex_unavailable`, and launch failures
 - `error` — present on a launch failure, and on `timeout` and `aborted` runs
+- `failureClass` — `"usage_limit"` when the run died on a provider usage/rate limit; **absent otherwise**. Additive: `status` stays `failed`, so any handling that switches on `status` keeps working
+- `limit` — present only alongside `failureClass`. `{ kind, retryAt, resetsAt, evidence }` where `kind` is `quota_exhausted` | `rate_limited` | `unknown`; `retryAt`/`resetsAt` are ISO timestamps or `null` (never guessed — an ambiguous "resets 3pm" stays `null`); `evidence` is `{ source, code, excerpt, artifactLine }`, a bounded excerpt plus the 1-based `events.jsonl` line the match came from, so you can audit the classification instead of trusting it
+
+### Usage limits
+
+A `usage_limit` result is **not a task failure**, and the two need opposite responses:
+
+- **Do not rework the brief** — nothing was wrong with it.
+- **Inspect `touchedFiles` first.** A limit can strike mid-edit, so the tree may hold partial work.
+- Then either wait (`retryAt`/`resetsAt` when the provider stated one) and resume the exact thread
+  with `--session <threadId>`, which is preserved across the limit, or re-dispatch the same brief on
+  another lane **from a clean tree** — rerouting on top of half-applied changes duplicates or
+  corrupts them.
+
+Classification is deliberately fail-closed: only Codex's terminal `turn.failed` event is inspected,
+only against usage-limit codes and message templates verified against the shipped binary
+(`test/fixtures/usage-limit/codex.json` records which, and where they came from). Codex emits
+`item.completed` items of type `error` — and even a top-level `{"type":"error"}` event — during runs
+that go on to succeed, so "an error appeared" is never enough. Anything ambiguous stays an
+unclassified `failed`: a missed classification costs you a diagnosis, while a false one would tell
+you to wait out a bug. A limit whose signature this relay does not recognize therefore looks like a
+plain `failed` — check `stderrTail` and `eventsPath` before concluding the brief was at fault.
+
+Precedence: a run the relay itself ended is never classified — the watchdog reports `timeout` and a
+kill reports `aborted`, even if a limit event was already seen. A limit that somehow arrives with a
+zero exit code is still normalized to a failure, because a run that did no work is not a completion.
 
 The helper also prints a summary to stdout and exits with Codex's exit code, so a wrapping script can
 branch on success/failure directly.
@@ -106,6 +132,8 @@ process has exited and `result.json` is written — not when a status line says 
   Common causes: an auth lapse, an invalid `--model` or unsupported `--effort`, or a sandbox that
   blocked something the task needed. Fix the cause and re-dispatch; don't paper over it by doing the
   work yourself unless that's what the user wants.
+- **`status: failed` with `failureClass: "usage_limit"`:** the provider refused on usage limits —
+  see "Usage limits" above. Wait or reroute; don't rework the brief.
 - **`status: timeout`:** the `--timeout` watchdog killed the run. The working tree may hold a
   half-applied change — inspect it before deciding between a longer `--timeout`, a smaller brief,
   or a resume.

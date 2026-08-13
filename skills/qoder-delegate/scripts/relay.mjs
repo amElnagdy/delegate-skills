@@ -37,6 +37,24 @@
  * write no result. Missing `qodercli` exits 127 with qoder_unavailable. Once
  * dispatched, every outcome writes a result: completed, failed, timeout,
  * aborted, or qoder_unavailable.
+ *
+ * Usage limits: when the run ends in Qoder's terminal stream-json `result` event
+ * carrying is_error and a recognized usage-limit signature, the result stays
+ * status "failed" (the status set is a closed enum orchestrators switch on) and
+ * gains two additive fields:
+ *   failureClass: "usage_limit"
+ *   limit: { kind, retryAt, resetsAt, evidence: { source, code, excerpt, artifactLine } }
+ * kind is quota_exhausted | rate_limited | unknown. retryAt/resetsAt are null
+ * unless Qoder stated a zoned absolute time or a well-defined duration - never
+ * guessed, and its terminal result event states neither today. The
+ * classification is fail-closed: only the terminal result event is inspected,
+ * only its errors[] and error_code, and only against codes and message
+ * templates verified for this CLI - Qoder's mid-run
+ * {"type":"system","subtype":"api_retry","error":"rate_limit"} events are
+ * transient 429s it retries and usually recovers from, so they never classify.
+ * Anything ambiguous stays an unclassified "failed". A usage limit is not a task
+ * failure - do not rework the brief; inspect touchedFiles, then wait for the
+ * reset or re-dispatch on another lane.
  */
 
 import {execFileSync, spawn, spawnSync } from "node:child_process";
@@ -70,6 +88,51 @@ const PERMISSION_MODES = new Set([
 ]);
 
 const IMPLEMENTER_KEY = "qoder";
+
+// Bound the evidence excerpt: a provider error can carry a very long body, and the
+// orchestrator only needs enough to audit the match. The full raw event stays in
+// events.jsonl, which evidence.artifactLine points at.
+const MAX_EVIDENCE_CHARS = 400;
+
+// Qoder's usage-limit signatures, pinned to @qoder-ai/qodercli@1.1.20. Every entry below was
+// read out of the shipped bundle's own error enum and message mapper (see
+// test/fixtures/usage-limit/qoder.json for the capture bundle and its provenance); nothing
+// here is inferred. `error_code` is that enum, carried on the terminal stream-json result
+// event. The kinds follow Qoder's own split: the codes in its terminal-quota set are spent
+// plans and drained credits, while usageLimitExceeded (113) is the per-window cap it treats
+// as retry-after-reset. Codes outside these - loginExpired (105), the BYOK custom-model codes
+// (100400/100401/100403) - are deliberately absent: they are not usage limits, and an
+// unverified signature is exactly the false positive this classification must avoid.
+const USAGE_LIMIT_CODES = new Map([
+  [110, "quota_exhausted"], // todayUsageLimitExceeded
+  [113, "rate_limited"], // usageLimitExceeded
+  [114, "quota_exhausted"], // freeTrialAccountsExceeded
+  [115, "quota_exhausted"], // freeUserQuotaLimit
+  [116, "quota_exhausted"], // teamsAdminCreditsDrainedOut
+  [117, "quota_exhausted"], // teamsMemberCreditsDrainedOut
+  [118, "quota_exhausted"], // personalCreditsDrainedOut
+  [119, "quota_exhausted"], // velaModelFreeLimitReached
+  [122, "quota_exhausted"], // billingGroupCreditsLimitReached
+]);
+
+// Exact templates from the same bundle's message-to-code mapper, matched case-insensitively
+// as whole phrases against the terminal event's errors[] only - never bare "quota", "429", or
+// "rate limit", which appear in ordinary task prose.
+const USAGE_LIMIT_MESSAGES = [
+  ["billing daily count exceeded", "quota_exhausted"], // -> todayUsageLimitExceeded
+  ["user quota exhausted", "rate_limited"], // -> usageLimitExceeded
+];
+
+// The credit-drain variants have no single template: the same mapper discriminates them by a
+// wire code token AND a marker token together. Both must be present, so no bare number and no
+// bare URL field name can match on its own.
+const USAGE_LIMIT_MARKERS = [
+  [["114", "pricingurl"], "quota_exhausted"], // freeTrialAccountsExceeded
+  [["112", "pricingurl"], "quota_exhausted"], // personalCreditsDrainedOut (wire token 112, enum 118)
+  [["116", "purchaseurl"], "quota_exhausted"], // teamsAdminCreditsDrainedOut
+  [["117", "usageurl"], "quota_exhausted"], // teamsMemberCreditsDrainedOut
+  [["122", "billing group"], "quota_exhausted"], // billingGroupCreditsLimitReached
+];
 
 function makeEventScanner(onObject) {
   let buf = "";
@@ -130,6 +193,113 @@ function makeEventScanner(onObject) {
       index = 0;
       start = -1;
     }
+  };
+}
+
+function safeJson(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function boundedExcerpt(text) {
+  const flat = String(text ?? "").replace(/\s+/g, " ").trim();
+  return flat.length > MAX_EVIDENCE_CHARS ? `${flat.slice(0, MAX_EVIDENCE_CHARS)}…` : flat;
+}
+
+function parseResetTimestamp(value, mode) {
+  // Only a zoned absolute timestamp or a well-defined duration becomes a time. Anything
+  // ambiguous or localized ("resets 3pm") yields null — a guessed reset time would send
+  // the orchestrator back at the wrong moment, which is worse than reporting nothing.
+  if (value === null || value === undefined) return null;
+  if (mode === "absolute") {
+    if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})$/.test(value.trim())) return null;
+    const parsed = new Date(value.trim().replace(" ", "T"));
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+  }
+  if (mode === "duration") {
+    const seconds = typeof value === "number" ? value : typeof value === "string" && /^\d+(\.\d+)?$/.test(value.trim()) ? Number(value) : NaN;
+    if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 30 * 24 * 3600) return null;
+    return new Date(Date.now() + seconds * 1000).toISOString();
+  }
+  return null;
+}
+
+function usageLimitFields(match) {
+  // The additive half of the result contract: status stays "failed" so orchestrators that
+  // switch on the closed status enum keep working; failureClass/limit carry the detail.
+  if (!match) return {};
+  return {
+    failureClass: "usage_limit",
+    limit: {
+      kind: match.kind,
+      retryAt: match.retryAt ?? null,
+      resetsAt: match.resetsAt ?? null,
+      evidence: {
+        source: match.source,
+        code: match.code ?? null,
+        excerpt: boundedExcerpt(match.excerpt),
+        artifactLine: match.artifactLine ?? null,
+      },
+    },
+  };
+}
+
+function classifyUsageLimit(event, artifactLine) {
+  // Qoder-specific detector. Only the terminal stream-json `result` event - the one carrying
+  // is_error - is inspected. Qoder also emits {"type":"system","subtype":"api_retry",
+  // "error":"rate_limit","error_status":429} mid-run for transient 429s it retries and usually
+  // recovers from, so matching "an error-shaped event" would classify healthy runs. Verified
+  // against @qoder-ai/qodercli@1.1.20 (see test/fixtures/usage-limit/qoder.json).
+  if (!event || (event.type !== "result" && event.type !== "final")) return null;
+  if (event.is_error !== true && event.status !== "error") return null;
+
+  // errors[] is the only quota-bearing text on this transport: Qoder fills it with the raw
+  // upstream error message. The implementer's own report (event.result) is deliberately NOT
+  // searched - ordinary task prose discusses quotas, 429s, and rate limits.
+  const errors = Array.isArray(event.errors) ? event.errors.filter((entry) => typeof entry === "string") : [];
+  const detail = errors.join("\n");
+  let code = Number.isInteger(event.error_code) ? event.error_code : null;
+  if (code === null) {
+    // An errors[] entry is sometimes the provider's serialized JSON body rather than a plain
+    // sentence; recover its numeric code so the verified table below can still decide. This
+    // only supplies a candidate code - an unlisted one still classifies nothing.
+    for (const entry of errors) {
+      const nested = safeJson(entry);
+      const inner = nested && typeof nested === "object"
+        ? (nested.error && typeof nested.error === "object" ? nested.error : nested)
+        : null;
+      const nestedCode = inner ? Number(inner.code ?? inner.error_code) : Number.NaN;
+      if (Number.isInteger(nestedCode)) {
+        code = nestedCode;
+        break;
+      }
+    }
+  }
+
+  const codeKind = code === null ? undefined : USAGE_LIMIT_CODES.get(code);
+  const haystack = detail.toLowerCase();
+  const messageHit = haystack ? USAGE_LIMIT_MESSAGES.find(([phrase]) => haystack.includes(phrase)) : undefined;
+  const markerHit = haystack ? USAGE_LIMIT_MARKERS.find(([tokens]) => tokens.every((token) => haystack.includes(token))) : undefined;
+  // Require a verified error code, an exact message template, or a verified code+marker pair.
+  // A bare 429, "quota", or "rate limit" is never enough - fail closed and let the run report
+  // a plain "failed".
+  if (!codeKind && !messageHit && !markerHit) return null;
+
+  return {
+    kind: codeKind ?? messageHit?.[1] ?? markerHit?.[1] ?? "unknown",
+    code: code === null ? (markerHit?.[0][0] ?? null) : String(code),
+    source: "events.jsonl",
+    // Qoder's terminal result event states no reset and no retry field: the account's reset
+    // time lives behind its HTTP quota endpoint, which this relay never calls. These reads
+    // stay defensive - parseResetTimestamp yields null for anything missing, localized, or
+    // ambiguous, so a time appears only if a later version states an unambiguous one.
+    resetsAt: parseResetTimestamp(event.resets_at, "absolute"),
+    retryAt: parseResetTimestamp(event.retry_after, "duration"),
+    excerpt: detail || `${event.subtype ?? event.type} error_code=${code ?? "?"}`,
+    artifactLine,
   };
 }
 
@@ -464,6 +634,10 @@ function dispatch(opts, brief, run, writeResult) {
   let resultSubtype = null;
   let qoderErrors = [];
   let permissionDenials = [];
+  let limitMatch = null;
+  // 1-based line of events.jsonl currently being scanned, so a classification can point at
+  // its own evidence in the artifact the orchestrator will read.
+  let eventsLine = 1;
   const textChunks = [];
   const deltaChunks = [];
   const stderrTail = [];
@@ -503,14 +677,36 @@ function dispatch(opts, brief, run, writeResult) {
       if (event.usage && typeof event.usage === "object") usage = event.usage;
       if (Array.isArray(event.errors)) qoderErrors = event.errors;
       if (Array.isArray(event.permission_denials)) permissionDenials = event.permission_denials;
+      // A result event that is not an error supersedes any earlier match: the run did the
+      // work, so it must never be reported as limit-exhausted.
+      limitMatch = resultIsError ? classifyUsageLimit(event, eventsLine) : null;
     }
   });
   const stdoutDecoder = new StringDecoder("utf8");
   const stderrDecoder = new StringDecoder("utf8");
 
+  // Feed the scanner one events.jsonl line at a time so `eventsLine` stays in step with the
+  // artifact on disk. The scanner itself is brace-matching rather than line-based (Qoder's
+  // stream-json is not guaranteed to be one object per line), so the counter lives out here:
+  // it names the line an object's closing brace landed on, which is the line an orchestrator
+  // opens to audit a classification. A trailing fragment with no newline is still scanned, so
+  // a terminal event that arrives unterminated classifies like any other.
+  const feedStdout = (text) => {
+    if (!text) return;
+    let from = 0;
+    for (;;) {
+      const nl = text.indexOf("\n", from);
+      if (nl === -1) break;
+      scan(text.slice(from, nl + 1));
+      eventsLine += 1;
+      from = nl + 1;
+    }
+    if (from < text.length) scan(text.slice(from));
+  };
+
   child.stdout.on("data", (chunk) => {
     appendFileSync(run.eventsPath, chunk);
-    scan(stdoutDecoder.write(chunk));
+    feedStdout(stdoutDecoder.write(chunk));
   });
   child.stderr.on("data", (chunk) => {
     process.stderr.write(chunk);
@@ -605,10 +801,17 @@ function dispatch(opts, brief, run, writeResult) {
     settled = true;
     clearWatchdog();
     if (watchdogFired) killChild(child, "SIGKILL");
-    scan(stdoutDecoder.end());
+    feedStdout(stdoutDecoder.end());
     const stderrEnd = stderrDecoder.end();
     if (stderrEnd.trim()) stderrTail.push(stderrEnd.trimEnd());
-    const succeeded = code === 0 && !watchdogFired && !resultIsError;
+    // Outcome precedence: a run the relay itself ended is a timeout (or, in the signal handler
+    // above, aborted) - never a classified provider failure, because the limit may simply be
+    // what qodercli was about to report when we killed it.
+    const limit = watchdogFired ? null : limitMatch;
+    // A usage limit is never a success: if qodercli ever exits 0 while its terminal result
+    // event carried a limit signature, normalize to a failure rather than report a run that
+    // did no work as completed.
+    const succeeded = code === 0 && !watchdogFired && !resultIsError && !limit;
     const mapped = code ?? (constants.signals[signal] ? 128 + constants.signals[signal] : 1);
     const exitCode = succeeded ? 0 : mapped === 0 ? 1 : mapped;
     const result = writeResult({
@@ -626,6 +829,7 @@ function dispatch(opts, brief, run, writeResult) {
       touchedFiles: gitTouchedFiles(opts.cd),
       ...(succeeded ? {} : { stderrTail: stderrTail.slice(-20) }),
       ...(watchdogFired ? { error: `qodercli did not finish within --timeout ${opts.timeout}; killed by the relay watchdog` } : {}),
+      ...usageLimitFields(limit),
     });
     printSummary(result, run.resultPath);
     process.exit(exitCode);
@@ -639,6 +843,11 @@ function printSummary(result, resultPath) {
   ];
   if (result.signal === "SIGKILL" && result.status === "failed") lines.push("hint: the host killed qodercli (commonly an OOM killer or supervisor timeout); check host memory and inspect the working tree before re-dispatching.");
   if (result.signal === "SIGTERM" && result.status === "failed") lines.push("hint: something outside the relay terminated qodercli; relay watchdogs and relay signals report timeout or aborted instead.");
+  if (result.failureClass === "usage_limit") {
+    const when = result.limit?.retryAt || result.limit?.resetsAt;
+    lines.push(`hint: Qoder refused on usage limits (${result.limit?.kind ?? "unknown"})${when ? `, earliest retry ${when}` : ""} - this is not a task failure. Do NOT rework the brief: inspect touched files first, then wait for the reset or re-dispatch the same brief on another lane from a clean tree.`);
+    if (result.limit?.evidence?.excerpt) lines.push(`  evidence (${result.limit.evidence.source}:${result.limit.evidence.artifactLine ?? "?"}): ${result.limit.evidence.excerpt}`);
+  }
   if (result.resumed) lines.push("mode: resumed an existing session");
   if (result.actualModel) lines.push(`model: ${result.actualModel}`);
   if (result.contextWindow) lines.push(`context window requested: ${result.contextWindow}`);

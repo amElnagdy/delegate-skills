@@ -91,6 +91,14 @@ Do not trust progress trackers over reality: a run is finished when `result.json
 process has exited. Read the working tree, not a status line. The implementer's full report is
 the `finalMessage` field in `result.json` (also printed in full on stdout between the report markers).
 
+**If the result carries `failureClass: "usage_limit"`,** the provider refused on usage limits — the
+brief was never the problem, so do not rework it. Inspect `touchedFiles` first (a limit can strike
+mid-edit), then either wait for the reset in `limit.retryAt`/`limit.resetsAt` and resume the exact
+thread with `--session <threadId>`, or re-dispatch the same brief on another lane **from a clean
+tree**. Detection is fail-closed, so an unrecognized limit still arrives as a plain `failed` — check
+`stderrTail` before concluding the brief was at fault. Details:
+[references/dispatch-and-poll.md](references/dispatch-and-poll.md).
+
 ### 4. Review — do not trust the self-report
 
 Codex's `result.json` includes its own summary and gate claims. **Re-verify, don't accept:**

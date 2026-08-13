@@ -138,3 +138,27 @@ caps a single argument), so have `agy` read large context from the workspace ins
 
 The helper never commits - by design, not omission. The robust contract is: Antigravity edits the
 working tree, the orchestrator reviews and commits. See [review-and-land.md](review-and-land.md).
+
+## Checking quota before dispatch
+
+Antigravity is the one implementer in this package with a headless usage query, so the relay offers
+an opt-in `--preflight-usage`. It runs `agy -p "/usage" --output-format json` — verified to create
+no conversation, take no turns, and spend no tokens — before dispatching.
+
+- **Quota remaining:** the run proceeds, and `result.json` gains `usagePreflight` with the
+  provider's own `remainingFraction` and `resetTime` per bucket, plus the exact command used.
+- **Every bucket exhausted:** the relay does **not** dispatch. It writes `status: "failed"` with
+  `failureClass: "usage_limit"`, `limit.kind: "quota_exhausted"`, the soonest stated reset in
+  `limit.resetsAt`, and evidence naming the query — then exits non-zero. A doomed run never starts.
+- **A single spent bucket does not block anything** — only total exhaustion does.
+- **A probe that fails, hangs, or returns an unfamiliar shape lets the dispatch proceed.** A broken
+  check must never stand between you and your work.
+
+It reports remaining quota as fact. It never estimates whether that quota is "enough" for your
+task — that depends on repo size, iteration count and gate behavior, and is unknowable before a run.
+
+Antigravity's own limit *errors* are server-provided text that appears nowhere in the shipped
+binary, so a failed run carries no `failureClass`: there is no verified signature to match, and
+inventing one would risk telling you to wait out a real bug. Inspect `stderrTail` instead. The
+shared result contract is in
+[`docs/relay-result-contract.md`](https://github.com/amElnagdy/delegate-skills/blob/master/docs/relay-result-contract.md).

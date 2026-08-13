@@ -89,6 +89,14 @@ Trust process state and the working tree over a progress display. Completion mea
 and `result.json` exists. Cursor's full report is the `finalMessage` field in `result.json` (also
 printed in full on stdout between the report markers).
 
+**If the result carries `failureClass: "usage_limit"`,** Cursor's provider refused on usage limits —
+the brief was never the problem, so do not rework it. Inspect `touchedFiles` first (a limit can
+strike mid-edit), then either wait for the reset in `limit.retryAt`/`limit.resetsAt` and resume the
+exact session with `--session <sessionId>`, which survives the limit, or re-dispatch the same brief
+on another lane **from a clean tree**. Detection is fail-closed, so an unrecognized limit still
+arrives as a plain `failed` — check `stderrTail` before concluding the brief was at fault. Details:
+[references/dispatch-and-poll.md](references/dispatch-and-poll.md).
+
 **Windows + hooks caveat:** if the user has Cursor hooks configured (`~/.cursor/hooks.json`, or
 Claude Code `PreToolUse` hooks, which cursor-agent imports), dispatching from a Git Bash (MSYS)
 console makes cursor-agent feed PowerShell-syntax hook wrappers to bash, so every command Cursor

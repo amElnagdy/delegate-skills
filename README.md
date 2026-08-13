@@ -91,6 +91,51 @@ Each skill name links to its `SKILL.md`, which owns that implementer's prerequis
 caveats. Building one for another CLI? [Claim it first](../../issues?q=is%3Aissue+label%3Aimplementer),
 then see [CONTRIBUTING.md](CONTRIBUTING.md).
 
+### Usage-limit detection
+
+When a run dies because the account hit a provider quota, that is **not** a task failure: the brief
+was fine, so reworking it is wasted effort. Where a relay can recognize that with confidence it
+keeps `status: "failed"` and adds `failureClass: "usage_limit"` plus a `limit` object — kind,
+any stated reset time, and bounded evidence you can audit. The response is inspect `touchedFiles`,
+then wait for the reset or re-dispatch on another lane; never rework the brief. Full contract:
+[`docs/relay-result-contract.md`](docs/relay-result-contract.md).
+
+| Implementer | Detection | Evidence |
+| --- | --- | --- |
+| `codex` | detected | source-backed; live run pending [^ul-live] |
+| `cursor` | detected | source-backed; live run pending |
+| `grok` | detected | source-backed; live run pending |
+| `qoder` | detected | source-backed; live run pending |
+| `opencode` | detected — hard exhaustion only [^ul-opencode] | source-backed; live run pending |
+| `agy` | **preflight query instead** [^ul-agy] | live-captured |
+| `aider`, `cline`, `claude`, `kimi`, `pi`, `vibe` | not yet captured | — |
+
+"Not yet captured" means exactly that: no verified signature for that CLI has been committed, so
+its relay reports an ordinary unclassified `failed`. **Absence of `failureClass` is never evidence
+that quota was fine.** Detection is fail-closed by design — only a CLI's terminal failure event is
+inspected, only against provider-specific codes and message templates recorded in a capture bundle
+under `test/fixtures/usage-limit/`, and anything ambiguous stays unclassified. A missed
+classification costs you a diagnosis you can still make; a false one would tell you to wait out a
+real bug.
+
+[^ul-live]: Every relay's error envelope, event ordering, and exit code were verified against the
+real CLI (or its version-pinned source); what is "pending" is a run against a genuinely exhausted
+account, which no bundle fakes. Each `test/fixtures/usage-limit/<cli>.json` records exactly what
+was verified, how, and against which version.
+
+[^ul-opencode]: OpenCode retries a plain HTTP 429 indefinitely and never forwards that retry status
+to its JSON stream, so ordinary throttling *stalls* a run rather than failing it — a `timeout`
+under `--timeout`, an unbounded hang without one. Only the non-retryable quota codes are terminal
+there, so this relay's coverage of transient rate limits is nil, not merely unverified.
+
+[^ul-agy]: Antigravity's limit text is server-provided and appears nowhere in the shipped binary, so
+no matcher is justified. Instead `agy-delegate` gained `--preflight-usage`, which asks
+`agy -p "/usage" --output-format json` — a query that creates no conversation, takes no turns, and
+spends no tokens — and refuses to dispatch when every bucket is exhausted, reporting the provider's
+own remaining fractions and reset times. It blocks *only* on true exhaustion; a probe that fails,
+hangs, or returns an unfamiliar shape never stands between you and your work. It never estimates
+whether remaining quota is "enough" for a task — that is unknowable before a run.
+
 ## Install
 
 Browse first:

@@ -6,6 +6,12 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const RELAYS = ["claude", "cline", "codex", "opencode", "agy", "grok", "kimi", "qoder", "vibe", "cursor", "pi", "aider"];
 const READ_ONLY_TRIPWIRE_RELAYS = ["claude", "grok"];
+// Relays carrying the usage-limit result contract. The per-CLI signature tables and
+// classifyUsageLimit deliberately differ (each implementer's terminal event and wording is its
+// own, so those are gated by behavior in test/relay/usage-limit.mjs instead) — but the fields
+// they produce must not drift, so the shape helpers are byte-compared here. agy is included:
+// it ships no matcher, but its --preflight-usage builds the same limit object.
+const USAGE_LIMIT_RELAYS = ["codex", "cursor", "grok", "qoder", "opencode", "agy"];
 const SYMBOLS = [
   ["MAX_TIMER_MS", "const", RELAYS],
   ["parseDuration", "function", RELAYS],
@@ -27,6 +33,11 @@ const SYMBOLS = [
   ["fingerprintDirtyPaths", "function", READ_ONLY_TRIPWIRE_RELAYS],
   ["changedDirtyPaths", "function", READ_ONLY_TRIPWIRE_RELAYS],
   ["readOnlyVerdict", "function", READ_ONLY_TRIPWIRE_RELAYS],
+  ["MAX_EVIDENCE_CHARS", "const", USAGE_LIMIT_RELAYS],
+  ["safeJson", "function", USAGE_LIMIT_RELAYS],
+  ["boundedExcerpt", "function", USAGE_LIMIT_RELAYS],
+  ["parseResetTimestamp", "function", USAGE_LIMIT_RELAYS],
+  ["usageLimitFields", "function", USAGE_LIMIT_RELAYS],
   ["MAX_BUFFERED_CHARS", "const", ["claude", "cline", "cursor", "grok", "kimi", "opencode", "pi", "qoder", "vibe"]],
   ["makeEventScanner", "function", ["claude", "cline", "cursor", "grok", "kimi", "opencode", "pi", "qoder"]],
 ];

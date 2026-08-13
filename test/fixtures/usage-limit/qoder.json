@@ -1,0 +1,125 @@
+{
+  "schema": "delegate-usage-limit-capture.v1",
+  "cli": "qoder",
+  "binary": "qodercli",
+  "version": "@qoder-ai/qodercli 1.1.20",
+  "platform": "npm package, single platform-independent JS bundle (bundle/qodercli.js, 36,352,351 bytes)",
+  "capturedAt": "2026-08-13",
+
+  "provenance": {
+    "state": "source-backed; no live run - qodercli is not installed on the capture host",
+    "envelope": "source-backed",
+    "envelopeMethod": "The CLI is not installed here (`command -v qodercli` finds nothing; nothing under ~/.qoder, /opt/homebrew/bin, /usr/local/bin, ~/.local/bin, or npm -g), so no event sequence below was transcribed from a run. The stream-json envelope is read out of the shipped implementation of @qoder-ai/qodercli@1.1.20: the result-event zod schema at ~28,086,019 (error subtypes are exactly [error_during_execution, error_max_turns, error_max_budget_usd, error_max_structured_output_retries] - there is NO dedicated quota subtype), the emitter `buildResultError` at ~30,868,865 ({type:\"result\",subtype:A,...,is_error:!0,errors:e.errors,...error_code}), its call site at ~24,736,161 (errors[0] is the raw upstream error .message, not a normalized template), and the api_retry schema at ~22,087,155. Field order and cosmetic fields in the events below are illustrative; the field NAMES and the terminal shape are what this bundle pins.",
+    "signature": "source-backed",
+    "signatureMethod": "Error codes and user-facing message templates read from the same bundle, whose user-facing strings are obfuscated with `_$d(s, k=\"0tvtCAtV8w77\")` (base64-decode then XOR) - the decoder is defined in the file's own banner, so every quoted message is a faithful decode, not a guess. Enum at ~29,071,388: {loginExpired:105, todayUsageLimitExceeded:110, usageLimitExceeded:113, freeTrialAccountsExceeded:114, freeUserQuotaLimit:115, teamsAdminCreditsDrainedOut:116, teamsMemberCreditsDrainedOut:117, personalCreditsDrainedOut:118, velaModelFreeLimitReached:119, billingGroupCreditsLimitReached:122}. Message-to-code mapper `Zor(A)` at ~29,069,153. Terminal-quota set `ool` at ~29,071,786 = {110,114,115,116,117,118,119,122}, consumed by `dAn(A)` to drive the CLI's own quota_exhausted classification; 113 sits outside it as the per-window cap, hence kind rate_limited here.",
+    "liveLimitRun": "pending - no Qoder account was exhausted, and the CLI is not installed, so every scenario below is composed from the source-verified transport rather than transcribed from a run. Re-capture against a real limit before upgrading this bundle's state.",
+    "excludedCandidates": [
+      { "code": "system/api_retry error=\"rate_limit\", error_status=429", "reason": "source-backed and really on this transport, but NOT terminal: the CLI retries these 429s (attempt/max_retries/retry_delay_ms) and usually recovers. Matching it would fail healthy runs, so it appears in the scenarios below only as a mid-run warning the matcher must ignore." },
+      { "code": "\"Usage limit reached for <model>.\" / \"Access resets at <time>.\" / \"/stats model for usage details\"", "reason": "interactive-TUI only - built in setFallbackModelHandler (~29,621,540) and never written to stream-json. Docs-only for this transport." },
+      { "code": "\"You have exhausted your daily quota on this model.\" / \"Usage limits span all sessions and reset daily.\"", "reason": "same: TUI strings, absent from the stream-json transport." },
+      { "code": "\"Compression failed because your Qoder credits or usage quota are exhausted.\" / \"Compression failed because the model request was rate limited.\"", "reason": "compaction notices in the TUI, not terminal result events." },
+      { "code": "loginExpired (105)", "reason": "an auth failure, not a usage limit - classifying it would tell the orchestrator to wait out a login problem." },
+      { "code": "customModelService (100400) / customModelAuth (100401) / customModelNotAvailable (100403)", "reason": "BYOK custom-model errors. A BYOK-backed model can surface an upstream provider's own 429 text in errors[0], which this matcher deliberately does not chase - an unverified upstream dialect is exactly the false positive to avoid." },
+      { "code": "bare \"429\" / \"quota\" / \"rate limit\"", "reason": "ordinary task prose. See the proseThenUnrelatedFailure scenario." }
+    ]
+  },
+
+  "transport": {
+    "stream": "stdout",
+    "flag": "--output-format stream-json",
+    "framing": "stream-json - the relay scans stdout with a brace-matching scanner rather than a line splitter, so concatenated or pretty-printed objects both work; the events below are written one per line, and the final one may arrive without a trailing newline",
+    "terminalFailureEvent": "{\"type\":\"result\", is_error:true} (error subtype, normally error_during_execution)",
+    "terminalFailureField": "errors[] plus error_code",
+    "terminalSuccessEvent": "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false}",
+    "observedExitCodeOnTerminalFailure": "not verified - the CLI is not installed. The relay does not depend on it: `succeeded` ANDs the exit code with !resultIsError and rewrites a 0 exit to 1, so an exit-zero limit still lands as status failed (see usageLimitExitZero).",
+    "warningsAreNotTerminal": "Source-backed: {\"type\":\"system\",\"subtype\":\"api_retry\",\"error\":\"rate_limit\",\"error_status\":429} is emitted by `Yer` (~22,600,065) for transient 429s the CLI then retries; `dAA` returns \"rate_limit\" for status 429 or a message containing \"rate limit\"/\"429\". It is an early-warning signal only. Only the terminal result event is classified.",
+    "resetFieldsPresent": "none. The terminal result event carries no reset or retry field - quota reset time lives behind GET {openapi}/api/v2/quota/usage (fetchQuotaUsage at ~21,583,484), which the relay never calls. retryAt/resetsAt are therefore always null, and scenarios usageLimitRetryAfter and usageLimitAmbiguousReset are deliberately absent: this CLI supplies no such data on this transport, and inventing it would be inventing a reset time."
+  },
+
+  "signatures": {
+    "codes": [
+      { "code": 110, "name": "todayUsageLimitExceeded", "kind": "quota_exhausted", "note": "in the CLI's own terminal-quota set `ool`" },
+      { "code": 113, "name": "usageLimitExceeded", "kind": "rate_limited", "note": "outside `ool` - the CLI treats it as the per-window cap that resets, not a spent plan" },
+      { "code": 114, "name": "freeTrialAccountsExceeded", "kind": "quota_exhausted" },
+      { "code": 115, "name": "freeUserQuotaLimit", "kind": "quota_exhausted" },
+      { "code": 116, "name": "teamsAdminCreditsDrainedOut", "kind": "quota_exhausted" },
+      { "code": 117, "name": "teamsMemberCreditsDrainedOut", "kind": "quota_exhausted" },
+      { "code": 118, "name": "personalCreditsDrainedOut", "kind": "quota_exhausted" },
+      { "code": 119, "name": "velaModelFreeLimitReached", "kind": "quota_exhausted" },
+      { "code": 122, "name": "billingGroupCreditsLimitReached", "kind": "quota_exhausted" }
+    ],
+    "messages": [
+      { "phrase": "billing daily count exceeded", "kind": "quota_exhausted", "source": "Zor(A): A.includes(\"Billing daily count exceeded\") -> todayUsageLimitExceeded" },
+      { "phrase": "user quota exhausted", "kind": "rate_limited", "source": "Zor(A): A.includes(\"User quota exhausted\") -> usageLimitExceeded" }
+    ],
+    "markerPairs": [
+      { "tokens": ["114", "pricingurl"], "kind": "quota_exhausted", "name": "freeTrialAccountsExceeded" },
+      { "tokens": ["112", "pricingurl"], "kind": "quota_exhausted", "name": "personalCreditsDrainedOut", "note": "the wire token is 112 while the enum value is 118 - the mapper maps the 112+pricingUrl body to personalCreditsDrainedOut" },
+      { "tokens": ["116", "purchaseurl"], "kind": "quota_exhausted", "name": "teamsAdminCreditsDrainedOut" },
+      { "tokens": ["117", "usageurl"], "kind": "quota_exhausted", "name": "teamsMemberCreditsDrainedOut" },
+      { "tokens": ["122", "billing group"], "kind": "quota_exhausted", "name": "billingGroupCreditsLimitReached" }
+    ],
+    "resetFields": []
+  },
+
+  "scenarios": {
+    "usageLimit": {
+      "note": "Daily plan limit. Carries both a verified error_code and a verified message template, and is preceded by the mid-run api_retry 429 the matcher must not treat as terminal.",
+      "expect": { "status": "failed", "failureClass": "usage_limit", "kind": "quota_exhausted", "retryAt": null, "resetsAt": null },
+      "exitCode": 1,
+      "events": [
+        "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"8f2c1d90-4a7b-4c2e-9a10-6b3e5d0f7c11\",\"model\":\"performance\",\"permissionMode\":\"auto\"}",
+        "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Reading src/config.ts before editing.\"}]},\"session_id\":\"8f2c1d90-4a7b-4c2e-9a10-6b3e5d0f7c11\"}",
+        "{\"type\":\"system\",\"subtype\":\"api_retry\",\"attempt\":1,\"max_retries\":3,\"retry_delay_ms\":2000,\"error_status\":429,\"error\":\"rate_limit\",\"content\":\"Request was rate limited; retrying.\",\"level\":\"error\",\"uuid\":\"7c1b0a54-2f33-4f0a-8f2e-0a9d4c6b1e22\",\"session_id\":\"8f2c1d90-4a7b-4c2e-9a10-6b3e5d0f7c11\"}",
+        "{\"type\":\"result\",\"subtype\":\"error_during_execution\",\"is_error\":true,\"errors\":[\"Billing daily count exceeded\"],\"error_code\":110,\"session_id\":\"8f2c1d90-4a7b-4c2e-9a10-6b3e5d0f7c11\"}"
+      ]
+    },
+
+    "unrelatedFailure": {
+      "note": "An ordinary tool failure. No error_code is emitted because the mapper has no code for it. Must stay an unclassified failure.",
+      "expect": { "status": "failed", "failureClass": null },
+      "exitCode": 1,
+      "events": [
+        "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"1a4d7e02-9b31-4c58-9de0-2f61c8a3b407\",\"model\":\"performance\",\"permissionMode\":\"auto\"}",
+        "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Applying the edit to src/config.ts.\"}]},\"session_id\":\"1a4d7e02-9b31-4c58-9de0-2f61c8a3b407\"}",
+        "{\"type\":\"result\",\"subtype\":\"error_during_execution\",\"is_error\":true,\"errors\":[\"Tool execution failed: EACCES: permission denied, open /repo/src/config.ts\"],\"session_id\":\"1a4d7e02-9b31-4c58-9de0-2f61c8a3b407\"}"
+      ]
+    },
+
+    "proseThenUnrelatedFailure": {
+      "note": "Adversarial: every trigger word - both message templates, every code, every marker token, 429 and the words quota and rate limit - appears in NON-terminal output (the implementer reporting on a quota-handling task, plus a mid-run api_retry 429 the CLI recovered from). The run then dies of a failing test suite. Must stay unclassified.",
+      "expect": { "status": "failed", "failureClass": null },
+      "exitCode": 1,
+      "events": [
+        "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"c3e9b1f7-5d24-4a06-b8c1-9e07d2f4a531\",\"model\":\"performance\",\"permissionMode\":\"auto\"}",
+        "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Wired up the quota handling: error_code 110 (Billing daily count exceeded) and 113 (User quota exhausted) now surface as usage limits instead of a bare 429 rate limit, and the 112/114/116/117/122 branches read pricingUrl, purchaseUrl, usageUrl and the Billing Group label.\"}]},\"session_id\":\"c3e9b1f7-5d24-4a06-b8c1-9e07d2f4a531\"}",
+        "{\"type\":\"system\",\"subtype\":\"api_retry\",\"attempt\":1,\"max_retries\":3,\"retry_delay_ms\":2000,\"error_status\":429,\"error\":\"rate_limit\",\"content\":\"Request was rate limited; retrying.\",\"level\":\"error\",\"uuid\":\"b0d5c7a1-8e42-4a9f-90b3-1c6e5f2d8a44\",\"session_id\":\"c3e9b1f7-5d24-4a06-b8c1-9e07d2f4a531\"}",
+        "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Running the project gates.\"}]},\"session_id\":\"c3e9b1f7-5d24-4a06-b8c1-9e07d2f4a531\"}",
+        "{\"type\":\"result\",\"subtype\":\"error_during_execution\",\"is_error\":true,\"errors\":[\"Tool execution failed: npm test exited 1 - 3 assertions failed in src/quota-limits.test.ts\"],\"session_id\":\"c3e9b1f7-5d24-4a06-b8c1-9e07d2f4a531\"}"
+      ]
+    },
+
+    "recoveredThenSuccess": {
+      "note": "The realistic recovery on this transport: the CLI hits a transient 429, retries it, and reaches its success state. The final report itself quotes both limit templates and both codes, proving the implementer's own prose (event.result) is never part of the haystack. Must be a clean completion.",
+      "expect": { "status": "completed", "failureClass": null },
+      "exitCode": 0,
+      "events": [
+        "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"5b8a0c46-7f19-4d23-a0e5-3d92b6c1f708\",\"model\":\"performance\",\"permissionMode\":\"auto\"}",
+        "{\"type\":\"system\",\"subtype\":\"api_retry\",\"attempt\":1,\"max_retries\":3,\"retry_delay_ms\":2000,\"error_status\":429,\"error\":\"rate_limit\",\"content\":\"Request was rate limited; retrying.\",\"level\":\"error\",\"uuid\":\"2e6f9b03-4c81-4a57-8b0d-71f3c5a9e264\",\"session_id\":\"5b8a0c46-7f19-4d23-a0e5-3d92b6c1f708\"}",
+        "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Retried after the rate limit and finished the edit.\"}]},\"session_id\":\"5b8a0c46-7f19-4d23-a0e5-3d92b6c1f708\"}",
+        "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"errors\":[],\"session_id\":\"5b8a0c46-7f19-4d23-a0e5-3d92b6c1f708\",\"result\":\"Added the usage-limit handler: User quota exhausted and Billing daily count exceeded now map to error_code 113 and 110; npm test passes.\",\"usage\":{\"input_tokens\":5310,\"output_tokens\":412}}"
+      ]
+    },
+
+    "usageLimitExitZero": {
+      "note": "Defensive: the exit code on a Qoder limit is unverified (the CLI is not installed), so the relay must not depend on it. A limit that arrives with a zero exit is still normalized to a failure with a non-zero relay exit code. Also the only scenario exercising the 113 / rate_limited branch and a message-template-plus-code match with no api_retry warning.",
+      "expect": { "status": "failed", "failureClass": "usage_limit", "kind": "rate_limited", "exitCode": 1, "retryAt": null, "resetsAt": null },
+      "exitCode": 0,
+      "events": [
+        "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"9d4f6a28-3c07-4b91-8e2a-5f10c8b7d3e6\",\"model\":\"performance\",\"permissionMode\":\"auto\"}",
+        "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Starting on the brief.\"}]},\"session_id\":\"9d4f6a28-3c07-4b91-8e2a-5f10c8b7d3e6\"}",
+        "{\"type\":\"result\",\"subtype\":\"error_during_execution\",\"is_error\":true,\"errors\":[\"User quota exhausted\"],\"error_code\":113,\"session_id\":\"9d4f6a28-3c07-4b91-8e2a-5f10c8b7d3e6\"}"
+      ]
+    }
+  }
+}

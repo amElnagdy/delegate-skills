@@ -113,6 +113,7 @@ import {
   readSync,
   closeSync,
   realpathSync,
+  rmSync,
 } from "node:fs";
 import {basename, delimiter, join, relative, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -564,6 +565,10 @@ function prepareRun(opts, brief) {
     settingsPath: join(outDir, "profile.json"),
     resultPath: join(outDir, "result.json"),
   };
+  // A reused --out-dir must not advertise the previous run: a poller that races the
+  // dispatch would read the old result.json as if it were this run's. The other
+  // artifacts are truncated by their own writes below.
+  rmSync(run.resultPath, { force: true });
   writeFileSync(run.briefPath, brief, "utf8");
   writeFileSync(run.eventsPath, "", "utf8");
   writeFileSync(run.finalPath, "", "utf8");

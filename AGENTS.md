@@ -25,6 +25,8 @@ jargon. Use these terms; don't invent synonyms.
 | **dispatch** | sending the brief to the implementer | "fire off", "kick off" |
 | **land** | commit the verified work yourself | — |
 | **relay** / `relay.mjs` | the dispatch **script** only | never a *category* of skills |
+| **usage limit** | the provider-imposed quota or rate cap that ends a run through no fault of the brief | "budget", "credits", "out of tokens" |
+| **capture bundle** | the committed fixture proving a CLI's usage-limit signature, with its provenance | "sample", "fixture" (bare) |
 | **lane** | a named fleet binding: implementer + optional dials (`model`, `effort` / `variant`, …) | "route", "profile" |
 | **fleet** | the user's set of lanes (which CLI handles which kind of work) | — |
 | **setup skill** / `delegate-setup` | utility that discovers CLIs and writes the lane map after approval | a `*-delegate` skill |
@@ -72,6 +74,20 @@ CLI flag, field, and command in the docs must match the installed implementer CL
   are separate; bump those only when the JSON contract breaks.
 - **Progressive disclosure:** keep `SKILL.md` lean; push depth into `references/*.md` that load only
   when needed.
+- **Result contract:** [`docs/relay-result-contract.md`](docs/relay-result-contract.md) is the source
+  of truth for `delegate-relay.result.v1` — the closed `status` set, the additive `failureClass` /
+  `limit` fields, the fail-closed classification rule, and the outcome-precedence table. Each skill's
+  `dispatch-and-poll.md` restates what its users need (skills install standalone and cannot depend on
+  a repo-level doc); when the two disagree, the canonical doc is right. **`status` is a closed enum —
+  adding a value is a breaking change requiring `delegate-relay.result.v2`.** Express new outcome
+  detail as additive optional fields instead.
+- **Usage-limit matchers:** a relay may classify a usage limit only with a committed capture bundle
+  under `test/fixtures/usage-limit/<cli>.json` recording the signature, the transport it appears in,
+  the CLI version, and its provenance (`live-captured`, or version-pinned source of the real
+  transport — never prose docs alone). No bundle → no matcher → that relay keeps reporting an
+  unclassified `failed`, and the README says so. Never add an unverified code or message to a
+  signature table: a false classification tells the orchestrator not to investigate a real bug.
+  Enrolled relays must pass the shared matrix in `test/relay/usage-limit.mjs`.
 - **Executables:** keep them minimal and inspectable. Each `*-delegate` skill has one
   `scripts/relay.mjs`. Utility skills may ship other scripts (e.g. `discover.mjs`, `config.mjs`) under
   the same trust line: Node built-ins only, no dependencies, no network calls of their own, no

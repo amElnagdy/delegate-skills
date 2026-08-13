@@ -62,6 +62,22 @@
  *   touchedFiles (git porcelain, null if git cannot report), and paths to
  *   brief.txt, final.txt, events.jsonl, and stderr.txt.
  *
+ * Usage limits: when the run ends in cursor-agent's terminal `turn_ended` event with
+ * status "error" carrying a recognized usage-limit sentence — or, when the run emitted no
+ * successful result event, a bare `ActionRequiredError:` line on stderr carrying one — the
+ * result stays status "failed" (the status set is a closed enum orchestrators switch on)
+ * and gains two additive fields:
+ *   failureClass: "usage_limit"
+ *   limit: { kind, retryAt, resetsAt, evidence: { source, code, excerpt, artifactLine } }
+ * kind is quota_exhausted | rate_limited | unknown. cursor-agent surfaces no error code and
+ * no reset hint in its headless stream, so code is null and retryAt/resetsAt stay null —
+ * never guessed. The classification is fail-closed: only the terminal event is inspected,
+ * only against message templates verified for this CLI, and anything ambiguous stays an
+ * unclassified "failed" — `ActionRequiredError:` on its own is never enough, because the
+ * same shape carries Cursor's model-entitlement refusal, which is not a quota stop. A usage
+ * limit is not a task failure — do not rework the brief; inspect touchedFiles, then wait
+ * for the reset or re-dispatch on another lane.
+ *
  * Exit codes: a pre-run usage error (bad/missing args, empty brief) exits 2
  * before any run and writes no result file; a missing `cursor-agent` binary
  * exits 127 and writes status `cursor_agent_unavailable`; otherwise the exit
@@ -89,6 +105,165 @@ const SAFE_SESSION = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 const SANDBOX_MODES = new Set(["enabled", "disabled"]);
 
 const IMPLEMENTER_KEY = "cursor";
+
+// Bound the evidence excerpt: a provider error can carry a very long body, and the
+// orchestrator only needs enough to audit the match. The full raw event stays in
+// events.jsonl, which evidence.artifactLine points at.
+const MAX_EVIDENCE_CHARS = 400;
+
+// cursor-agent's usage-limit signatures. Cursor surfaces NO error code, no HTTP status, and
+// no retry-after in its headless stream — the vendor's own sentence in the terminal event is
+// the entire signal — so this table holds exact message templates only. Both were captured
+// from real cursor-agent runs under the same flag set this relay uses (--print
+// --output-format stream-json --force); see test/fixtures/usage-limit/cursor.json for the
+// capture bundle and its provenance. Nothing here is inferred, and deliberately absent are
+// the substring needles "quota"/"rate limit"/"429" and the bare "ActionRequiredError:"
+// prefix: the first three appear in ordinary task prose, and the last also introduces
+// Cursor's model-entitlement refusal ("Named models unavailable ... upgrade plans to
+// continue"), which is not a quota stop and must not send an orchestrator away to wait.
+const USAGE_LIMIT_MESSAGES = [
+  // "You've hit your usage limit Get Cursor Pro for more Agent usage, unlimited Tab, and more."
+  ["you've hit your usage limit", "quota_exhausted"],
+  // "Increase limits for faster responses You're out of usage. Switch to Auto, or ask your
+  // admin to increase your limit to continue."
+  ["you're out of usage", "quota_exhausted"],
+];
+
+// cursor-agent's second transport for the same stop: a bare, non-JSON line on stderr. The
+// prefix is a structural gate, never a signature on its own (see USAGE_LIMIT_MESSAGES).
+const ACTION_REQUIRED_PREFIX = /^ActionRequiredError:\s*/;
+
+function safeJson(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function boundedExcerpt(text) {
+  const flat = String(text ?? "").replace(/\s+/g, " ").trim();
+  return flat.length > MAX_EVIDENCE_CHARS ? `${flat.slice(0, MAX_EVIDENCE_CHARS)}…` : flat;
+}
+
+function parseResetTimestamp(value, mode) {
+  // Only a zoned absolute timestamp or a well-defined duration becomes a time. Anything
+  // ambiguous or localized ("resets 3pm") yields null — a guessed reset time would send
+  // the orchestrator back at the wrong moment, which is worse than reporting nothing.
+  if (value === null || value === undefined) return null;
+  if (mode === "absolute") {
+    if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})$/.test(value.trim())) return null;
+    const parsed = new Date(value.trim().replace(" ", "T"));
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+  }
+  if (mode === "duration") {
+    const seconds = typeof value === "number" ? value : typeof value === "string" && /^\d+(\.\d+)?$/.test(value.trim()) ? Number(value) : NaN;
+    if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 30 * 24 * 3600) return null;
+    return new Date(Date.now() + seconds * 1000).toISOString();
+  }
+  return null;
+}
+
+function usageLimitFields(match) {
+  // The additive half of the result contract: status stays "failed" so orchestrators that
+  // switch on the closed status enum keep working; failureClass/limit carry the detail.
+  if (!match) return {};
+  return {
+    failureClass: "usage_limit",
+    limit: {
+      kind: match.kind,
+      retryAt: match.retryAt ?? null,
+      resetsAt: match.resetsAt ?? null,
+      evidence: {
+        source: match.source,
+        code: match.code ?? null,
+        excerpt: boundedExcerpt(match.excerpt),
+        artifactLine: match.artifactLine ?? null,
+      },
+    },
+  };
+}
+
+function classifyUsageLimit(event) {
+  // Cursor-specific detector. Only `turn_ended` with status "error" — the event cursor-agent's
+  // stream ends on when a run stops, and the only status observed on a stop — is inspected. A
+  // usage limit emits no `result` envelope at all, so the terminal event is all there is; a
+  // later `turn_ended` or a successful `result` supersedes an earlier match (see the scanner).
+  // Assistant text is never inspected: a brief about rate limiting makes the model quote these
+  // very sentences mid-run, and Cursor also emits ActionRequiredError for a model-entitlement
+  // refusal that is not a quota stop.
+  if (!event || event.type !== "turn_ended") return null;
+  if (typeof event.status !== "string" || event.status.toLowerCase() !== "error") return null;
+  const detail = typeof event.error === "string" ? event.error : "";
+  if (!detail) return null;
+  const haystack = detail.toLowerCase();
+  // Require a verified message template. Cursor ships no error code, so there is no second
+  // gate to fall back on — an unrecognized sentence stays an unclassified "failed".
+  const messageHit = USAGE_LIMIT_MESSAGES.find(([phrase]) => haystack.includes(phrase));
+  if (!messageHit) return null;
+
+  // No captured cursor-agent limit transcript states a reset: no retry-after is surfaced, no
+  // reset field exists, and the only reset wording anyone reports comes from the web dashboard,
+  // not the CLI. Both stay null rather than guessed. The parse still routes through the shared
+  // helper so that if a future cursor-agent does state one, an ambiguous or localized value
+  // yields null instead of sending the orchestrator back at the wrong moment.
+  const resetsAt = parseResetTimestamp(event.resets_at, "absolute");
+  const retryAt = parseResetTimestamp(event.retry_after, "duration");
+
+  return {
+    kind: messageHit[1],
+    code: null,
+    source: "events.jsonl",
+    excerpt: detail,
+    artifactLine: null,
+    resetsAt,
+    retryAt,
+  };
+}
+
+function classifyStderrUsageLimit(lines) {
+  // The stderr half of the same stop: `ActionRequiredError: <vendor sentence>`, a bare line
+  // with no JSON around it. Consulted only after the run ended without a successful result
+  // event, and only on the LAST such line — that is the reason cursor-agent stopped on. An
+  // ActionRequiredError that is not a quota sentence ends the search rather than licensing a
+  // hunt back through the log for one that is.
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index];
+    if (!ACTION_REQUIRED_PREFIX.test(line)) continue;
+    const detail = line.replace(ACTION_REQUIRED_PREFIX, "").trim();
+    const haystack = detail.toLowerCase();
+    const messageHit = USAGE_LIMIT_MESSAGES.find(([phrase]) => haystack.includes(phrase));
+    if (!messageHit) return null;
+    return {
+      kind: messageHit[1],
+      code: null,
+      source: "stderr.txt",
+      excerpt: detail,
+      artifactLine: null,
+      resetsAt: null,
+      retryAt: null,
+    };
+  }
+  return null;
+}
+
+function locateArtifactLine(path, matches) {
+  // evidence.artifactLine must point at the real record in the artifact the match came from,
+  // so an orchestrator can audit the classification instead of trusting it. cursor-agent's
+  // stream is scanned by brace depth rather than by line (makeEventScanner), so there is no
+  // line counter to read during the run — the number is resolved from the written artifact
+  // afterwards. Searching backwards finds the terminal record, not an earlier lookalike.
+  try {
+    const lines = readFileSync(path, "utf8").split("\n");
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      if (lines[index].trim() && matches(lines[index])) return index + 1;
+    }
+  } catch {
+    // The artifact is unreadable; the bounded excerpt still stands on its own.
+  }
+  return null;
+}
+
 
 function makeEventScanner(onObject) {
   let buf = "";
@@ -541,6 +716,12 @@ function dispatchToCursor(opts, brief, run, writeResult) {
   let usage = null;
   let resultMessage = null;
   let resultIsError = false;
+  // limitMatch holds the usage-limit classification of the LATEST terminal turn; a later
+  // turn or a successful result event clears it, so a run that recovered and finished is
+  // never reported as limit-exhausted. sawSuccessfulResult additionally gates the stderr
+  // fallback below, which must not second-guess a run that closed cleanly.
+  let limitMatch = null;
+  let sawSuccessfulResult = false;
   const textChunks = [];
   const stderrTail = [];
   const scan = makeEventScanner((event) => {
@@ -554,9 +735,21 @@ function dispatchToCursor(opts, brief, run, writeResult) {
         if (part && part.type === "text" && typeof part.text === "string") textChunks.push(part.text);
       }
     }
+    if (event.type === "turn_ended") {
+      // The stream ends on turn_ended when cursor-agent stops; a usage limit emits no result
+      // envelope at all. Reassigning on every turn_ended is the supersession rule: a turn that
+      // ended some other way (or ended cleanly) drops the previous turn's match.
+      limitMatch = classifyUsageLimit(event);
+    }
     if (event.type === "result") {
       if (typeof event.result === "string") resultMessage = event.result;
       if (event.is_error === true) resultIsError = true;
+      else {
+        // Cursor reported a clean close: the run did the work, so no earlier limit-looking
+        // event may downgrade it.
+        sawSuccessfulResult = true;
+        limitMatch = null;
+      }
       if (event.usage && typeof event.usage === "object") usage = event.usage;
     }
   });
@@ -680,10 +873,25 @@ function dispatchToCursor(opts, brief, run, writeResult) {
     // a descendant that ignored SIGTERM must not outlive the timeout report: once the
     // parent is down, sweep the group (no-op where taskkill already felled the tree)
     if (watchdogFired) killChild(child, "SIGKILL");
+    // Outcome precedence: a run the relay itself ended is a timeout (or, in the signal
+    // handler above, aborted) — never a classified provider failure, because the limit may
+    // simply be what cursor-agent was about to report when we killed it. The stderr shape is
+    // consulted only as a fallback: it carries no structure, so it may speak only when the
+    // stream produced neither a limit-bearing terminal turn nor a clean close.
+    const limit = watchdogFired
+      ? null
+      : limitMatch ?? (sawSuccessfulResult ? null : classifyStderrUsageLimit(stderrTail));
+    if (limit) {
+      limit.artifactLine = limit.source === "stderr.txt"
+        ? locateArtifactLine(run.stderrPath, (line) => ACTION_REQUIRED_PREFIX.test(line))
+        : locateArtifactLine(run.eventsPath, (line) => safeJson(line)?.type === "turn_ended");
+    }
     // A timed-out run is failed even if cursor-agent handles SIGTERM by exiting 0 —
     // orchestrators key off status and the relay exit code. A result event with
-    // is_error true is failed even on exit 0.
-    const succeeded = code === 0 && !watchdogFired && !resultIsError;
+    // is_error true is failed even on exit 0. A usage limit is likewise never a success: if
+    // cursor-agent ever exits 0 while its terminal turn carried a limit signature, normalize
+    // to a failure rather than report a run that did no work as completed.
+    const succeeded = code === 0 && !watchdogFired && !resultIsError && !limit;
     const mapped = code ?? (constants.signals[signal] ? 128 + constants.signals[signal] : 1);
     const exitCode = succeeded ? 0 : mapped === 0 ? 1 : mapped;
     const touched = gitTouchedFiles(opts.cd);
@@ -700,6 +908,7 @@ function dispatchToCursor(opts, brief, run, writeResult) {
       ...(succeeded ? {} : { stderrTail: stderrTail.slice(-20) }),
       ...(watchdogFired ? { error: `cursor-agent did not finish within --timeout ${opts.timeout}; killed by the relay watchdog` } : {}),
       ...(resultIsError && !watchdogFired ? { error: "cursor-agent reported an error result (is_error: true in its result event)" } : {}),
+      ...usageLimitFields(limit),
     });
     printSummary(result, run.resultPath);
     process.exit(result.exitCode);
@@ -740,6 +949,11 @@ function printSummary(result, resultPath) {
   lines.push(`relay: ${result.status} (exit ${result.exitCode}${result.signal ? `, killed by ${result.signal}` : ""})  ·  cursor-agent ${result.cursorAgentVersion ?? "?"}`);
   if (result.signal === "SIGKILL" && result.status === "failed") lines.push("hint: the host killed the process (commonly the OOM killer or a supervisor timeout) — this is not a cursor-agent error; check host memory and re-dispatch, or split the task into smaller briefs.");
   if (result.signal === "SIGTERM" && result.status === "failed") lines.push("hint: something outside the relay terminated cursor-agent (a supervisor, the session ending, or a manual kill) — when the relay itself does the killing it reports status \"timeout\" or \"aborted\" instead; inspect the working tree before re-dispatching.");
+  if (result.failureClass === "usage_limit") {
+    const when = result.limit?.retryAt || result.limit?.resetsAt;
+    lines.push(`hint: the provider refused on usage limits (${result.limit?.kind ?? "unknown"})${when ? `, earliest retry ${when}` : ""} — this is not a task failure. Do NOT rework the brief: inspect touched files first, then wait for the reset or re-dispatch the same brief on another lane from a clean tree.`);
+    if (result.limit?.evidence?.excerpt) lines.push(`  evidence (${result.limit.evidence.source}:${result.limit.evidence.artifactLine ?? "?"}): ${result.limit.evidence.excerpt}`);
+  }
   if (result.resumed) lines.push("mode: resumed an existing session");
   if (result.readOnly) lines.push("mode: read-only (plan)");
   if (result.resolvedModel) lines.push(`model: ${result.resolvedModel}${result.permissionMode ? `  ·  permission mode: ${result.permissionMode}` : ""}`);

@@ -93,6 +93,19 @@ Do not trust progress trackers over reality: a run is finished when `result.json
 process has exited. Read the working tree, not a status line. The implementer's full report is
 the `finalMessage` field in `result.json` (also printed in full on stdout between the report markers).
 
+**Checking quota before you dispatch.** Antigravity is the one implementer here with a headless
+usage query, so the relay offers an opt-in `--preflight-usage`. It runs
+`agy -p "/usage" --output-format json` — which creates no conversation, takes no turns, and spends
+no tokens — and records the provider's own remaining fractions and reset times on the result as
+`usagePreflight`. If **every** bucket is exhausted it refuses to dispatch and reports
+`failureClass: "usage_limit"` with the soonest reset, so a doomed run never starts. A single spent
+bucket does not block anything, and a probe that fails, hangs, or returns an unfamiliar shape lets
+the dispatch proceed — a broken check must never stand between you and your work. It reports
+remaining quota as fact; it never estimates whether that is "enough" for your task, which is
+unknowable before a run. Antigravity's own limit *errors* are server-provided text, so a failed run
+is not classified — inspect `stderrTail`. Details:
+[references/dispatch-and-poll.md](references/dispatch-and-poll.md).
+
 ### 4. Review - do not trust the self-report
 
 Antigravity's `result.json` includes its own final message and any gate claims. **Re-verify, don't

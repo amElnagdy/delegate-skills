@@ -69,6 +69,22 @@
  *   none), touchedFiles (git porcelain, null if git can't report), and the paths
  *   to events.jsonl and final.txt.
  *
+ * Usage limits: when the run ends on Grok's terminal streaming-json `{"type":"error"}`
+ * line carrying a recognized usage-limit message template, the result stays status
+ * "failed" (the status set is a closed enum orchestrators switch on) and gains two
+ * additive fields:
+ *   failureClass: "usage_limit"
+ *   limit: { kind, retryAt, resetsAt, evidence: { source, code, excerpt, artifactLine } }
+ * kind is quota_exhausted | rate_limited | unknown. Every Grok limit template deliberately
+ * states no reset window, so retryAt/resetsAt are null — never guessed. The classification
+ * is fail-closed: only the terminal error line is inspected, only against Grok's own exact
+ * message templates (its wire carries no error code), and anything ambiguous stays an
+ * unclassified "failed". A usage limit is not a task failure — do not rework the brief;
+ * inspect touchedFiles, then wait for the reset or re-dispatch on another lane. Grok
+ * reports its session id only on the `end` line, which a limit run never reaches, so
+ * resume that partial work with --resume-last unless the run was dispatched with an
+ * explicit --session.
+ *
  * Exit codes: a pre-run usage error (bad/missing args, empty brief) exits 2
  * before any run and writes no result file; a missing `grok` binary exits 127;
  * otherwise the exit code mirrors Grok's own (0 success, non-zero failure). If
@@ -83,7 +99,7 @@
 
 import { spawn, execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, writeFileSync, renameSync, readFileSync, readdirSync, existsSync, appendFileSync, lstatSync, readlinkSync, openSync, readSync, closeSync, realpathSync } from "node:fs";
+import { mkdirSync, writeFileSync, renameSync, readFileSync, readdirSync, existsSync, appendFileSync, lstatSync, readlinkSync, openSync, readSync, closeSync, realpathSync, rmSync } from "node:fs";
 import { join, relative, resolve, basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { constants, tmpdir } from "node:os";
@@ -97,6 +113,119 @@ const MAX_TIMER_MS = 2_147_483_647;
 const AUTONOMY_MODES = new Set(["workspace-write", "read-only", "full-access"]);
 
 const IMPLEMENTER_KEY = "grok";
+
+// Bound the evidence excerpt: a provider error can carry a very long body, and the
+// orchestrator only needs enough to audit the match. The full raw event stays in
+// events.jsonl, which evidence.artifactLine points at.
+const MAX_EVIDENCE_CHARS = 400;
+
+// Grok's usage-limit signatures. Grok's streaming-json wire carries no error code at all —
+// the internal ACP rate-limit code is consumed to pick the user-facing sentence and never
+// serialized — so the exact message templates ARE the signature. Each entry below is a
+// verbatim user-facing constant from xai-grok-shell's sampling/error.rs at the pinned commit
+// recorded in test/fixtures/usage-limit/grok.json; nothing here is inferred, and no template
+// for a non-xAI backend is listed because none was verified. Matched case-insensitively as
+// whole phrases with typographic apostrophes folded to ASCII — never bare "429", "quota", or
+// "rate limit", which appear in ordinary task prose. Grok separates the free-plan paywall
+// (quota exhaustion) from a transient throttle, so the kinds differ.
+const USAGE_LIMIT_MESSAGES = [
+  ["you've reached your free grok build usage limit", "quota_exhausted"],
+  ["you've hit your team's api rate limit", "rate_limited"],
+  ["you've hit the rate limit for your plan", "rate_limited"],
+];
+
+function safeJson(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function boundedExcerpt(text) {
+  const flat = String(text ?? "").replace(/\s+/g, " ").trim();
+  return flat.length > MAX_EVIDENCE_CHARS ? `${flat.slice(0, MAX_EVIDENCE_CHARS)}…` : flat;
+}
+
+function parseResetTimestamp(value, mode) {
+  // Only a zoned absolute timestamp or a well-defined duration becomes a time. Anything
+  // ambiguous or localized ("resets 3pm") yields null — a guessed reset time would send
+  // the orchestrator back at the wrong moment, which is worse than reporting nothing.
+  if (value === null || value === undefined) return null;
+  if (mode === "absolute") {
+    if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})$/.test(value.trim())) return null;
+    const parsed = new Date(value.trim().replace(" ", "T"));
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+  }
+  if (mode === "duration") {
+    const seconds = typeof value === "number" ? value : typeof value === "string" && /^\d+(\.\d+)?$/.test(value.trim()) ? Number(value) : NaN;
+    if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 30 * 24 * 3600) return null;
+    return new Date(Date.now() + seconds * 1000).toISOString();
+  }
+  return null;
+}
+
+function usageLimitFields(match) {
+  // The additive half of the result contract: status stays "failed" so orchestrators that
+  // switch on the closed status enum keep working; failureClass/limit carry the detail.
+  if (!match) return {};
+  return {
+    failureClass: "usage_limit",
+    limit: {
+      kind: match.kind,
+      retryAt: match.retryAt ?? null,
+      resetsAt: match.resetsAt ?? null,
+      evidence: {
+        source: match.source,
+        code: match.code ?? null,
+        excerpt: boundedExcerpt(match.excerpt),
+        artifactLine: match.artifactLine ?? null,
+      },
+    },
+  };
+}
+
+function classifyUsageLimit(event, artifactLine) {
+  // Grok-specific detector. Only the streaming-json `{"type":"error"}` line is inspected: it is
+  // emitted from headless mode's single terminal error arm, which returns immediately after and
+  // never emits the `end` line, so it is the naturally terminal failure event. Grok's other
+  // error-shaped lines (auto-compact failure, image-compression notice) are separate event types
+  // and are deliberately not matched — "an error appeared" is never sufficient.
+  if (!event || event.type !== "error") return null;
+  const raw = typeof event.message === "string" ? event.message : "";
+  if (!raw) return null;
+
+  // Grok flattens a provider envelope into a plain sentence before it reaches this wire, but
+  // parse defensively anyway: a build that ever handed the raw body through should still be
+  // matched against its own template rather than against escaped JSON text.
+  const nested = safeJson(raw);
+  const detail = nested && typeof nested === "object" && typeof nested.message === "string" ? nested.message : raw;
+
+  // Grok's templates are typographic — they use U+2019, including mid-word in "team's" — so fold
+  // curly apostrophes on both sides. That keeps the phrase table readable and stops a purely
+  // typographic change upstream from silently disabling the matcher.
+  const haystack = `${detail}\n${raw}`.replace(/[\u2018\u2019]/g, "'").toLowerCase();
+  const messageHit = USAGE_LIMIT_MESSAGES.find(([phrase]) => haystack.includes(phrase));
+  // A verified full-sentence template is the only accepted signature. Fail closed otherwise and
+  // let the run report a plain "failed" — a false classification would tell the orchestrator not
+  // to investigate a real bug.
+  if (!messageHit) return null;
+
+  return {
+    kind: messageHit[1],
+    // Grok's error line has no code field: the ACP rate-limit code is dropped on serialization.
+    code: null,
+    source: "events.jsonl",
+    excerpt: detail || raw,
+    artifactLine,
+    // No Grok limit template states a reset window (the free-usage one promises none on purpose,
+    // because the quota window is backend-configured). Run the shared parser over whatever the
+    // line does carry rather than hard-coding null, so a field a later build adds is subject to
+    // the same never-guess rule as every other relay.
+    resetsAt: parseResetTimestamp(event.resets_at ?? event.resetsAt ?? null, "absolute"),
+    retryAt: parseResetTimestamp(event.retry_after ?? event.retryAfter ?? null, "duration"),
+  };
+}
 
 function makeEventScanner(onObject) {
   let buf = "";
@@ -745,6 +874,10 @@ function prepareRunDir(opts, brief) {
     briefPath: join(outDir, "brief.txt"),
     resultPath: join(outDir, "result.json"),
   };
+  // A reused --out-dir must not advertise the previous run: a poller that races the
+  // dispatch would read the old result.json as if it were this run's. The other
+  // artifacts are truncated by their own writes below.
+  rmSync(run.resultPath, { force: true });
   writeFileSync(run.briefPath, brief, "utf8");
   writeFileSync(run.eventsPath, "", "utf8");
   writeFileSync(run.finalPath, "", "utf8");
@@ -842,6 +975,12 @@ function dispatchToGrok(opts, run, writeResult) {
 
   let sessionId = opts.session || null;
   let usage = null;
+  let limitMatch = null;
+  // 1-based line in events.jsonl that the scanner is currently reading, so a classification can
+  // point at its own evidence. It has to be tracked out here: events.jsonl is the raw byte
+  // stream and makeEventScanner is brace-depth based, not line based, so neither one knows the
+  // line number on its own.
+  let eventLine = 1;
   const textChunks = [];
   const stderrTail = [];
 
@@ -851,7 +990,29 @@ function dispatchToGrok(opts, run, writeResult) {
     const chunk = extractTextChunk(event);
     if (chunk) textChunks.push(chunk);
     if (event.usage && typeof event.usage === "object") usage = event.usage;
+    if (event.type === "error") {
+      limitMatch = classifyUsageLimit(event, eventLine);
+    } else if (event.type === "end") {
+      // `end` is grok's success line and is never emitted after the terminal error arm. If one
+      // arrives anyway, the run did the work, so it must not be reported as limit-exhausted.
+      limitMatch = null;
+    }
   });
+
+  // Feed the scanner one line at a time so an object that completes inside a segment belongs to
+  // the line being fed. Segments can be fragments (a chunk boundary can land mid-line, mid-escape
+  // or mid-multibyte) and the last record can arrive with no trailing newline; the scanner buffers
+  // across calls either way, so splitting here changes only the line bookkeeping.
+  const feedByLine = (text) => {
+    if (!text) return;
+    let start = 0;
+    for (let nl = text.indexOf("\n"); nl !== -1; nl = text.indexOf("\n", start)) {
+      scan(text.slice(start, nl + 1));
+      eventLine += 1;
+      start = nl + 1;
+    }
+    if (start < text.length) scan(text.slice(start));
+  };
 
   // Decode across chunk boundaries: a multibyte UTF-8 character split between
   // two data events would otherwise decode as U+FFFD and corrupt the report.
@@ -860,7 +1021,7 @@ function dispatchToGrok(opts, run, writeResult) {
 
   child.stdout.on("data", (chunk) => {
     appendFileSync(run.eventsPath, chunk); // faithful raw record
-    scan(stdoutDecoder.write(chunk));
+    feedByLine(stdoutDecoder.write(chunk));
   });
 
   child.stderr.on("data", (chunk) => {
@@ -967,9 +1128,16 @@ function dispatchToGrok(opts, run, writeResult) {
     if (watchdogFired) killChild(child, "SIGKILL");
     const finalMessage = assembleFinal();
     const touchedFiles = gitTouchedFiles(opts.cd);
+    // Outcome precedence: a run the relay itself ended is a timeout (or, in the signal handler
+    // above, aborted) — never a classified provider failure, because the limit may simply be
+    // what grok was about to report when we killed it.
+    const limit = watchdogFired ? null : limitMatch;
     // A timed-out run is never a success even if grok handles SIGTERM by exiting 0 -
-    // orchestrators key off status and the relay exit code.
-    const succeeded = code === 0 && !watchdogFired;
+    // orchestrators key off status and the relay exit code. A usage limit is likewise never a
+    // success: if grok ever exits 0 while its terminal error line carried a limit signature,
+    // normalize to a failure (exit 1 below) rather than report a run that did no work as
+    // completed.
+    const succeeded = code === 0 && !watchdogFired && !limit;
     const mapped = code ?? (constants.signals[signal] ? 128 + constants.signals[signal] : 1);
     const result = writeResult({
       status: succeeded ? "completed" : watchdogFired ? "timeout" : "failed",
@@ -982,6 +1150,7 @@ function dispatchToGrok(opts, run, writeResult) {
       ...readOnlyFlag(),
       ...(succeeded ? {} : { stderrTail: stderrTail.slice(-20) }),
       ...(watchdogFired ? { error: `grok did not finish within --timeout ${opts.timeout}; killed by the relay watchdog` } : {}),
+      ...usageLimitFields(limit),
     });
     printSummary(result, run.resultPath);
     process.exit(result.exitCode);
@@ -1018,6 +1187,12 @@ function printSummary(result, resultPath) {
   lines.push(`relay: ${result.status} (exit ${result.exitCode}${result.signal ? `, killed by ${result.signal}` : ""})  ·  grok ${result.grokVersion ?? "?"}`);
   if (result.signal === "SIGKILL" && result.status === "failed") lines.push("hint: the host killed the process (commonly the OOM killer or a supervisor timeout) — this is not a grok error; check host memory and re-dispatch, or split the task into smaller briefs.");
   if (result.signal === "SIGTERM" && result.status === "failed") lines.push("hint: something outside the relay terminated grok (a supervisor, the session ending, or a manual kill) — when the relay itself does the killing it reports status \"timeout\" or \"aborted\" instead; inspect the working tree before re-dispatching.");
+  if (result.failureClass === "usage_limit") {
+    const when = result.limit?.retryAt || result.limit?.resetsAt;
+    lines.push(`hint: the provider refused on usage limits (${result.limit?.kind ?? "unknown"})${when ? `, earliest retry ${when}` : ""} — this is not a task failure. Do NOT rework the brief: inspect touched files first, then wait for the reset or re-dispatch the same brief on another lane from a clean tree.`);
+    if (result.limit?.evidence?.excerpt) lines.push(`  evidence (${result.limit.evidence.source}:${result.limit.evidence.artifactLine ?? "?"}): ${result.limit.evidence.excerpt}`);
+    if (!result.sessionId) lines.push("  note: grok reports its session id only on the end event, which this run never reached — resume the partial work with --resume-last, or re-dispatch from a clean tree.");
+  }
   if (result.readOnlyViolation === null) lines.push("warning: this --read-only run could not be verified - git could not report, or a submodule or unreadable path left coverage incomplete; inspect the working tree directly.");
   if (result.readOnlyViolation === true) lines.push("warning: a git-visible change was detected during this --read-only run — grok's read-only is best-effort; review the diff before trusting the run.");
   lines.push(`autonomy: ${result.autonomy}`);

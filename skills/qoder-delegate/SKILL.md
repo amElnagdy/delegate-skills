@@ -85,6 +85,14 @@ file contains a `status`; do not trust a progress display.
 A pre-run usage error exits 2 and writes no result. Missing `qodercli` exits 127 and writes
 `status: "qoder_unavailable"` with installation guidance.
 
+**If the result carries `failureClass: "usage_limit"`,** Qoder's provider refused on usage limits —
+the brief was never the problem, so do not rework it. Inspect `touchedFiles` first (a limit can
+strike mid-edit), then either wait for the reset in `limit.retryAt`/`limit.resetsAt` and resume the
+exact session with `--resume <sessionId>`, which survives the limit, or re-dispatch the same brief
+on another lane **from a clean tree**. Detection is fail-closed, so an unrecognized limit still
+arrives as a plain `failed` — check `qoderErrors` and `stderrTail` before concluding the brief was
+at fault. Details: [references/dispatch-and-poll.md](references/dispatch-and-poll.md).
+
 Native Windows relay launch is not yet verified; do not claim it until a native Windows smoke passes.
 
 ### 4. Review - do not trust the self-report

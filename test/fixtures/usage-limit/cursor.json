@@ -1,0 +1,134 @@
+{
+  "schema": "delegate-usage-limit-capture.v1",
+  "cli": "cursor",
+  "binary": "cursor-agent",
+  "version": "cursor-agent 2026.07.17-3e2a980",
+  "platform": "Windows 11 + WSL Ubuntu-22.04 (the platform the signature capture was made on)",
+  "capturedAt": "2026-07-22",
+
+  "provenance": {
+    "state": "source-backed; live run pending",
+    "envelope": "source-backed",
+    "envelopeMethod": "cursor-agent is NOT installed on the machine that produced this bundle (`command -v cursor-agent` exits 1; no binary under ~/.local/bin, no npm global package), so no envelope was captured here and no CLI was run. The `turn_ended` terminal shape is transcribed from github.com/paulocorcino/ralphy @ d7859a9c5655e7a8154873f9f1cec3f1a83f98ca — crates/ralphy-agent-cursor/fixtures/usage-limit-2026-07-21.jsonl (the whole file, 139 bytes: one turn_ended record) and the tail of fixtures/usage-limit-midturn-2026-07-21.jsonl. It is parsed there at crates/ralphy-agent-cursor/src/outcome.rs:221-232 (the (\"turn_ended\", _) arm) and asserted by the tests `a_turn_ended_in_error_carries_the_vendors_reason` (outcome.rs:568) and `a_quota_stop_is_a_limit_with_no_reset_hint` (outcome.rs:611-629). The flags that produced it (crates/ralphy-agent-cursor/src/command.rs:135-141: `-p --model <m> --force --output-format stream-json`) are the same set this relay passes. The surrounding `system`/`init`, `assistant`, and `result` records are this relay's own documented stream contract (skills/cursor-delegate/scripts/relay.mjs event handling, and test/fixtures/fake-cli.cjs `cursor-success`); session ids and file names in the scenarios below are synthesized placeholders, since captures are redacted.",
+    "signature": "source-backed",
+    "signatureMethod": "Two exact vendor sentences, from two independent third-party implementations that measured this same headless transport. cursor-agent ships as a closed-source prebuilt binary with no upstream source repo, so third-party captures are the strongest provenance available short of exhausting an account. (1) The Free-tier sentence is byte-exact from ralphy's fixtures/usage-limit-stderr-2026-07-22.log (verified with `od -c`: single space between 'limit' and 'Get', trailing newline), include_str!'d as USAGE_LIMIT_STDERR at outcome.rs:396 and asserted by `the_bare_stderr_quota_shape_is_a_limit` (outcome.rs:661); measurement conditions in ralphy docs/evidence/251-cursor-capstone-live.md:103-107 and docs/adr/0042-cursor-validation.md:139-144 (cursor-agent 2026.07.17-3e2a980, Free tier, exit 1, no reset hint, no result envelope). The same sentence is the `error` field of the stdout turn_ended fixture. (2) The Pro/premium-pool sentence is quoted verbatim in github.com/agent-tools-org/ai-dispatch @ cdc46cbb8b263eb7aedbc57b33526606a56b65df — src/rate_limit_signatures.rs:110-116, annotated 'cursor premium pool spent, captured 2026-08-07 on t-dfc23e80, t-b38df7a8 and t-d6fef491', with the transport described at src/agent/cursor.rs:384-390 and the flags at src/agent/cursor.rs:106-121 (`-p --output-format stream-json`).",
+    "liveLimitRun": "pending — no cursor-agent install and no account was exhausted to produce this bundle, so every line below is transcribed from the third-party captures named above rather than from a run made by this repository. Nothing here is marked live-captured.",
+    "excludedCandidates": [
+      {
+        "candidate": "quota exceeded for this workspace",
+        "reason": "Weakest of the four candidates found. It appears in ai-dispatch (src/rate_limit_signatures.rs:108-109) as a lowercase substring needle for a workspace quota, not as a captured full message template, and — unlike its neighbours in the same file — it carries no capture-ID annotation. Matching a bare fragment containing 'quota' is exactly the false positive this classification must avoid."
+      },
+      {
+        "candidate": "Your usage limits will reset when your monthly cycle ends on x/x/xxx",
+        "reason": "docs-only. It comes from a forum report (forum.cursor.com/t/cursor-agent-cli-limit-hit/128577, cursor-agent 2025.08.09-d8191f3) and was never reproduced in any captured headless transcript. It is the only reset wording anyone attributes to Cursor, so the relay parses NO reset at all rather than guessing from an unverified template."
+      },
+      {
+        "candidate": "ActionRequiredError: (the bare prefix)",
+        "reason": "Structural gate only, never a signature. The identical prefix carries Cursor's model-entitlement refusal — 'ActionRequiredError: Named models unavailable Free plans can only use Auto. Switch to Auto or upgrade plans to continue.' (ralphy fixtures/model-entitlement-2026-07-21.err; independently corroborated at github.com/agnt-gg/agnt — backend/src/services/ai/CursorCliService.js:50-62, whose comment records that conflating the two 'sent anyone debugging it looking for a quota that was never the problem'). That refusal is the unrelatedFailure scenario below."
+      },
+      {
+        "candidate": "429 / \"rate limit\" / \"quota\" / \"limit\"",
+        "reason": "Never surfaced by this transport at all — cursor-agent exposes no HTTP status, no error code, and no retry-after in stream-json — and each appears in ordinary task prose. See the proseThenUnrelatedFailure scenario."
+      }
+    ]
+  },
+
+  "transport": {
+    "stream": "stdout",
+    "flag": "--print --output-format stream-json",
+    "framing": "JSONL — one JSON object per line. The relay scans stdout by brace depth rather than by line, so a final record without a trailing newline still parses; events.jsonl receives the raw bytes verbatim either way.",
+    "terminalFailureEvent": "turn_ended with status \"error\"",
+    "terminalFailureField": "error (a plain vendor sentence — no code, no status, no retry-after)",
+    "terminalSuccessEvent": "result with is_error false",
+    "observedExitCodeOnUsageLimit": 1,
+    "noResultEnvelopeOnLimit": "A usage-limit stop emits NO result envelope: the stream ends on turn_ended (ralphy outcome.rs:594 asserts !fold.saw_envelope). The relay therefore cannot key the limit off is_error, and the exit code alone would report only an unclassified failure.",
+    "secondaryStream": "stderr — the same stop can also surface as a bare, non-JSON `ActionRequiredError: <vendor sentence>` line. The relay consults it only when the stream produced neither a limit-bearing turn_ended nor a clean result envelope. Not exercised by the scenarios below, which are all stdout.",
+    "warningsAreNotTerminal": "Assistant text is never inspected: a brief about rate limiting makes the model quote these exact sentences mid-run, and ralphy pins the same requirement with `a_quoted_quota_sentence_in_a_green_transcript_is_not_a_limit` (outcome.rs:708-714). `ActionRequiredError:` is likewise not terminal evidence on its own — see excludedCandidates.",
+    "noStructuredCode": "There is no numeric code, no surfaced HTTP 429, no `code` field, and no retry-after anywhere in this transport, so evidence.code is always null and the matcher has no second gate to fall back on when a sentence drifts: an unrecognized sentence stays an unclassified failed.",
+    "twoPools": "Cursor bills the Auto pool and the named/API-model pool separately, so a limit on named models can leave `--model auto` working (ai-dispatch src/rate_limit_signatures.rs:114-116; agnt CursorCliService.js:50-62). A usage_limit result is not necessarily a whole-implementer outage."
+  },
+
+  "signatures": {
+    "codes": [],
+    "codesNote": "cursor-agent emits no error codes in this transport; the message templates below are the only signature.",
+    "messages": [
+      {
+        "phrase": "you've hit your usage limit",
+        "kind": "quota_exhausted",
+        "template": "You've hit your usage limit Get Cursor Pro for more Agent usage, unlimited Tab, and more.",
+        "tier": "Free",
+        "sourceRef": "ralphy fixtures/usage-limit-2026-07-21.jsonl (stdout turn_ended.error) and fixtures/usage-limit-stderr-2026-07-22.log (stderr ActionRequiredError)"
+      },
+      {
+        "phrase": "you're out of usage",
+        "kind": "quota_exhausted",
+        "template": "Increase limits for faster responses You're out of usage. Switch to Auto, or ask your admin to increase your limit to continue.",
+        "tier": "Pro / premium pool spent",
+        "sourceRef": "ai-dispatch src/rate_limit_signatures.rs:110-116 (stderr ActionRequiredError)"
+      }
+    ],
+    "resetFields": [],
+    "resetFieldsNote": "None. Both ralphy docs/adr/0042-cursor-validation.md:139-140 and docs/evidence/251-cursor-capstone-live.md:103-105 record 'no reset hint' on the limit stop, so retryAt and resetsAt are always null for this CLI. The relay still routes its (absent) resets_at/retry_after reads through the shared parseResetTimestamp helper, so a future cursor-agent that states an ambiguous or localized reset still yields null rather than a guess."
+  },
+
+  "scenarios": {
+    "usageLimit": {
+      "note": "Modeled on ralphy's midturn capture: the run streams normally, then the stream ends on turn_ended/error with the Free-tier sentence and no result envelope. Exit 1, and no reset time is stated anywhere — so expect carries no resetsAt.",
+      "expect": { "status": "failed", "failureClass": "usage_limit", "kind": "quota_exhausted", "retryAt": null, "resetsAt": null },
+      "exitCode": 1,
+      "events": [
+        "{\"type\":\"system\",\"subtype\":\"init\",\"apiKeySource\":\"login\",\"session_id\":\"6b3a2f14-9f0d-4c3a-8f21-2b6a5d0e77c1\",\"model\":\"auto\",\"permissionMode\":\"default\"}",
+        "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Adding the retry helper to src/limits.ts.\"}]},\"session_id\":\"6b3a2f14-9f0d-4c3a-8f21-2b6a5d0e77c1\"}",
+        "{\"type\":\"turn_ended\",\"status\":\"error\",\"error\":\"You've hit your usage limit Get Cursor Pro for more Agent usage, unlimited Tab, and more.\"}"
+      ]
+    },
+
+    "unrelatedFailure": {
+      "note": "The documented false-positive trap, verbatim: Cursor's model-entitlement refusal ends the run through the SAME turn_ended/error shape and the same ActionRequiredError prefix, but it is not a quota stop — waiting on it would leave the real problem (a named model the plan cannot use) undiagnosed. Must stay an unclassified failure.",
+      "expect": { "status": "failed", "failureClass": null },
+      "exitCode": 1,
+      "events": [
+        "{\"type\":\"system\",\"subtype\":\"init\",\"apiKeySource\":\"login\",\"session_id\":\"1c7d4e90-33ab-4f52-9c18-704e2a5b6d33\",\"model\":\"claude-opus-4-8\",\"permissionMode\":\"default\"}",
+        "{\"type\":\"turn_ended\",\"status\":\"error\",\"error\":\"Named models unavailable Free plans can only use Auto. Switch to Auto or upgrade plans to continue.\"}"
+      ]
+    },
+
+    "proseThenUnrelatedFailure": {
+      "note": "Adversarial: both verified templates, the ActionRequiredError prefix, 429, 'quota' and 'rate limit' all appear in NON-terminal assistant output — the implementer describing a rate-limit handler it just wrote — and the run then dies of the unrelated entitlement refusal. Must stay unclassified.",
+      "expect": { "status": "failed", "failureClass": null },
+      "exitCode": 1,
+      "events": [
+        "{\"type\":\"system\",\"subtype\":\"init\",\"apiKeySource\":\"login\",\"session_id\":\"90fe1b22-5d47-4a0e-b3c6-8811ff20a4de\",\"model\":\"auto\",\"permissionMode\":\"default\"}",
+        "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Added the HTTP 429 backoff: on a rate limit the queue parks the job, and the quota probe logs the remaining budget. The fixtures assert both vendor sentences verbatim — \\\"ActionRequiredError: You've hit your usage limit Get Cursor Pro for more Agent usage, unlimited Tab, and more.\\\" and \\\"Increase limits for faster responses You're out of usage. Switch to Auto, or ask your admin to increase your limit to continue.\\\" — so the parser cannot regress.\"}]},\"session_id\":\"90fe1b22-5d47-4a0e-b3c6-8811ff20a4de\"}",
+        "{\"type\":\"turn_ended\",\"status\":\"error\",\"error\":\"Named models unavailable Free plans can only use Auto. Switch to Auto or upgrade plans to continue.\"}"
+      ]
+    },
+
+    "recoveredThenSuccess": {
+      "note": "Constructed, not captured: a limit-shaped turn_ended is superseded by a later turn that closes with a successful result envelope. Cursor's success close is the `result` event with is_error false (the relay's documented contract). Must be a clean completion.",
+      "expect": { "status": "completed", "failureClass": null },
+      "exitCode": 0,
+      "events": [
+        "{\"type\":\"system\",\"subtype\":\"init\",\"apiKeySource\":\"login\",\"session_id\":\"4d5c66a1-2e8f-4b70-9a44-0c1de9b37f52\",\"model\":\"auto\",\"permissionMode\":\"default\"}",
+        "{\"type\":\"turn_ended\",\"status\":\"error\",\"error\":\"You've hit your usage limit Get Cursor Pro for more Agent usage, unlimited Tab, and more.\"}",
+        "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Retried on Auto and finished the change.\"}]},\"session_id\":\"4d5c66a1-2e8f-4b70-9a44-0c1de9b37f52\"}",
+        "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"4d5c66a1-2e8f-4b70-9a44-0c1de9b37f52\",\"result\":\"Updated src/limits.ts and ran the suite.\",\"usage\":{\"input_tokens\":11,\"output_tokens\":4}}"
+      ]
+    },
+
+    "usageLimitExitZero": {
+      "note": "Defensive: never observed (this CLI exits 1 on the limit stop), but a limit must never be reported as a completed run. Uses the Pro/premium-pool sentence, so the second template is exercised too.",
+      "expect": { "status": "failed", "failureClass": "usage_limit", "kind": "quota_exhausted", "exitCode": 1 },
+      "exitCode": 0,
+      "events": [
+        "{\"type\":\"system\",\"subtype\":\"init\",\"apiKeySource\":\"login\",\"session_id\":\"7ab0c318-6f21-4d9c-8e05-13b7c2a4de60\",\"model\":\"auto\",\"permissionMode\":\"default\"}",
+        "{\"type\":\"turn_ended\",\"status\":\"error\",\"error\":\"Increase limits for faster responses You're out of usage. Switch to Auto, or ask your admin to increase your limit to continue.\"}"
+      ]
+    }
+  },
+
+  "scenariosOmitted": {
+    "usageLimitRetryAfter": "Not applicable. cursor-agent surfaces no retry-after and no transient-throttle template anywhere in this transport, so there is no rate_limited signature to drive and no duration to parse. Composing one would mean inventing a signature.",
+    "usageLimitAmbiguousReset": "Not applicable. No captured cursor-agent limit transcript states a reset time in any form (ralphy ADR-0042:139-140 and capstone:103-105 both record 'no reset hint'); the only reset wording attributed to Cursor is docs-only and excluded above. The main usageLimit scenario already covers the message-only match with null retryAt/resetsAt."
+  }
+}

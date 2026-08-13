@@ -112,6 +112,16 @@ Do not trust progress trackers over reality: a run is finished when `result.json
 process has exited. Read the working tree, not a status line. The implementer's full report is
 the `finalMessage` field in `result.json` (also printed in full on stdout between the report markers).
 
+**If the result carries `failureClass: "usage_limit"`,** the provider refused on usage limits — the
+brief was never the problem, so do not rework it. Inspect `touchedFiles` first (a limit can strike
+mid-edit), then either wait for the reset in `limit.retryAt`/`limit.resetsAt` and resume the exact
+session with `--session <sessionId>`, which survives the limit, or re-dispatch the same brief on
+another lane **from a clean tree**. Note what this does *not* cover: OpenCode retries a plain HTTP
+429 indefinitely and never forwards that status here, so ordinary throttling shows up as a stalled
+run — a `timeout` under `--timeout`, an unbounded hang without one — not as a classified failure.
+Always run with a `--timeout` for that reason. Details:
+[references/dispatch-and-poll.md](references/dispatch-and-poll.md).
+
 ### 4. Review — do not trust the self-report
 
 OpenCode's `result.json` includes its own final message and any gate claims. **Re-verify, don't accept:**

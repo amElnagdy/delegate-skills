@@ -1,0 +1,190 @@
+{
+  "schema": "delegate-usage-limit-capture.v1",
+  "cli": "codex",
+  "binary": "codex",
+  "version": "codex-cli 0.147.0",
+  "platform": "aarch64-apple-darwin",
+  "capturedAt": "2026-08-13",
+
+  "provenance": {
+    "state": "source-backed; live run pending",
+    "envelope": "live-captured",
+    "envelopeMethod": "Forced a terminal failure against the installed CLI without exhausting an account: `codex exec --json --sandbox read-only -m definitely-not-a-real-model-xyz \"say hi\"`. The event sequence, the turn.failed shape, the nested-JSON provider envelope inside error.message, and the exit code below are transcribed from that run. The `unrelatedFailure` scenario is that capture verbatim.",
+    "signature": "source-backed",
+    "signatureMethod": "Error codes and user-facing message templates read from the string table of the shipped binary at ~/.codex/packages/standalone/releases/0.147.0-aarch64-apple-darwin/bin/codex (`strings -n 6`). Occurrence counts recorded per signature below; codes with zero occurrences were excluded.",
+    "liveLimitRun": "pending — no account was exhausted to produce this bundle, so the usage-limit scenario composes the live-captured envelope with source-backed codes rather than transcribing one real limit run",
+    "excludedCandidates": [
+      { "code": "rate_limit_exceeded", "occurrences": 0, "reason": "absent from this binary — matching it would be an invented signature" },
+      { "code": "insufficient_quota", "occurrences": 0, "reason": "absent from this binary; it is an OpenAI platform-API code, not one this CLI emits" }
+    ]
+  },
+
+  "transport": {
+    "stream": "stdout",
+    "flag": "--json",
+    "framing": "JSONL — one JSON object per line; the final line may arrive without a trailing newline",
+    "terminalFailureEvent": "turn.failed",
+    "terminalFailureField": "error.message",
+    "terminalSuccessEvent": "turn.completed",
+    "observedExitCodeOnTurnFailed": 1,
+    "warningsAreNotTerminal": "Verified in live runs: `item.completed` items of type \"error\" AND a top-level {\"type\":\"error\"} event both occur in runs that go on to complete successfully (e.g. model-metadata fallback, shortened skill descriptions). Neither is terminal. A matcher keyed on \"an error event\" would classify healthy runs — only turn.failed is terminal."
+  },
+
+  "signatures": {
+    "codes": [
+      { "code": "usage_limit_exceeded", "kind": "quota_exhausted", "occurrences": 7 },
+      { "code": "usage_limit_reached", "kind": "quota_exhausted", "occurrences": 12 },
+      { "code": "rate_limit_reached", "kind": "quota_exhausted", "occurrences": 26, "note": "Codex calls its plan quota a rate limit internally (cf. rate_limit_resets, rate_limit_reset_credits), so this is quota exhaustion, not transient throttling." },
+      { "code": "workspace_owner_usage_limit_reached", "kind": "quota_exhausted", "occurrences": 11 },
+      { "code": "workspace_member_usage_limit_reached", "kind": "quota_exhausted", "occurrences": 11 },
+      { "code": "workspace_owner_credits_depleted", "kind": "quota_exhausted", "occurrences": 11 },
+      { "code": "workspace_member_credits_depleted", "kind": "quota_exhausted", "occurrences": 11 },
+      { "code": "rate_limit_error", "kind": "rate_limited", "occurrences": 2 }
+    ],
+    "messages": [
+      { "phrase": "you've hit your usage limit", "kind": "quota_exhausted" },
+      { "phrase": "you've reached your usage limit", "kind": "quota_exhausted" },
+      { "phrase": "usage limit reached", "kind": "quota_exhausted" },
+      { "phrase": "you've reached your workspace credit limit", "kind": "quota_exhausted" },
+      { "phrase": "you're out of credits", "kind": "quota_exhausted" },
+      { "phrase": "your workspace is out of credits", "kind": "quota_exhausted" }
+    ],
+    "resetFields": [
+      { "field": "resets_at", "mode": "absolute", "occurrences": 19 },
+      { "field": "retry_after", "mode": "duration", "occurrences": 7 }
+    ]
+  },
+
+  "hardening": ["bare429UnknownCode", "proseInTerminalMessage", "realCodeButNonTerminal", "absurdRetryAfter"],
+
+  "scenarios": {
+    "usageLimit": {
+      "expect": { "status": "failed", "failureClass": "usage_limit", "kind": "quota_exhausted", "resetsAt": "2026-08-13T21:00:00.000Z" },
+      "exitCode": 1,
+      "events": [
+        "{\"type\":\"thread.started\",\"thread_id\":\"019ff870-7a89-7a02-8eea-e271ee1b2c90\"}",
+        "{\"type\":\"turn.started\"}",
+        "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"error\",\"message\":\"Skill descriptions were shortened to fit the skills context budget.\"}}",
+        "{\"type\":\"error\",\"message\":\"{\\\"type\\\":\\\"error\\\",\\\"status\\\":429,\\\"error\\\":{\\\"type\\\":\\\"usage_limit_reached\\\",\\\"message\\\":\\\"You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits\\\",\\\"resets_at\\\":\\\"2026-08-13T21:00:00Z\\\"}}\"}",
+        "{\"type\":\"turn.failed\",\"error\":{\"message\":\"{\\\"type\\\":\\\"error\\\",\\\"status\\\":429,\\\"error\\\":{\\\"type\\\":\\\"usage_limit_reached\\\",\\\"message\\\":\\\"You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits\\\",\\\"resets_at\\\":\\\"2026-08-13T21:00:00Z\\\"}}\"}}"
+      ]
+    },
+
+    "usageLimitRetryAfter": {
+      "expect": { "status": "failed", "failureClass": "usage_limit", "kind": "rate_limited", "retryAtIsSet": true },
+      "exitCode": 1,
+      "events": [
+        "{\"type\":\"thread.started\",\"thread_id\":\"019ff870-aaaa-7a02-8eea-e271ee1b2c90\"}",
+        "{\"type\":\"turn.started\"}",
+        "{\"type\":\"turn.failed\",\"error\":{\"message\":\"{\\\"type\\\":\\\"error\\\",\\\"status\\\":429,\\\"error\\\":{\\\"type\\\":\\\"rate_limit_error\\\",\\\"message\\\":\\\"Too many requests, slow down.\\\",\\\"retry_after\\\":120}}\"}}"
+      ]
+    },
+
+    "usageLimitAmbiguousReset": {
+      "expect": { "status": "failed", "failureClass": "usage_limit", "kind": "quota_exhausted", "retryAt": null, "resetsAt": null },
+      "exitCode": 1,
+      "events": [
+        "{\"type\":\"thread.started\",\"thread_id\":\"019ff870-bbbb-7a02-8eea-e271ee1b2c90\"}",
+        "{\"type\":\"turn.started\"}",
+        "{\"type\":\"turn.failed\",\"error\":{\"message\":\"You've hit your usage limit for the week. Resets 3pm tomorrow.\"}}"
+      ]
+    },
+
+    "unrelatedFailure": {
+      "note": "Live capture, verbatim. Must stay an unclassified failure.",
+      "expect": { "status": "failed", "failureClass": null },
+      "exitCode": 1,
+      "events": [
+        "{\"type\":\"thread.started\",\"thread_id\":\"019ff870-7a89-7a02-8eea-e271ee1b2c90\"}",
+        "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"error\",\"message\":\"Model metadata for `definitely-not-a-real-model-xyz` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.\"}}",
+        "{\"type\":\"turn.started\"}",
+        "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"error\",\"message\":\"Skill descriptions were shortened to fit the skills context budget. Codex can still see every skill, but some descriptions are shorter. Disable unused skills or plugins to leave more room for the rest.\"}}",
+        "{\"type\":\"error\",\"message\":\"{\\\"type\\\":\\\"error\\\",\\\"status\\\":400,\\\"error\\\":{\\\"type\\\":\\\"invalid_request_error\\\",\\\"message\\\":\\\"The 'definitely-not-a-real-model-xyz' model is not supported when using Codex with a ChatGPT account.\\\"}}\"}",
+        "{\"type\":\"turn.failed\",\"error\":{\"message\":\"{\\\"type\\\":\\\"error\\\",\\\"status\\\":400,\\\"error\\\":{\\\"type\\\":\\\"invalid_request_error\\\",\\\"message\\\":\\\"The 'definitely-not-a-real-model-xyz' model is not supported when using Codex with a ChatGPT account.\\\"}}\"}}"
+      ]
+    },
+
+    "proseThenUnrelatedFailure": {
+      "note": "Adversarial: every trigger word appears in NON-terminal events (the agent discussing usage limits, and a warning), then the run dies of something else. Must stay unclassified.",
+      "expect": { "status": "failed", "failureClass": null },
+      "exitCode": 1,
+      "events": [
+        "{\"type\":\"thread.started\",\"thread_id\":\"019ff870-cccc-7a02-8eea-e271ee1b2c90\"}",
+        "{\"type\":\"turn.started\"}",
+        "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I added a rate limit handler for HTTP 429. When you've hit your usage limit the middleware now returns usage_limit_reached with resets_at.\"}}",
+        "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"error\",\"message\":\"You've hit your usage limit. Upgrade to Pro to continue.\"}}",
+        "{\"type\":\"error\",\"message\":\"rate_limit_reached\"}",
+        "{\"type\":\"turn.failed\",\"error\":{\"message\":\"{\\\"type\\\":\\\"error\\\",\\\"status\\\":500,\\\"error\\\":{\\\"type\\\":\\\"internal_server_error\\\",\\\"message\\\":\\\"The server had an error while processing your request.\\\"}}\"}}"
+      ]
+    },
+
+    "recoveredThenSuccess": {
+      "note": "A limit-looking terminal failure superseded by a later completed turn, plus the top-level error event that real successful runs emit. Must be a clean completion.",
+      "expect": { "status": "completed", "failureClass": null },
+      "exitCode": 0,
+      "events": [
+        "{\"type\":\"thread.started\",\"thread_id\":\"019ff870-dddd-7a02-8eea-e271ee1b2c90\"}",
+        "{\"type\":\"turn.started\"}",
+        "{\"type\":\"turn.failed\",\"error\":{\"message\":\"{\\\"type\\\":\\\"error\\\",\\\"status\\\":429,\\\"error\\\":{\\\"type\\\":\\\"rate_limit_reached\\\",\\\"message\\\":\\\"You've hit your usage limit.\\\"}}\"}}",
+        "{\"type\":\"turn.started\"}",
+        "{\"type\":\"error\",\"message\":\"Skill descriptions were shortened to fit the skills context budget.\"}",
+        "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"ok\"}}",
+        "{\"type\":\"turn.completed\"}"
+      ]
+    },
+
+    "bare429UnknownCode": {
+      "note": "Hardening: a 429 whose code is not in the verified table. Bare status is never enough.",
+      "expect": { "status": "failed", "failureClass": null },
+      "exitCode": 1,
+      "events": [
+        "{\"type\":\"thread.started\",\"thread_id\":\"019ff870-1111-7a02-8eea-e271ee1b2c90\"}",
+        "{\"type\":\"turn.started\"}",
+        "{\"type\":\"turn.failed\",\"error\":{\"message\":\"{\\\"type\\\":\\\"error\\\",\\\"status\\\":429,\\\"error\\\":{\\\"type\\\":\\\"some_unknown_throttle\\\",\\\"message\\\":\\\"Slow down please.\\\"}}\"}}"
+      ]
+    },
+
+    "proseInTerminalMessage": {
+      "note": "Hardening: the TERMINAL message itself carries every trigger word as ordinary task prose. The strongest false-positive case — a naive substring matcher fails here.",
+      "expect": { "status": "failed", "failureClass": null },
+      "exitCode": 1,
+      "events": [
+        "{\"type\":\"thread.started\",\"thread_id\":\"019ff870-2222-7a02-8eea-e271ee1b2c90\"}",
+        "{\"type\":\"turn.started\"}",
+        "{\"type\":\"turn.failed\",\"error\":{\"message\":\"Task failed: the rate limit middleware test hit a quota assertion and returned 429.\"}}"
+      ]
+    },
+
+    "realCodeButNonTerminal": {
+      "note": "Hardening: a genuine usage-limit code in the top-level error event that real runs emit even on success, with no matching terminal failure. Must not classify.",
+      "expect": { "status": "failed", "failureClass": null },
+      "exitCode": 1,
+      "events": [
+        "{\"type\":\"thread.started\",\"thread_id\":\"019ff870-3333-7a02-8eea-e271ee1b2c90\"}",
+        "{\"type\":\"error\",\"message\":\"{\\\"type\\\":\\\"error\\\",\\\"status\\\":429,\\\"error\\\":{\\\"type\\\":\\\"usage_limit_reached\\\",\\\"message\\\":\\\"You've hit your usage limit.\\\"}}\"}"
+      ]
+    },
+
+    "absurdRetryAfter": {
+      "note": "Hardening: an out-of-range retry_after (≈3 years) must classify but refuse the time rather than invent a plausible-looking one.",
+      "expect": { "status": "failed", "failureClass": "usage_limit", "retryAt": null },
+      "exitCode": 1,
+      "events": [
+        "{\"type\":\"thread.started\",\"thread_id\":\"019ff870-4444-7a02-8eea-e271ee1b2c90\"}",
+        "{\"type\":\"turn.started\"}",
+        "{\"type\":\"turn.failed\",\"error\":{\"message\":\"{\\\"type\\\":\\\"error\\\",\\\"error\\\":{\\\"type\\\":\\\"rate_limit_error\\\",\\\"message\\\":\\\"wait\\\",\\\"retry_after\\\":99999999}}\"}}"
+      ]
+    },
+
+    "usageLimitExitZero": {
+      "note": "Defensive: never observed (this CLI exits 1 on turn.failed), but a limit must never be reported as a completed run.",
+      "expect": { "status": "failed", "failureClass": "usage_limit", "exitCode": 1 },
+      "exitCode": 0,
+      "events": [
+        "{\"type\":\"thread.started\",\"thread_id\":\"019ff870-eeee-7a02-8eea-e271ee1b2c90\"}",
+        "{\"type\":\"turn.started\"}",
+        "{\"type\":\"turn.failed\",\"error\":{\"message\":\"{\\\"type\\\":\\\"error\\\",\\\"status\\\":429,\\\"error\\\":{\\\"type\\\":\\\"usage_limit_exceeded\\\",\\\"message\\\":\\\"You've hit your usage limit.\\\"}}\"}}"
+      ]
+    }
+  }
+}

@@ -164,4 +164,61 @@ export async function runAgy(h) {
     analysis.value.status === "completed" &&
     analysis.value.exitCode === 0 &&
     analysis.value.finalMessage === "fake agy analysis completed");
+
+  // ---- --preflight-usage ----
+  // agy is the one implementer in the fleet with a verified headless quota query
+  // (`agy -p "/usage" --output-format json`: no conversation, no turns, no tokens). The
+  // flag may block a dispatch ONLY on true exhaustion — a probe that fails, hangs, or
+  // returns an unfamiliar shape must never stand between the user and their work.
+  const preflight = (name, usageMode) => {
+    const outDir = join(h.scratch, `out-preflight-${name}-agy`);
+    const workDir = h.freshRepo(`work-preflight-${name}-agy`);
+    const argsFile = join(h.scratch, `args-preflight-${name}-agy`);
+    const result = spawnSync(process.execPath, [
+      h.relayPath("agy"), "--brief", h.briefPath, "--cd", workDir,
+      "--out-dir", outDir, "--preflight-usage",
+    ], {
+      env: { ...h.baseEnv, SMOKE_MODE: "agy-usage-preflight", SMOKE_USAGE_MODE: usageMode, SMOKE_ARGS_FILE: argsFile },
+      encoding: "utf8",
+    });
+    return {
+      result,
+      value: existsSync(join(outDir, "result.json")) ? h.result(outDir) : null,
+      dispatched: existsSync(argsFile),
+    };
+  };
+
+  const healthy = preflight("healthy", "healthy");
+  h.check("agy preflight: quota remaining dispatches and records the provider's own numbers",
+    healthy.dispatched &&
+    healthy.value?.status === "completed" &&
+    healthy.value?.failureClass === undefined &&
+    healthy.value?.usagePreflight?.exhausted === false &&
+    Array.isArray(healthy.value?.usagePreflight?.buckets) &&
+    healthy.value.usagePreflight.buckets.length > 0);
+  h.check("agy preflight: one spent bucket among several does not block a dispatch",
+    healthy.dispatched &&
+    healthy.value?.usagePreflight?.buckets?.some((b) => b.remainingFraction === 0));
+
+  const exhausted = preflight("exhausted", "exhausted");
+  h.check("agy preflight: full exhaustion blocks the dispatch and classifies the result",
+    !exhausted.dispatched &&
+    exhausted.value?.status === "failed" &&
+    exhausted.value?.failureClass === "usage_limit" &&
+    exhausted.value?.limit?.kind === "quota_exhausted" &&
+    exhausted.result.status !== 0);
+  h.check("agy preflight: the blocked result carries the soonest stated reset",
+    typeof exhausted.value?.limit?.resetsAt === "string" &&
+    !Number.isNaN(Date.parse(exhausted.value.limit.resetsAt)));
+  h.check("agy preflight: the block names the query as its evidence",
+    typeof exhausted.value?.limit?.evidence?.source === "string" &&
+    exhausted.value.limit.evidence.source.length > 0);
+
+  for (const [name, mode] of [["a failing probe", "fail"], ["an unfamiliar payload", "unparseable"]]) {
+    const degraded = preflight(mode, mode);
+    h.check(`agy preflight: ${name} never blocks the work`,
+      degraded.dispatched &&
+      degraded.value?.status === "completed" &&
+      degraded.value?.failureClass === undefined);
+  }
 }

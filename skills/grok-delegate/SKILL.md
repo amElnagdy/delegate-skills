@@ -94,6 +94,16 @@ Do not trust progress trackers over reality: a run is finished when `result.json
 process has exited. Read the working tree, not a status line. The implementer's full report is
 the `finalMessage` field in `result.json` (also printed in full on stdout between the report markers).
 
+**If the result carries `failureClass: "usage_limit"`,** Grok's provider refused on usage limits —
+the brief was never the problem, so do not rework it. Inspect `touchedFiles` first (a limit can
+strike mid-edit), then either wait and resume, or re-dispatch the same brief on another lane **from
+a clean tree**. Grok reports its session id only on the `end` line, which a limit run never reaches,
+so resume that partial work with `--resume-last` unless you dispatched with an explicit `--session`.
+Grok's limit messages state no reset window, so `limit.retryAt`/`limit.resetsAt` are `null` rather
+than guessed. Detection is fail-closed, so an unrecognized limit still arrives as a plain `failed` —
+check `stderrTail` before concluding the brief was at fault. Details:
+[references/dispatch-and-poll.md](references/dispatch-and-poll.md).
+
 ### 4. Review — do not trust the self-report
 
 Grok's `result.json` includes its own summary and gate claims. **Re-verify, don't accept:**
