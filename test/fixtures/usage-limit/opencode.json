@@ -61,7 +61,7 @@
     },
 
     "usageLimitRetryAfter": {
-      "expect": { "status": "failed", "failureClass": "usage_limit", "kind": "quota_exhausted", "retryAtIsSet": true },
+      "expect": { "status": "failed", "failureClass": "usage_limit", "kind": "quota_exhausted", "retryAtIsSet": true, "retryAfterSeconds": 600 },
       "exitCode": 1,
       "events": [
         "{\"type\":\"session_start\",\"sessionID\":\"ses_aa11bb22cc33\"}",

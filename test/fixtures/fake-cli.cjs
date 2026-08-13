@@ -142,7 +142,16 @@ if (process.env.SMOKE_MODE === "usage-limit") {
   if (process.env.SMOKE_LIMIT_SPLIT === "1") {
     // Deliberately awkward chunk size: lands mid-token, mid-JSON-escape, and mid-multibyte.
     const buf = Buffer.from(payload, "utf8");
-    for (let i = 0; i < buf.length; i += 7) fs.writeSync(fd, buf.subarray(i, i + 7));
+    // Back-to-back writes are coalesced by the pipe, so the reader normally sees one `data`
+    // event no matter how small the writes were — which silently makes a chunk-boundary test
+    // prove nothing. SMOKE_LIMIT_SPLIT_DELAY_MS pauses between writes so each one lands as
+    // its own `data` event, which is what a reader that fails to buffer partial lines needs
+    // in order to actually break.
+    const delayMs = Number(process.env.SMOKE_LIMIT_SPLIT_DELAY_MS || 0);
+    for (let i = 0; i < buf.length; i += 7) {
+      fs.writeSync(fd, buf.subarray(i, i + 7));
+      if (delayMs > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
+    }
   } else {
     fs.writeSync(fd, payload);
   }

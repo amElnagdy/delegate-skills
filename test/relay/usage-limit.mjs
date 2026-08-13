@@ -144,10 +144,25 @@ async function runMatrix(h, entry) {
   }
 
   if (bundle.scenarios.usageLimitRetryAfter) {
+    const retryExpect = bundle.scenarios.usageLimitRetryAfter.expect;
+    const before = Date.now();
     const retry = run("usageLimitRetryAfter", { name: "retry" });
+    const after = Date.now();
     h.check(`${tag}: a stated duration becomes retryAt`,
       typeof retry.result?.limit?.retryAt === "string"
       && !Number.isNaN(Date.parse(retry.result.limit.retryAt)));
+    // "It parses as a date" would also pass for a timestamp the relay invented, so pin the
+    // value: retryAt must land the bundle's own stated retry_after ahead of the moment the
+    // relay read the event, which happened somewhere inside [before, after]. Bounding with
+    // that window rather than a fixed tolerance means a slow machine widens the bound
+    // instead of flaking. The duration comes from the bundle because each CLI states its
+    // own — codex's capture says 120s, OpenCode's says 600s.
+    if (Number.isFinite(retryExpect?.retryAfterSeconds)) {
+      const offset = retryExpect.retryAfterSeconds * 1000;
+      const parsed = Date.parse(retry.result?.limit?.retryAt ?? "");
+      h.check(`${tag}: retryAt is the stated ${retryExpect.retryAfterSeconds}s ahead, not a guess`,
+        Number.isFinite(parsed) && parsed >= before + offset - 2000 && parsed <= after + offset + 2000);
+    }
     // The kind comes from the bundle, not from this file: a CLI that surfaces transient
     // throttling reports "rate_limited" here, while one that only ever exposes hard
     // exhaustion (OpenCode retries a 429 forever and never forwards it) says so instead.
@@ -225,6 +240,12 @@ async function runMatrix(h, entry) {
   writeFileSync(join(reuseDir, "result.json"),
     JSON.stringify({ schema: "delegate-relay.result.v1", status: "completed", exitCode: 0, finalMessage: "STALE REPORT" }), "utf8");
   writeFileSync(join(reuseDir, "final.txt"), "STALE REPORT", "utf8");
+  // Seed a stale event stream too. events.jsonl is the artifact evidence.artifactLine indexes
+  // into, so leftover lines at the top would shift every offset by their count: the evidence
+  // would point at the wrong record while still looking auditable, which is worse than no
+  // evidence at all. The relays truncate it on reuse; nothing pinned that until now.
+  writeFileSync(join(reuseDir, "events.jsonl"),
+    '{"type":"stale","note":"STALE EVENT"}\n{"type":"stale","note":"STALE EVENT"}\n', "utf8");
   const reuse = spawnSync(process.execPath, [
     h.relayPath(entry.cli), "--brief", h.briefPath, "--cd", reuseRepo, "--out-dir", reuseDir,
     ...(EXTRA_ARGS[entry.cli] || []),
@@ -234,5 +255,12 @@ async function runMatrix(h, entry) {
     reuseResult?.status === "failed" && reuseResult?.failureClass === "usage_limit");
   h.check(`${tag}: a stale final report is not inherited`,
     !JSON.stringify(reuseResult ?? {}).includes("STALE REPORT"));
+  h.check(`${tag}: a reused out-dir does not keep the previous run's events`, (() => {
+    const reuseEventsPath = join(reuseDir, "events.jsonl");
+    if (!existsSync(reuseEventsPath)) return false;
+    return !readFileSync(reuseEventsPath, "utf8").includes("STALE EVENT");
+  })());
+  h.check(`${tag}: evidence.artifactLine still resolves to this run's terminal event`,
+    reuseResult?.limit?.evidence?.artifactLine === expected.artifactLine);
   h.check(`${tag}: the reused run still exits non-zero`, reuse.status !== 0);
 }

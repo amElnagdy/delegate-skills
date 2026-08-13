@@ -724,6 +724,8 @@ function dispatchToCursor(opts, brief, run, writeResult) {
   let sawSuccessfulResult = false;
   const textChunks = [];
   const stderrTail = [];
+  // The tail of a stderr chunk that did not end on a newline, held until the rest arrives.
+  let stderrPartial = "";
   const scan = makeEventScanner((event) => {
     if (typeof event.session_id === "string") sessionId = event.session_id;
     if (event.type === "system" && event.subtype === "init") {
@@ -773,12 +775,26 @@ function dispatchToCursor(opts, brief, run, writeResult) {
   child.stderr.on("data", (chunk) => {
     process.stderr.write(chunk);
     appendFileSync(run.stderrPath, chunk);
-    const text = stderrDecoder.write(chunk);
-    for (const line of text.split("\n")) {
+    // A single stderr line can arrive split across data events, so hold the unterminated
+    // remainder and prepend it to the next chunk. Splitting each chunk on its own would tear
+    // `ActionRequiredError: You've hit your usage limit` into `ActionRequiredError: You` and
+    // `'ve hit your usage limit`: the fallback classifier reads only lines carrying the
+    // prefix, so it would find the prefix without the sentence and the sentence without the
+    // prefix, and report a real limit as an unclassified failure.
+    const parts = (stderrPartial + stderrDecoder.write(chunk)).split("\n");
+    stderrPartial = parts.pop() ?? "";
+    for (const line of parts) {
       if (line.trim()) stderrTail.push(line.trimEnd());
     }
     while (stderrTail.length > 20) stderrTail.shift();
   });
+
+  // Every reader of stderr must also see the held remainder: cursor-agent can die without a
+  // trailing newline, leaving its last — and most diagnostic — line unterminated.
+  const stderrLines = () => {
+    const held = stderrPartial.trim() ? [stderrPartial.trimEnd()] : [];
+    return [...stderrTail, ...held].slice(-20);
+  };
 
   const assembleFinal = () => {
     // Prefer the result event's own report; fall back to the assistant text
@@ -825,7 +841,7 @@ function dispatchToCursor(opts, brief, run, writeResult) {
         usage,
         finalMessage: assembleFinal(),
         touchedFiles: touched,
-        stderrTail: stderrTail.slice(-20),
+        stderrTail: stderrLines(),
         error: `the relay was killed by ${sig}; cursor-agent was terminated with it — inspect the working tree before re-dispatching`,
       };
       const result = writeResult(abortedFields);
@@ -858,7 +874,7 @@ function dispatchToCursor(opts, brief, run, writeResult) {
       usage,
       finalMessage: assembleFinal(),
       touchedFiles: touched,
-      stderrTail: stderrTail.slice(-20),
+      stderrTail: stderrLines(),
       error: String(err && err.message ? err.message : err),
     });
     printSummary(result, run.resultPath);
@@ -880,7 +896,7 @@ function dispatchToCursor(opts, brief, run, writeResult) {
     // stream produced neither a limit-bearing terminal turn nor a clean close.
     const limit = watchdogFired
       ? null
-      : limitMatch ?? (sawSuccessfulResult ? null : classifyStderrUsageLimit(stderrTail));
+      : limitMatch ?? (sawSuccessfulResult ? null : classifyStderrUsageLimit(stderrLines()));
     if (limit) {
       limit.artifactLine = limit.source === "stderr.txt"
         ? locateArtifactLine(run.stderrPath, (line) => ACTION_REQUIRED_PREFIX.test(line))
@@ -905,7 +921,7 @@ function dispatchToCursor(opts, brief, run, writeResult) {
       usage,
       finalMessage: assembleFinal(),
       touchedFiles: touched,
-      ...(succeeded ? {} : { stderrTail: stderrTail.slice(-20) }),
+      ...(succeeded ? {} : { stderrTail: stderrLines() }),
       ...(watchdogFired ? { error: `cursor-agent did not finish within --timeout ${opts.timeout}; killed by the relay watchdog` } : {}),
       ...(resultIsError && !watchdogFired ? { error: "cursor-agent reported an error result (is_error: true in its result event)" } : {}),
       ...usageLimitFields(limit),

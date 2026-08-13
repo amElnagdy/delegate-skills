@@ -195,4 +195,52 @@ if (!h.WIN) {
     h.result(outDir).status === "cursor_agent_unavailable" &&
     !existsSync(join(outDir, "final.txt")));
 }
+{
+  // The stderr fallback. cursor-agent can report the same stop as a bare, non-JSON
+  // `ActionRequiredError:` line on stderr with no limit-bearing turn_ended and no result
+  // envelope on stdout — the one path the shared matrix in usage-limit.mjs cannot drive,
+  // because it runs one stream per relay. The split case is the regression: stderr chunks
+  // arrive on `data` boundaries that fall anywhere, and a line torn mid-sentence must still
+  // classify. Before stderr lines were buffered across chunks, `ActionRequiredError: You` and
+  // `'ve hit your usage limit` landed as separate entries and a real limit reported as an
+  // unclassified failure.
+  const fixturePath = join(h.testDir, "fixtures", "usage-limit", "cursor.json");
+  const expected = JSON.parse(readFileSync(fixturePath, "utf8"))
+    .scenarios.usageLimitStderrFallback.expect;
+  for (const [name, extraEnv] of [
+    ["whole", {}],
+    // The delay is load-bearing: without it the pipe coalesces the small writes into a single
+    // `data` event and an unbuffered reader would pass this case by accident.
+    ["split across chunk boundaries", {
+      SMOKE_LIMIT_SPLIT: "1",
+      SMOKE_LIMIT_NO_TRAILING_NEWLINE: "1",
+      SMOKE_LIMIT_SPLIT_DELAY_MS: "15",
+    }],
+  ]) {
+    const outDir = join(h.scratch, `out-stderr-limit-${name.split(" ")[0]}-cursor`);
+    const workDir = h.freshRepo(`work-stderr-limit-${name.split(" ")[0]}-cursor`);
+    const run = spawnSync(process.execPath, [
+      h.relayPath("cursor"), "--brief", h.briefPath, "--cd", workDir, "--out-dir", outDir,
+    ], {
+      env: {
+        ...h.baseEnv,
+        SMOKE_MODE: "usage-limit",
+        SMOKE_LIMIT_FIXTURE: fixturePath,
+        SMOKE_LIMIT_SCENARIO: "usageLimitStderrFallback",
+        SMOKE_LIMIT_STREAM: "stderr",
+        ...extraEnv,
+      },
+      encoding: "utf8",
+    });
+    const value = existsSync(join(outDir, "result.json")) ? h.result(outDir) : null;
+    h.check(`cursor stderr limit (${name}): classifies from the ActionRequiredError line`,
+      value?.status === expected.status &&
+      value?.failureClass === expected.failureClass &&
+      value?.limit?.kind === expected.kind &&
+      run.status !== 0);
+    h.check(`cursor stderr limit (${name}): evidence names stderr as its source`,
+      value?.limit?.evidence?.source === expected.source &&
+      /usage limit/i.test(value?.limit?.evidence?.excerpt || ""));
+  }
+}
 }

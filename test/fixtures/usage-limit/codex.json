@@ -71,7 +71,7 @@
     },
 
     "usageLimitRetryAfter": {
-      "expect": { "status": "failed", "failureClass": "usage_limit", "kind": "rate_limited", "retryAtIsSet": true },
+      "expect": { "status": "failed", "failureClass": "usage_limit", "kind": "rate_limited", "retryAtIsSet": true, "retryAfterSeconds": 120 },
       "exitCode": 1,
       "events": [
         "{\"type\":\"thread.started\",\"thread_id\":\"019ff870-aaaa-7a02-8eea-e271ee1b2c90\"}",

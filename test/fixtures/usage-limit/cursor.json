@@ -124,6 +124,19 @@
         "{\"type\":\"system\",\"subtype\":\"init\",\"apiKeySource\":\"login\",\"session_id\":\"7ab0c318-6f21-4d9c-8e05-13b7c2a4de60\",\"model\":\"auto\",\"permissionMode\":\"default\"}",
         "{\"type\":\"turn_ended\",\"status\":\"error\",\"error\":\"Increase limits for faster responses You're out of usage. Switch to Auto, or ask your admin to increase your limit to continue.\"}"
       ]
+    },
+    "usageLimitStderrFallback": {
+          "note": "The secondary stream the transport block describes: the same stop surfaced as a bare, non-JSON `ActionRequiredError:` line on stderr, with stdout emitting neither a limit-bearing turn_ended nor a result envelope. Sentence copied verbatim from signatures.messages[0].template, whose sourceRef already records a captured stderr log. Driven from test/relay/cursor.mjs (not the shared matrix, which is one stream per relay), both whole and split across chunk boundaries — the split case is the regression: a line torn mid-sentence used to leave the prefix and the sentence in separate stderr entries, and the fallback classifier saw neither whole.",
+          "expect": {
+                "status": "failed",
+                "failureClass": "usage_limit",
+                "kind": "quota_exhausted",
+                "source": "stderr.txt"
+          },
+          "exitCode": 1,
+          "events": [
+                "ActionRequiredError: You've hit your usage limit Get Cursor Pro for more Agent usage, unlimited Tab, and more."
+          ]
     }
   },
 
