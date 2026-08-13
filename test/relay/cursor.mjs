@@ -238,9 +238,26 @@ if (!h.WIN) {
       value?.failureClass === expected.failureClass &&
       value?.limit?.kind === expected.kind &&
       run.status !== 0);
+    // Naming stderr.txt is not enough: the evidence has to be auditable, which means the
+    // artifact exists and artifactLine indexes the line the excerpt was actually read from.
+    // The shared matrix pins this for the stdout path (usage-limit.mjs); the stderr fallback
+    // is the one classification path it cannot drive. It matters most for the split case,
+    // where the reassembled excerpt must still resolve to one whole line on disk.
+    const evidence = value?.limit?.evidence;
+    const stderrPath = join(outDir, expected.source);
+    const stderrLines = existsSync(stderrPath)
+      ? readFileSync(stderrPath, "utf8").split("\n")
+      : [];
     h.check(`cursor stderr limit (${name}): evidence names stderr as its source`,
-      value?.limit?.evidence?.source === expected.source &&
-      /usage limit/i.test(value?.limit?.evidence?.excerpt || ""));
+      evidence?.source === expected.source &&
+      /usage limit/i.test(evidence?.excerpt || ""));
+    h.check(`cursor stderr limit (${name}): artifactLine resolves to the recorded excerpt in stderr.txt`,
+      Number.isInteger(evidence?.artifactLine) &&
+      evidence.artifactLine > 0 &&
+      // Guard the excerpt: every line `includes("")`, so a null excerpt would pass the index
+      // check while proving nothing.
+      Boolean(evidence.excerpt) &&
+      Boolean(stderrLines[evidence.artifactLine - 1]?.includes(evidence.excerpt)));
   }
 }
 }
