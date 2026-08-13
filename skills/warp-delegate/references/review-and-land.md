@@ -77,8 +77,11 @@ would take longer to correct than to redo.
 Discard against a known baseline, never with a blanket revert. `git checkout -- .` is the wrong
 reach: it leaves staged and untracked files behind, so the tree stays dirty for the next dispatch,
 and it destroys any uncommitted work of your own that predates the run. Dispatch from a clean tree —
-commit or `git stash` your own changes first — so that everything dirty afterwards is Warp's, then
-drop exactly what the run introduced, reading the paths off `touchedFiles`:
+commit your own changes, or `git stash push --include-untracked` them. A bare `git stash` leaves
+untracked files in place, and those resurface as `??` entries in `touchedFiles`, where the cleanup
+below would delete work the run never made. Confirm `git status --porcelain` prints nothing before
+dispatching, so that everything dirty afterwards is Warp's, then drop exactly what the run
+introduced, reading the paths off `touchedFiles`:
 
 ```bash
 git restore --staged --worktree -- <tracked paths>   # the ' M' / 'M ' entries

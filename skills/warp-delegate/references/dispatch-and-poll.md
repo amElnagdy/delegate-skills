@@ -147,7 +147,9 @@ recorded. On Windows the process tree is felled with `taskkill /t /f`; Windows d
 SIGTERM, so the aborted path cannot be driven there.
 
 **A timed-out or aborted run leaves a partially edited tree.** Inspect `git status` and `git diff`
-before re-dispatching, and consider `git stash` or a reset if the state is incoherent.
+before re-dispatching. If the state is incoherent, discard it against the recorded baseline rather
+than stashing — a bare `git stash` leaves behind every file the run created. See
+[review-and-land.md](review-and-land.md#rework-through-a-conversation).
 
 ## Failure recovery
 
