@@ -124,7 +124,7 @@ Treat Warp's final message and gate claims as claims:
 - Round-trip migrations and grep for dangling references after removals or renames.
 
 Because there is no read-only mode to fall back on, the diff is the **only** record you get - and it
-records what git can see in the workspace afterwards, not everything the run did. Dispatch from a
+records what git can see in the workspace afterward, not everything the run did. Dispatch from a
 clean tree so the two are as close as they can be. See
 [references/review-and-land.md](references/review-and-land.md).
 

@@ -80,13 +80,17 @@ and it destroys any uncommitted work of your own that predates the run. Dispatch
 commit your own changes, or `git stash push --include-untracked` them. A bare `git stash` leaves
 untracked files in place, and those resurface as `??` entries in `touchedFiles`, where the cleanup
 below would delete work the run never made. Confirm `git status --porcelain` prints nothing before
-dispatching, so that everything dirty afterwards is Warp's, then drop exactly what the run
+dispatching, so that everything dirty afterward is Warp's, then drop exactly what the run
 introduced, reading the paths off `touchedFiles`:
 
 ```bash
 git restore --staged --worktree -- <tracked paths>   # the ' M' / 'M ' entries
 git clean -f -- <untracked paths>                    # the '??' entries
 ```
+
+A `??` entry can name a whole directory rather than each file under it; passing that path removes
+the directory and its contents, since `-d` only governs the no-pathspec case. The exception is a
+nested git repository — if the run scaffolded one, `git clean -f` skips it and `-ff` is required.
 
 If dispatching from a clean tree is not an option, give Warp its own `git worktree` instead: then
 discarding is `git worktree remove --force`, and your work was never in reach. Either way, rewrite
