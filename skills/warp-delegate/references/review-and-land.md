@@ -14,8 +14,12 @@ could touch while it worked. The diff is not a courtesy record — it is the onl
 Work through these in order. Stop at the first one that fails and decide whether to rework or
 discard.
 
-1. **Read `result.json` first.** Check `status` and `exitCode` before anything else. A `timeout` or
-   `aborted` status means the tree may be mid-edit and incoherent.
+1. **Read `result.json` first.** If there is no `result.json`, stop: a usage error exits 2 before
+   Warp is ever dispatched and writes none, so an absent file means the run did not happen — read the
+   relay's stderr, not the tree. Otherwise require `status: "completed"` and `exitCode: 0` before
+   going further. `failed`, `timeout`, `aborted`, and `warp_unavailable` all mean the run did not
+   finish on its own terms, and `timeout` and `aborted` additionally mean the tree may be mid-edit
+   and incoherent. Rework or discard from the baseline rather than reviewing a partial run.
 2. **Start from `touchedFiles`.** It is `git status --porcelain` taken after the run: post-run,
    git-visible worktree state, not a log of what the agent did. It cannot show an ignored file, an
    edit the run made and then reverted, or a write outside the repository, and it includes anything
@@ -23,9 +27,15 @@ discard.
    git could not report — inspect the tree by hand. `[]` on a run that claimed edits is a
    contradiction worth chasing.
 3. **Re-run the gates yourself.** Do not accept "tests pass" from `finalMessage`. Run the project's
-   actual lint, typecheck, build, and test commands and read the output.
-4. **Read the whole diff against the brief.** `git diff` and `git diff --staged`. Ask of each hunk:
-   did the brief ask for this? Changes outside the brief's stated scope are the thing to catch.
+   actual lint, typecheck, build, and test commands and read the output. Take "actual" from
+   `CONTRIBUTING.md`, the CI config, or `package.json`: a project's gate set often includes a
+   packaging, manifest, or schema validation step that lint and test do not cover, and that is
+   exactly the gate a run can break without any test going red.
+4. **Read the whole diff against the brief.** `git diff` and `git diff --staged` — then open every
+   `??` path in `touchedFiles` directly, including everything inside an untracked directory. Neither
+   diff command shows the contents of an untracked file, so a file Warp created is invisible to both
+   and would otherwise reach your commit unread. Ask of each hunk and each new file: did the brief
+   ask for this? Changes outside the brief's stated scope are the thing to catch.
 5. **Check what should NOT have changed.** Lockfiles, CI config, formatter config, unrelated
    modules, and anything the brief listed under "leave untouched".
 6. **Grep for dangling references** after any removal or rename — imports, string keys, docs.
