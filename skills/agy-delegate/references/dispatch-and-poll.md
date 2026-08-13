@@ -71,6 +71,25 @@ touched-files report shows only Antigravity's edits and nothing of the helper's 
 - `stderrTail` - last ~20 stderr lines; present on every run that did not complete (`failed`, `timeout`, `aborted`), except a launch failure, which reports `failed` with no `stderrTail`; also present when `finalMessage` is empty so diagnostics are not discarded
 - `error` - present on a launch failure, `timeout`, `aborted`, headless permission denial, or silent no-op
 
+Three more fields are additive - present only when the run produced them, absent otherwise, so an
+orchestrator that does not know them keeps working:
+
+- `usagePreflight` - `null` unless you passed `--preflight-usage`; otherwise
+  `{ command, checkedAt, status, exhausted, buckets, artifactPath, note }`. `status` is `ok` |
+  `skipped` (the installed agy predates the print-mode `/usage`) | `timeout` | `unavailable` (the
+  probe failed) | `unparseable` (an unfamiliar payload); only `ok` carries a meaningful
+  `exhausted`, which is `null` otherwise. Each entry in `buckets` is
+  `{ group, id, name, window, remainingFraction, resetTime }` - the provider's own numbers,
+  unrounded and uninterpreted. `artifactPath` points at `usage-preflight.json`, the raw reply,
+  and `note` explains any non-`ok` status. See [Checking quota before dispatch](#checking-quota-before-dispatch).
+- `failureClass` - `"usage_limit"`, and **absent on every other failure**. For agy this comes only
+  from the preflight refusal above; Antigravity's own limit *errors* carry no verified signature,
+  so a failed run is never classified from its output.
+- `limit` - accompanies `failureClass`: `{ kind: "quota_exhausted", retryAt, resetsAt, evidence }`,
+  where `evidence` is `{ source, code, excerpt, artifactLine }` naming `usage-preflight.json` as
+  the source. `resetsAt` is the soonest reset the provider stated, `retryAt` is `null` - neither is
+  ever guessed. The status stays `failed`: the enum is closed, and these two fields carry the detail.
+
 The helper also prints a summary to stdout and normally exits with Antigravity's exit code. It forces
 exit 1 when Antigravity exits 0 after a detected headless permission denial or with neither a final
 message nor observable working-tree changes, so a wrapping script can branch on success/failure directly.

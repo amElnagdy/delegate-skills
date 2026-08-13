@@ -65,7 +65,7 @@
   "scenarios": {
     "usageLimit": {
       "note": "Daily plan limit. Carries both a verified error_code and a verified message template, and is preceded by the mid-run api_retry 429 the matcher must not treat as terminal.",
-      "expect": { "status": "failed", "failureClass": "usage_limit", "kind": "quota_exhausted", "retryAt": null, "resetsAt": null },
+      "expect": { "status": "failed", "failureClass": "usage_limit", "kind": "quota_exhausted", "retryAt": null, "resetsAt": null, "artifactLine": 4 },
       "exitCode": 1,
       "events": [
         "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"8f2c1d90-4a7b-4c2e-9a10-6b3e5d0f7c11\",\"model\":\"performance\",\"permissionMode\":\"auto\"}",

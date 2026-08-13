@@ -50,7 +50,7 @@
 
   "scenarios": {
     "usageLimit": {
-      "expect": { "status": "failed", "failureClass": "usage_limit", "kind": "quota_exhausted", "resetsAt": "2026-08-13T21:00:00.000Z" },
+      "expect": { "status": "failed", "failureClass": "usage_limit", "kind": "quota_exhausted", "resetsAt": "2026-08-13T21:00:00.000Z", "artifactLine": 4 },
       "exitCode": 1,
       "events": [
         "{\"type\":\"session_start\",\"sessionID\":\"ses_7f3a91c20b4e\"}",

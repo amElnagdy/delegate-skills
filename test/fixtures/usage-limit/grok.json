@@ -69,7 +69,7 @@
   "scenarios": {
     "usageLimit": {
       "note": "Free-plan quota exhaustion, the case the upstream e2e test drives. The terminal error line is verbatim FREE_USAGE_USER_MESSAGE. No reset time is stated anywhere, so expect carries no resetsAt.",
-      "expect": { "status": "failed", "failureClass": "usage_limit", "kind": "quota_exhausted" },
+      "expect": { "status": "failed", "failureClass": "usage_limit", "kind": "quota_exhausted", "artifactLine": 3 },
       "exitCode": 1,
       "events": [
         "{\"type\":\"thought\",\"data\":\"Reading the brief and the touched files before editing.\"}",

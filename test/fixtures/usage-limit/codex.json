@@ -59,7 +59,7 @@
 
   "scenarios": {
     "usageLimit": {
-      "expect": { "status": "failed", "failureClass": "usage_limit", "kind": "quota_exhausted", "resetsAt": "2026-08-13T21:00:00.000Z" },
+      "expect": { "status": "failed", "failureClass": "usage_limit", "kind": "quota_exhausted", "resetsAt": "2026-08-13T21:00:00.000Z", "artifactLine": 5 },
       "exitCode": 1,
       "events": [
         "{\"type\":\"thread.started\",\"thread_id\":\"019ff870-7a89-7a02-8eea-e271ee1b2c90\"}",

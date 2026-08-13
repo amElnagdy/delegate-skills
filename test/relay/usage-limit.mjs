@@ -99,10 +99,19 @@ async function runMatrix(h, entry) {
   })());
   h.check(`${tag}: evidence excerpt is bounded`,
     (limit.result?.limit?.evidence?.excerpt || "").length <= 401);
-  h.check(`${tag}: evidence.artifactLine points at a real events.jsonl line`, (() => {
+  // Bounds alone would pass on any line of a short bundle, so the check is against the
+  // bundle's own `artifactLine`: the 1-based events.jsonl line of the terminal event that
+  // CLI classifies on. That catches an off-by-one in a relay's object counter — evidence
+  // pointing at the wrong record is worse than none, because it reads as auditable.
+  // The file is read defensively: a relay that died before writing artifacts must fail
+  // this one check, not throw out of the matrix and skip every check after it.
+  h.check(`${tag}: evidence.artifactLine points at the terminal event in events.jsonl`, (() => {
     const line = limit.result?.limit?.evidence?.artifactLine;
-    const events = readFileSync(join(limit.outDir, "events.jsonl"), "utf8").split("\n").filter(Boolean);
-    return Number.isInteger(line) && line >= 1 && line <= events.length;
+    const eventsPath = join(limit.outDir, "events.jsonl");
+    if (!existsSync(eventsPath)) return false;
+    const events = readFileSync(eventsPath, "utf8").split("\n").filter(Boolean);
+    if (!Number.isInteger(line) || line < 1 || line > events.length) return false;
+    return line === expected.artifactLine;
   })());
   if (entry.resumeField) {
     // Partial work must stay resumable after the reset — for implementers that have a

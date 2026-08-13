@@ -170,13 +170,13 @@ export async function runAgy(h) {
   // (`agy -p "/usage" --output-format json`: no conversation, no turns, no tokens). The
   // flag may block a dispatch ONLY on true exhaustion — a probe that fails, hangs, or
   // returns an unfamiliar shape must never stand between the user and their work.
-  const preflight = (name, usageMode) => {
+  const preflight = (name, usageMode, extraArgs = []) => {
     const outDir = join(h.scratch, `out-preflight-${name}-agy`);
     const workDir = h.freshRepo(`work-preflight-${name}-agy`);
     const argsFile = join(h.scratch, `args-preflight-${name}-agy`);
     const result = spawnSync(process.execPath, [
       h.relayPath("agy"), "--brief", h.briefPath, "--cd", workDir,
-      "--out-dir", outDir, "--preflight-usage",
+      "--out-dir", outDir, "--preflight-usage", ...extraArgs,
     ], {
       env: { ...h.baseEnv, SMOKE_MODE: "agy-usage-preflight", SMOKE_USAGE_MODE: usageMode, SMOKE_ARGS_FILE: argsFile },
       encoding: "utf8",
@@ -214,11 +214,24 @@ export async function runAgy(h) {
     typeof exhausted.value?.limit?.evidence?.source === "string" &&
     exhausted.value.limit.evidence.source.length > 0);
 
-  for (const [name, mode] of [["a failing probe", "fail"], ["an unfamiliar payload", "unparseable"]]) {
-    const degraded = preflight(mode, mode);
+  // Every degraded probe must let the work through AND still say on the result why the check
+  // did not answer — a silently absent verdict reads like a healthy account. The hanging
+  // probe is the one that could wedge the relay before any result.json exists: the dispatch
+  // watchdog is not armed during the probe, so --timeout cannot reach it and only the probe's
+  // own bound can end it. Passing --timeout 3s shortens that bound (it is the lesser of
+  // --timeout and the 10s probe ceiling), so the case costs seconds instead of the ceiling.
+  const degradedProbes = [
+    ["a failing probe", "fail", "unavailable", []],
+    ["an unfamiliar payload", "unparseable", "unparseable", []],
+    ["a hanging probe", "hang", "timeout", ["--timeout", "3s"]],
+  ];
+  for (const [name, mode, expectedStatus, extraArgs] of degradedProbes) {
+    const degraded = preflight(mode, mode, extraArgs);
     h.check(`agy preflight: ${name} never blocks the work`,
       degraded.dispatched &&
       degraded.value?.status === "completed" &&
       degraded.value?.failureClass === undefined);
+    h.check(`agy preflight: ${name} is recorded as usagePreflight.status "${expectedStatus}"`,
+      degraded.value?.usagePreflight?.status === expectedStatus);
   }
 }

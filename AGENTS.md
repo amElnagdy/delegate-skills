@@ -81,13 +81,26 @@ CLI flag, field, and command in the docs must match the installed implementer CL
   a repo-level doc); when the two disagree, the canonical doc is right. **`status` is a closed enum —
   adding a value is a breaking change requiring `delegate-relay.result.v2`.** Express new outcome
   detail as additive optional fields instead.
-- **Usage-limit matchers:** a relay may classify a usage limit only with a committed capture bundle
-  under `test/fixtures/usage-limit/<cli>.json` recording the signature, the transport it appears in,
-  the CLI version, and its provenance (`live-captured`, or version-pinned source of the real
-  transport — never prose docs alone). No bundle → no matcher → that relay keeps reporting an
-  unclassified `failed`, and the README says so. Never add an unverified code or message to a
-  signature table: a false classification tells the orchestrator not to investigate a real bug.
-  Enrolled relays must pass the shared matrix in `test/relay/usage-limit.mjs`.
+- **Usage-limit evidence:** a relay may set `failureClass: "usage_limit"` on exactly two evidence
+  paths, and on nothing else.
+  - *Terminal-event matchers* — reading a limit out of the CLI's own terminal failure. These
+    require a committed capture bundle under `test/fixtures/usage-limit/<cli>.json` recording the
+    signature, the transport it appears in, the CLI version, and its provenance (`live-captured`,
+    or version-pinned source of the real transport — never prose docs alone). No bundle → no
+    matcher → that relay keeps reporting an unclassified `failed`, and the README says so. Never
+    add an unverified code or message to a signature table: a false classification tells the
+    orchestrator not to investigate a real bug. Relays enrolled here must pass the shared matrix
+    in `test/relay/usage-limit.mjs`.
+  - *Preflight exhaustion* — a CLI with a verified headless quota query (today only `agy`, whose
+    `/usage` reply is structured data, not an error message) may refuse to dispatch when that
+    query reports every bucket exhausted. The query's own reply is the evidence, so no
+    terminal-error capture bundle applies; the requirement instead is that the query is verified
+    to spend nothing, the raw reply is written to the out-dir and named by `evidence.source`, and
+    only total exhaustion blocks. A probe that fails, times out, or returns an unfamiliar shape
+    must never block a dispatch. Coverage lives with that relay's own suite, not the shared matrix,
+    because nothing was dispatched to compare.
+
+  Both paths obey the same fail-closed rule: ambiguous evidence stays an unclassified `failed`.
 - **Executables:** keep them minimal and inspectable. Each `*-delegate` skill has one
   `scripts/relay.mjs`. Utility skills may ship other scripts (e.g. `discover.mjs`, `config.mjs`) under
   the same trust line: Node built-ins only, no dependencies, no network calls of their own, no

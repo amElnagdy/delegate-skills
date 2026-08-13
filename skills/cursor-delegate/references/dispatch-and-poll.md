@@ -178,9 +178,14 @@ A usage limit is **not a task failure**, and the two need opposite responses:
 
 - **Do not rework the brief** — nothing was wrong with it.
 - **Inspect `touchedFiles` first.** A limit can strike mid-edit, so the tree may hold partial work.
+  `touchedFiles` covers the tree under `--cd` only, so on a run that passed `--add-dir`, check
+  each of those roots yourself as well — a limit can land mid-edit there just as easily, and
+  nothing on the result will tell you it did.
 - Wait for the reset, then resume the exact session with `--session <sessionId>` — the handle survives the limit, so partial work is not lost.
 - Or re-dispatch the same brief on another lane **from a clean tree** — rerouting on top of
-  half-applied changes duplicates or corrupts them.
+  half-applied changes duplicates or corrupts them. "Clean" means every root the run could
+  write to, `--add-dir` roots included; a stale edit outside `--cd` is invisible to the check
+  you would normally trust, and the reroute applies it twice.
 
 Classification is deliberately fail-closed: only Cursor's terminal failure is inspected, only
 against signatures verified against the real CLI or its version-pinned source and recorded in

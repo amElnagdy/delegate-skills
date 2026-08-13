@@ -30,6 +30,27 @@ class FakeCli {
     }
     var writeFile = Environment.GetEnvironmentVariable("SMOKE_WRITE_FILE");
     if (!String.IsNullOrEmpty(writeFile)) File.WriteAllText(writeFile, "written by fake cli\n");
+    // Usage-limit replay, so the qoder row of test/relay/usage-limit.mjs runs on Windows too.
+    // The whole scenario is driven by SMOKE_LIMIT_* env vars and reads no arguments, so this
+    // fake defers to the fake-cli.cjs sitting beside it rather than re-reading the capture
+    // bundle itself: a hand-rolled JSON reader here would be a second source of truth for the
+    // things these scenarios exist to prove — chunk boundaries, the missing trailing newline,
+    // the bundle's exit code — and any drift would surface as a Windows-only failure nobody
+    // could reproduce. What this exe exists to provide is the native process boundary, and
+    // that is unchanged: the relay still launches a real .exe with no shell in between.
+    if (mode == "usage-limit") {
+      var cjs = Path.Combine(Path.GetDirectoryName(typeof(FakeCli).Assembly.Location), "fake-cli.cjs");
+      var replay = new ProcessStartInfo {
+        FileName = Environment.GetEnvironmentVariable("SMOKE_NODE"),
+        Arguments = "\"" + cjs + "\"",
+        // No redirection: the child inherits this process's handles, so the relay reads the
+        // replayed bytes exactly as written, in the same chunks.
+        UseShellExecute = false,
+      };
+      var replayer = Process.Start(replay);
+      replayer.WaitForExit();
+      return replayer.ExitCode;
+    }
     if (mode == "aider-success") {
       File.WriteAllLines(Environment.GetEnvironmentVariable("SMOKE_ARGS_FILE"), args);
       Console.WriteLine("Applied the edit and updated docs to explain OPENAI_API_KEY setup.");

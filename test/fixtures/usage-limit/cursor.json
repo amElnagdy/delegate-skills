@@ -74,7 +74,7 @@
   "scenarios": {
     "usageLimit": {
       "note": "Modeled on ralphy's midturn capture: the run streams normally, then the stream ends on turn_ended/error with the Free-tier sentence and no result envelope. Exit 1, and no reset time is stated anywhere — so expect carries no resetsAt.",
-      "expect": { "status": "failed", "failureClass": "usage_limit", "kind": "quota_exhausted", "retryAt": null, "resetsAt": null },
+      "expect": { "status": "failed", "failureClass": "usage_limit", "kind": "quota_exhausted", "retryAt": null, "resetsAt": null, "artifactLine": 3 },
       "exitCode": 1,
       "events": [
         "{\"type\":\"system\",\"subtype\":\"init\",\"apiKeySource\":\"login\",\"session_id\":\"6b3a2f14-9f0d-4c3a-8f21-2b6a5d0e77c1\",\"model\":\"auto\",\"permissionMode\":\"default\"}",
