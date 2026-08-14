@@ -1,9 +1,10 @@
 import { join } from "node:path";
 
-export const SKILLS = ["claude", "codex", "opencode", "agy", "grok", "kimi", "qoder", "vibe", "cursor", "pi", "zcode"];
+export const SKILLS = ["claude", "cline", "codex", "opencode", "agy", "grok", "kimi", "qoder", "vibe", "cursor", "pi", "aider", "zcode"];
 
 export const EXTRA_ARGS = {
   claude: [],
+  cline: [],
   codex: [],
   opencode: ["--model", "fake/model"],
   agy: [],
@@ -13,6 +14,7 @@ export const EXTRA_ARGS = {
   vibe: [],
   cursor: [],
   pi: [],
+  aider: [],
   zcode: [],
 };
 

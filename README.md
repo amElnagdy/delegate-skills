@@ -64,8 +64,10 @@ Skip setup when you want one implementer or one-off dials. Pick the skill for a 
 
 | Skill | Implementer CLI | Write access (default) | Read-only run | Resume |
 | --- | --- | --- | --- | --- |
-| [`agy-delegate`](skills/agy-delegate/SKILL.md) | Google Antigravity (`agy`) | Antigravity's own `permissions`; bypass opt-in | — [^none] | `--resume-last`, `--conversation <id>` |
+| [`aider-delegate`](skills/aider-delegate/SKILL.md) | [Aider](https://aider.chat) (`aider`) — any OpenAI-compatible endpoint, including a local or self-hosted model via `--api-base` | `--yes-always` with `--no-suggest-shell-commands`; no sandbox or permission modes; commits force-disabled [^aider] | `--read-only` (`--dry-run`) | `--resume-last` (chat history, per-worktree) |
+| [`agy-delegate`](skills/agy-delegate/SKILL.md) | Google Antigravity (`agy`) | Antigravity's own `permissions`; bypass opt-in | `--read-only` (`plan` mode) | `--resume-last`, `--conversation <id>` |
 | [`claude-delegate`](skills/claude-delegate/SKILL.md) | [Claude Code](https://code.claude.com/docs/en/overview) (`claude`) | `acceptEdits` + explicit tool surface | `--read-only` (`plan` mode) | `--resume-last`, `--session <id>` |
+| [`cline-delegate`](skills/cline-delegate/SKILL.md) | [Cline](https://github.com/cline/cline) (`cline`) | `--auto-approve true` in act mode; upstream sandbox not configured by the relay | `--plan` + `--auto-approve false` (relay-enforced pair) | — (headless JSON resume unsupported) |
 | [`codex-delegate`](skills/codex-delegate/SKILL.md) | [OpenAI Codex](https://github.com/openai/codex) (`codex`) | `--sandbox workspace-write` | `--read-only` | `--resume-last`, `--session <id>` |
 | [`cursor-delegate`](skills/cursor-delegate/SKILL.md) | [Cursor Agent](https://cursor.com/cli) (`cursor-agent`) | `--force`; `--no-force` withholds command approval | `--read-only` (plan mode) | `--resume-last`, `--session <id>` |
 | [`grok-delegate`](skills/grok-delegate/SKILL.md) | Grok Build (`grok`) | workspace-scoped; `--full-access` opt-in | `--read-only` — best-effort [^grok] | `--resume-last`, `--session <id>` |
@@ -77,6 +79,11 @@ Skip setup when you want one implementer or one-off dials. Pick the skill for a 
 | [`zcode-delegate`](skills/zcode-delegate/SKILL.md) | [Z.AI ZCode](https://zcode.z.ai) (`zcode`) [^zcode] | `--mode yolo` | `--read-only` (`plan` mode) | `--resume-last`, `--session <id>` |
 
 [^none]: No CLI-enforced read-only mode. `touchedFiles` and the diff, not a flag, are the guarantee.
+
+[^aider]: Aider is the one implementer here that commits by default. Its `--auto-commits` and
+`--dirty-commits` both default to `True`, the second of which commits your pre-existing uncommitted
+work before editing. The relay always passes `--no-auto-commits` and `--no-dirty-commits`, and neither
+is configurable through it.
 
 [^grok]: `grok` cannot be prevented from writing headlessly. The relay reports a tri-state
 `readOnlyViolation` tripwire for detected Git-visible changes; it does not enforce or attribute them.
@@ -196,13 +203,31 @@ This package is intentionally inspectable:
 
 **Verification status** — claims here are backed by runs, not assumptions.
 
-True of every relay: argument handling, exit codes, `result.json` shape, resume, and signal reporting
-are verified, along with each implementer-specific guard.
+True of every relay: argument handling, exit codes, `result.json` shape, supported resume mappings,
+and signal reporting are verified, along with each implementer-specific guard.
 
 Per skill — platform, CLI version, and what the run exercised:
 
-- `agy-delegate` — macOS, `agy` 1.0.16: headless edit run, `--print=` delivery, absolute `--add-dir`
-  workspace pin.
+- `aider-delegate` — Windows, `aider` 0.86.2: contract-tested against the shared smoke matrix, plus
+  live headless `--message-file` runs against a **stub** OpenAI-compatible endpoint on loopback. Those
+  runs covered: an applied edit left uncommitted, with a pre-existing dirty file still uncommitted,
+  proving `--no-auto-commits`/`--no-dirty-commits`; no `.gitignore` written, proving `--no-gitignore`;
+  a `--read-only` (`--dry-run`) run that left the target file byte-identical; an endpoint returning
+  401, where aider exits 0 and the relay reports `failed` with `litellm.AuthenticationError`;
+  `aider_unavailable`/127 writing a result file; and usage errors exiting 2 without one. Review
+  follow-ups were re-verified the same way: a successful run whose report says `OPENAI_API_KEY` three
+  times still reports `completed`; a reused `--out-dir` seeded with another run's `final.txt` and
+  `result.json` publishes neither; a plain exit 7 carries an `error`; and a `--read-only` run over a
+  modified `.aider.conf.yml` plus generated history and tags-cache warns about exactly the config
+  file. Not run against a hosted provider model or a real local inference server, and not run on
+  macOS or Linux.
+- `agy-delegate` — Windows 10, native, `agy` 1.1.12: headless `--print` write run editing one briefed
+  file; `--read-only` `--effort high` run whose brief ordered an immediate file write, in a directory
+  the permission rules allowed: agy refused, wrote nothing, and `result.json` reported effort high,
+  `readOnly` true, `readOnlyViolation` false; argument validation for a bad `--effort` value and for
+  `--read-only` combined with `--dangerously-skip-permissions`, both exiting 2; resume by
+  `--conversation` with a delta brief. macOS, `agy` 1.0.16: headless edit run, `--print=` delivery,
+  absolute `--add-dir` workspace pin.
 - `claude-delegate` — macOS, `claude` 2.1.220: write run under `acceptEdits`; plan mode refusing an
   edit, with the Git tripwire true on a violation and false on a clean run;
   `--session`/`--resume-last` resume; `claude_unavailable`/127 and usage errors exiting 2 without a
@@ -239,18 +264,25 @@ Per skill — platform, CLI version, and what the run exercised:
 - `codex-delegate`, `opencode-delegate`, `vibe-delegate` — contract-tested only: argument validation,
   bounded version preflight, missing binary, result parsing, and whole-process-tree timeout/abort
   cleanup. No end-to-end run is recorded here.
+- `cline-delegate` — macOS, `cline` 3.0.52: current-binary unauthenticated plan probe reached
+  `run_start` with the fixed positional instruction plus the real brief on stdin, accepted a
+  provider-local model id, parsed the failing `run_result`, and left the tree clean. Contract-tested:
+  plan mode forcing `--auto-approve false`, the unsafe true conflict, argument validation, nullable
+  `sessionId`/`finalPath`, bounded version preflight, missing binary, result parsing, and whole-process-tree
+  timeout/abort cleanup. The contributor also reported a native Windows 3.0.51 edit run against the
+  earlier positional-brief commit; that does not verify this exact stdin-based head on Windows.
 - `delegate-setup` — contract-tested: discover JSON shape, config validate/write/load, whole-lane
   project overlay, global write without creating `.delegate/`, and `--lane` resolve / wrong-skill /
   flag-override against relays. The smoke suite runs live discovery against installed CLIs
   (versions vary by machine). Native Windows discover smoke not yet claimed.
 
-Not yet verified: native Windows launches for `agy`, `claude`, `grok`, `kimi`, `pi`, `qoder`, and
-`vibe` (the `codex`/`opencode`/`grok` `.cmd` shim handling is in place and quoted; Cursor serializes a
-pre-joined, quoted command; Qoder and Vibe target their documented native executables). Claude's own
-shell sandbox is unsupported on native Windows regardless of launch mechanics, and upstream Vibe
-officially targets UNIX. A native Linux `cursor-agent` run is unverified. The full delegate → review →
-commit loop is designed for and run on Claude Code; other orchestrators (Cursor, …) are designed-for
-but unproven.
+Not yet verified: native Windows launches for `claude`, exact-head `cline`, `grok`, `kimi`,
+`pi`, `qoder`, and `vibe` (`codex`/`opencode`/`grok` have contract-tested `.cmd` shim handling;
+Cursor serializes a pre-joined, quoted command; Qoder and Vibe target their documented native executables).
+Claude's own shell sandbox is unsupported on native Windows regardless of launch mechanics, and upstream
+Vibe officially targets UNIX. A native Linux `cursor-agent` run is unverified. The full delegate →
+review → commit loop is designed for and run on Claude Code; other orchestrators (Cursor, …) are
+designed-for but unproven.
 
 ## Repository shape
 

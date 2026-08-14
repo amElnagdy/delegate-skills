@@ -65,6 +65,20 @@ export const IMPLEMENTERS = Object.freeze([
     winShell: true,
   },
   {
+    key: "cline",
+    skill: "cline-delegate",
+    binary: "cline",
+    versionArgs: ["--version"],
+    // No status command exposes login state; usage stays unknown rather than guessed —
+    // the CLI's conversations live under a profile that has no documented stable path.
+    authProbe: null,
+    modelProbe: null,
+    usageProbe: null,
+    // Plan mode is a dispatch flag (--plan), not a lane dial; readOnly is unsupported.
+    supports: ["provider", "model", "timeout"],
+    winShell: true,
+  },
+  {
     key: "codex",
     skill: "codex-delegate",
     binary: "codex",
@@ -127,7 +141,7 @@ export const IMPLEMENTERS = Object.freeze([
       entry: "file",
       match: /\.db$/,
     },
-    supports: ["model", "timeout"],
+    supports: ["model", "effort", "timeout", "readOnly"],
     winShell: false,
   },
   {
@@ -234,6 +248,23 @@ export const IMPLEMENTERS = Object.freeze([
     winShell: true,
   },
   {
+    key: "aider",
+    skill: "aider-delegate",
+    binary: "aider",
+    versionArgs: ["--version"],
+    // Aider has no auth subcommand; it reads provider keys from the environment
+    // and its own config, and reports a failure only once a run reaches the model.
+    authProbe: null,
+    // `aider --list-models` needs a partial-name argument, so there is no listing
+    // that covers the catalog; leaving this null beats probing with a guessed query.
+    modelProbe: null,
+    // No global session store: Aider keeps its chat history in the repo itself
+    // (.aider.chat.history.md), so there is nothing per-user to count.
+    usageProbe: null,
+    supports: ["model", "timeout", "readOnly"],
+    winShell: false,
+  },
+  {
     key: "zcode",
     skill: "zcode-delegate",
     binary: "zcode",
@@ -253,8 +284,8 @@ export const IMPLEMENTERS = Object.freeze([
         linux: [],
       },
     },
-    // No auth-status command exists, and `zcode login` is broken on 0.16.1
-    // (ZaiCliOAuthError), so auth stays unknown rather than guessed.
+    // No auth-status command exists, and `zcode login` fails with ZaiCliOAuthError
+    // (seen on 0.16.1 and 0.16.3), so auth stays unknown rather than guessed.
     authProbe: null,
     // No --model flag: the model is chosen in the CLI's own config file.
     modelProbe: null,
@@ -262,6 +293,7 @@ export const IMPLEMENTERS = Object.freeze([
     // counts disagree, so none is proven one-per-session. Unknown, not guessed.
     usageProbe: null,
     supports: ["permissionMode", "timeout", "readOnly"],
+
     winShell: false,
   },
 ]);
@@ -275,6 +307,7 @@ export const IMPLEMENTER_BY_KEY = Object.freeze(
 );
 
 export const CLAUDE_EFFORT = Object.freeze(["low", "medium", "high", "xhigh", "max", "ultracode"]);
+export const AGY_EFFORT = Object.freeze(["low", "medium", "high"]);
 export const CODEX_SANDBOX = Object.freeze(["read-only", "workspace-write", "danger-full-access"]);
 export const GROK_SANDBOX = Object.freeze(["workspace", "read-only", "off"]);
 export const QODER_PERMISSION = Object.freeze([

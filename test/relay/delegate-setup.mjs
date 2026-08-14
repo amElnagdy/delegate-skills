@@ -321,6 +321,19 @@ if (observation === "models") {
     });
     h.check("config validate rejects unknown claude effort", rejectClaude.status === 2);
 
+    const badAgy = {
+      version: "delegate-fleet.v1",
+      lanes: { review: { implementer: "agy", effort: "ultra" } },
+    };
+    const badAgyFile = join(cfgRepo, "bad-agy.json");
+    writeFileSync(badAgyFile, `${JSON.stringify(badAgy)}\n`);
+    const rejectAgy = spawnSync(process.execPath, [join(setupDir, "config.mjs"), "validate", badAgyFile], {
+      encoding: "utf8",
+      env: process.env,
+    });
+    h.check("config validate rejects unknown Agy effort",
+      rejectAgy.status === 2 && /low, medium, high/.test(rejectAgy.stderr));
+
     const badCursorSandbox = {
       version: "delegate-fleet.v1",
       lanes: { feature: { implementer: "cursor", sandbox: "workspace-write" } },
@@ -456,6 +469,67 @@ if (observation === "models") {
         h.result(claudeDspOut).dangerouslySkipPermissions === true &&
         h.result(claudeDspOut).readOnly === false,
     );
+
+    const agyRoLane = {
+      version: "delegate-fleet.v1",
+      lanes: { review: { implementer: "agy", effort: "high", readOnly: true } },
+    };
+    const agyRoFile = join(cfgRepo, "agy-readonly.json");
+    writeFileSync(agyRoFile, `${JSON.stringify(agyRoLane)}\n`);
+    const writeAgyLane = spawnSync(
+      process.execPath,
+      [join(setupDir, "config.mjs"), "write", "--scope", "global", agyRoFile],
+      { encoding: "utf8", env: process.env },
+    );
+    const agyLaneOut = join(cfgRepo, "out-agy-lane");
+    const agyLaneArgsFile = join(h.scratch, "args-lane-agy");
+    const agyLane = spawnSync(process.execPath, [
+      h.relayPath("agy"),
+      "--brief", laneBrief,
+      "--cd", cfgRepo,
+      "--out-dir", agyLaneOut,
+      "--lane", "review",
+    ], {
+      encoding: "utf8",
+      env: { ...fleetEnv, SMOKE_MODE: "agy-analysis", SMOKE_ARGS_FILE: agyLaneArgsFile },
+    });
+    const agyLaneArgs = existsSync(agyLaneArgsFile)
+      ? h.WIN
+        ? readFileSync(agyLaneArgsFile, "utf8").split(/\r?\n/).filter(Boolean)
+        : JSON.parse(readFileSync(agyLaneArgsFile, "utf8"))
+      : [];
+    h.check("relay --lane: Agy applies effort and readOnly dials",
+      writeAgyLane.status === 0 &&
+      agyLane.status === 0 &&
+      h.pair(agyLaneArgs, "--effort", "high") &&
+      h.pair(agyLaneArgs, "--mode", "plan") &&
+      h.result(agyLaneOut).effort === "high" &&
+      h.result(agyLaneOut).readOnly === true);
+
+    const agyDspOut = join(cfgRepo, "out-agy-dsp");
+    const agyDspArgsFile = join(h.scratch, "args-dsp-agy");
+    const agyDsp = spawnSync(process.execPath, [
+      h.relayPath("agy"),
+      "--brief", laneBrief,
+      "--cd", cfgRepo,
+      "--out-dir", agyDspOut,
+      "--lane", "review",
+      "--dangerously-skip-permissions",
+    ], {
+      encoding: "utf8",
+      env: { ...fleetEnv, SMOKE_MODE: "agy-analysis", SMOKE_ARGS_FILE: agyDspArgsFile },
+    });
+    const agyDspArgs = existsSync(agyDspArgsFile)
+      ? h.WIN
+        ? readFileSync(agyDspArgsFile, "utf8").split(/\r?\n/).filter(Boolean)
+        : JSON.parse(readFileSync(agyDspArgsFile, "utf8"))
+      : [];
+    h.check("relay --lane: Agy explicit dangerous permissions wins over readOnly lane",
+      agyDsp.status === 0 &&
+      agyDspArgs.includes("--dangerously-skip-permissions") &&
+      !agyDspArgs.includes("--mode") &&
+      h.result(agyDspOut).dangerouslySkipPermissions === true &&
+      h.result(agyDspOut).readOnly === false);
     spawnSync(process.execPath, [join(setupDir, "config.mjs"), "write", "--scope", "global", goodFile], {
       encoding: "utf8",
       env: process.env,

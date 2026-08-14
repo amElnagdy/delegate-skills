@@ -28,11 +28,32 @@ class FakeCli {
       File.WriteAllLines(Environment.GetEnvironmentVariable("SMOKE_ARGS_FILE"), args);
       return 0;
     }
+    var writeFile = Environment.GetEnvironmentVariable("SMOKE_WRITE_FILE");
+    if (!String.IsNullOrEmpty(writeFile)) File.WriteAllText(writeFile, "written by fake cli\n");
+    if (mode == "aider-success") {
+      File.WriteAllLines(Environment.GetEnvironmentVariable("SMOKE_ARGS_FILE"), args);
+      Console.WriteLine("Applied the edit and updated docs to explain OPENAI_API_KEY setup.");
+      Console.WriteLine("If OPENAI_API_KEY is not set, the tool exits.");
+      Console.WriteLine("Unable to connect without following the documented placeholder key steps.");
+      return 0;
+    }
+    if (mode == "aider-auth-fail") {
+      Console.WriteLine("litellm.AuthenticationError: Authentication Error, Invalid API key");
+      return 0;
+    }
+    if (mode == "aider-exit-nonzero") {
+      Console.Error.WriteLine("fake aider nonzero exit");
+      return 7;
+    }
     if (mode == "agy-permission-denied") {
       Console.Error.WriteLine("jetski: no output produced — a tool required the \"write_file\" permission that headless\nmode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow\nin settings.json (e.g. write_file(<target>)). Alternatively, re-run with\n--dangerously-skip-permissions to auto-approve all tools.");
       return 0;
     }
     if (mode == "agy-analysis") {
+      var argsFile = Environment.GetEnvironmentVariable("SMOKE_ARGS_FILE");
+      if (!String.IsNullOrEmpty(argsFile)) File.WriteAllLines(argsFile, args);
+      var logAt = Array.IndexOf(args, "--log-file");
+      if (logAt >= 0) File.WriteAllText(args[logAt + 1], "fake agy log\n");
       Console.WriteLine("fake agy analysis completed");
       return 0;
     }

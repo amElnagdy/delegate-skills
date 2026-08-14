@@ -47,15 +47,17 @@ later-edited project config fails closed until it is reviewed and written again 
 | Key | Skill | Binary | Supported dials |
 | --- | --- | --- | --- |
 | `claude` | claude-delegate | `claude` | model, effort, timeout, readOnly |
+| `cline` | cline-delegate | `cline` | provider, model, timeout |
 | `codex` | codex-delegate | `codex` | model, effort, sandbox, timeout, readOnly |
 | `opencode` | opencode-delegate | `opencode` | model, **variant**, timeout, readOnly |
-| `agy` | agy-delegate | `agy` | model, timeout |
+| `agy` | agy-delegate | `agy` | model, effort, timeout, readOnly |
 | `grok` | grok-delegate | `grok` | model, effort, sandbox, timeout, readOnly |
 | `kimi` | kimi-delegate | `kimi` | model, timeout |
 | `qoder` | qoder-delegate | `qodercli` | model, permissionMode, timeout, readOnly |
 | `vibe` | vibe-delegate | `vibe` | timeout, readOnly |
 | `cursor` | cursor-delegate | `cursor-agent` | model, force, timeout, readOnly |
 | `pi` | pi-delegate | `pi` | provider, model, timeout, readOnly |
+| `aider` | aider-delegate | `aider` | model, timeout, readOnly |
 | `zcode` | zcode-delegate | `zcode` | permissionMode, timeout, readOnly |
 
 ZCode carries its `--mode` as `permissionMode`, and only `plan` and `yolo` are accepted: ZCode also
@@ -66,7 +68,8 @@ inside the desktop app rather than on PATH, so discovery falls back to the insta
 
 OpenCode uses `variant` for reasoning intensity, not `effort`. Do not write `effort` on an `opencode` lane.
 OpenCode lanes **require** `model` in `provider/model` form, with a non-empty provider before the first
-`/` and at least one non-`/` character after it.
+`/` and at least one non-`/` character after it. Cline accepts `provider` and `model` as separate
+dials and does not impose that shape.
 
 Boolean dials: `readOnly`, `force`. All other dials are non-empty strings. Duration strings for
 `timeout` use `h`/`m`/`s` (e.g. `30m`) and must fit the relay watchdog ceiling (~24.8 days).

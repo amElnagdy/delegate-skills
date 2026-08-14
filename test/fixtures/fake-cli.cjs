@@ -70,11 +70,30 @@ if (process.env.SMOKE_GIT_RENAME_FROM && process.env.SMOKE_GIT_RENAME_TO) {
     "mv", "-f", process.env.SMOKE_GIT_RENAME_FROM, process.env.SMOKE_GIT_RENAME_TO,
   ]);
 }
+if (process.env.SMOKE_MODE === "aider-success") {
+  fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify(args));
+  // Mentions OPENAI_API_KEY in prose so a bare-substring matcher would false-fail.
+  console.log("Applied the edit and updated docs to explain OPENAI_API_KEY setup.");
+  console.log("If OPENAI_API_KEY is not set, the tool exits.");
+  console.log("Unable to connect without following the documented placeholder key steps.");
+  process.exit(0);
+}
+if (process.env.SMOKE_MODE === "aider-auth-fail") {
+  console.log("litellm.AuthenticationError: Authentication Error, Invalid API key");
+  process.exit(0);
+}
+if (process.env.SMOKE_MODE === "aider-exit-nonzero") {
+  console.error("fake aider nonzero exit");
+  process.exit(7);
+}
 if (process.env.SMOKE_MODE === "agy-permission-denied") {
   console.error('jetski: no output produced — a tool required the "write_file" permission that headless\nmode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow\nin settings.json (e.g. write_file(<target>)). Alternatively, re-run with\n--dangerously-skip-permissions to auto-approve all tools.');
   process.exit(0);
 }
 if (process.env.SMOKE_MODE === "agy-analysis") {
+  if (process.env.SMOKE_ARGS_FILE) fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify(args));
+  const logAt = args.indexOf("--log-file");
+  if (logAt !== -1) fs.writeFileSync(args[logAt + 1], "fake agy log\n");
   console.log("fake agy analysis completed");
   process.exit(0);
 }
@@ -180,6 +199,30 @@ if (["pi-success", "pi-error"].includes(process.env.SMOKE_MODE)) {
     }));
     console.log(JSON.stringify({ type: "agent_end", messages: [] }));
     process.exit(0);
+  });
+} else if (["cline-success", "cline-error"].includes(process.env.SMOKE_MODE)) {
+  let brief = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (chunk) => { brief += chunk; });
+  process.stdin.on("end", () => {
+    const failed = process.env.SMOKE_MODE === "cline-error";
+    fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify({ args, brief, cwd: process.cwd() }));
+    console.log(JSON.stringify({
+      type: "run_start",
+      modelId: "fake-model",
+      providerId: "fake",
+      cwd: process.cwd(),
+    }));
+    console.log(JSON.stringify({ type: "agent_event", agentType: "task", subagent: false, message: { type: "text", text: "working" } }));
+    console.log(JSON.stringify({
+      type: "run_result",
+      finishReason: failed ? "error" : "completed",
+      text: failed ? "fake cline failed" : "fake cline completed",
+      usage: { inputTokens: 7, outputTokens: 2 },
+      model: { id: "fake-model", provider: "fake" },
+      durationMs: 42,
+    }));
+    process.exit(failed ? 1 : 0);
   });
 } else if (["cursor-success", "claude-success", "claude-read-only-write", "claude-read-only-clean", "claude-read-only-append", "claude-chunked"].includes(process.env.SMOKE_MODE)) {
   let brief = "";

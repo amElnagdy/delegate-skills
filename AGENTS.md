@@ -2,12 +2,12 @@
 
 This repo is a [Skills CLI](https://github.com/vercel-labs/skills) package of **delegation skills** —
 skills that let an orchestrating agent drive a separate CLI coding agent as an implementer, then review
-and land the result. Eleven implementer skills ship today: `claude-delegate` (Claude Code),
-`codex-delegate` (OpenAI Codex), `opencode-delegate` (OpenCode), `agy-delegate` (Google Antigravity),
-`grok-delegate` (Grok Build), `kimi-delegate` (Kimi Code), `qoder-delegate` (Qoder CLI),
-`vibe-delegate` (Mistral Vibe), `cursor-delegate` (Cursor Agent CLI), `pi-delegate` (Pi CLI), and
-`zcode-delegate` (Z.AI ZCode);
-siblings like `gemini-delegate` can be added later without renaming the repo. One **utility** skill
+and land the result. Thirteen implementer skills ship today: `claude-delegate` (Claude Code),
+`cline-delegate` (Cline CLI), `codex-delegate` (OpenAI Codex), `opencode-delegate` (OpenCode),
+`agy-delegate` (Google Antigravity), `grok-delegate` (Grok Build), `kimi-delegate` (Kimi Code),
+`qoder-delegate` (Qoder CLI), `vibe-delegate` (Mistral Vibe), `cursor-delegate` (Cursor Agent CLI),
+`pi-delegate` (Pi CLI), `aider-delegate` (Aider), and `zcode-delegate` (Z.AI ZCode); siblings like
+`gemini-delegate` can be added later without renaming the repo. One **utility** skill
 ships alongside them: `delegate-setup` (configure fleet lanes — setup only, never dispatches).
 
 ## Vocabulary
@@ -19,7 +19,7 @@ jargon. Use these terms; don't invent synonyms.
 | --- | --- | --- |
 | **delegate** / **delegation** | the activity, and this skill family | "relay" (as the activity), "hand-off", "offload" |
 | **orchestrator** | the driving agent (Claude Code, …) | "controller", "driver" |
-| **implementer** | the separate agent (Claude, Codex, OpenCode, Antigravity, Grok, Kimi, Qoder, Vibe, Cursor, Pi, ZCode) | "worker", "sub-agent", "executor" |
+| **implementer** | the separate agent (Claude, Cline, Codex, OpenCode, Antigravity, Grok, Kimi, Qoder, Vibe, Cursor, Pi, Aider, ZCode) | "worker", "sub-agent", "executor" |
 | **brief** | the self-contained task spec sent to the implementer | "task file", "the prompt", "the spec" |
 | **gates** | the project's test/lint/build commands | "checks", "CI" |
 | **dispatch** | sending the brief to the implementer | "fire off", "kick off" |
@@ -35,9 +35,11 @@ jargon. Use these terms; don't invent synonyms.
 | `session`, `--continue`, `model alias`, `auto permission mode`, `plan mode`, `--yolo` | Kimi Code's own terms — use verbatim when discussing `kimi` | don't paraphrase them |
 | `session`, `--continue`, `--resume`, `plan mode`, `--force`, `--sandbox` (`enabled`/`disabled`), `--trust`, `models` | Cursor Agent's own terms — use verbatim when discussing `cursor-agent` | don't paraphrase them |
 | `session`, `--continue`, `--resume`, `permission mode` (`acceptEdits`/`plan`/`bypassPermissions`), `sandbox`, `subagents`, `agent teams`, `background sessions` | Claude Code's own terms — use verbatim when discussing Claude | never use `subagents` as a generic synonym for implementer |
+| `session`, `--json`, `-v` (verbose), `--auto-approve`, `--cwd`, `--model`, `--provider`, `--id` (unsupported by the JSON relay), `--plan`, `--data-dir` / `CLINE_SANDBOX` (sandbox), `-t`/`--timeout` (CLI's own flag) | Cline's own terms — use verbatim when discussing `cline`. The relay's `--timeout` watchdog is a different flag with the same spelling | don't invent a Cline permission-mode enum |
 | `session`, `-c`, `--resume`, `permission mode` (`default`/`accept_edits`/`auto`/`bypass_permissions`/`dont_ask`/`plan`), `print mode`, `stream-json`, `model`, `context window` | Qoder CLI's own terms — use verbatim when discussing Qoder | don't paraphrase them |
 | `--prompt`, `--output` (`streaming`/`json`/`text`), `--agent` (`plan`/`accept-edits`/`auto-approve`), `--max-turns`, `--max-price`, `--max-tokens`, `--trust`, `--resume`, `--continue`, `--enabled-tools`, `--disabled-tools` | Mistral Vibe's own terms — use verbatim when discussing `vibe` | don't invent a Vibe sandbox enum; `--trust` is not a permission mode |
 | `session`, `--continue`, `--session`, `print mode`, `--mode json`, `tools`, `context files`, `project trust` | Pi's own terms — use verbatim when discussing `pi` | don't paraphrase them |
+| `--message-file`, `--yes-always`, `--suggest-shell-commands`, `--auto-commits`/`--dirty-commits`, `--dry-run`, `--edit-format`, `--architect`, `--file`/`--read`, `chat history` | Aider's own terms — use verbatim when discussing `aider` | Aider has no sandbox, no permission modes, and no session ids; don't imply any. `--file`/`--read` scope the chat context — never call them a boundary |
 | `mode` (`build`/`edit`/`plan`/`yolo`), `session` (`sess_…`), `goal` (`--target`), `--attach`, `app-server`, `plugins`, `skills` | ZCode's own terms — use verbatim when discussing `zcode` | don't call `mode` a sandbox or a permission mode; never present `build`/`edit` as usable headlessly |
 
 Banned on sight: coined umbrella terms in user-facing surfaces (README headings, `skills.sh.json`
@@ -46,8 +48,8 @@ version-neutral) everywhere except the README's "Verification status" list, wher
 version a run was made against is what makes the claim checkable; and claims that can't be verified
 ("verified" without a run → hedge or cut). Every
 CLI flag, field, and command in the docs must match the installed implementer CLI (`claude` /
-`codex` / `opencode` / `agy` / `grok` / `kimi` / `qodercli` / `vibe` / `cursor-agent` / `pi` /
-`zcode`) and the skill's `relay.mjs`.
+`cline` / `codex` / `opencode` / `agy` / `grok` / `kimi` / `qodercli` / `vibe` / `cursor-agent` /
+`pi` / `aider` / `zcode`) and the skill's `relay.mjs`.
 
 ## Conventions
 
@@ -82,15 +84,18 @@ CLI flag, field, and command in the docs must match the installed implementer CL
 - Smoke-test any changed script directly (e.g. `node skills/<skill>/scripts/relay.mjs --help`, and a
   no-write or read-only run against a throwaway repo) before relying on it.
 - If you touch how a `relay.mjs` launches its implementer CLI, smoke-test on Windows too (native
-  PowerShell/cmd, not just Git Bash/WSL): the `codex`, `opencode`, `grok`, and `pi` launches need
-  `shell:true` on win32 to resolve the `.cmd` shim (which is why their spaceable args are quoted and
-  value flags token-validated); the `claude` and `cursor-agent` launches serialize a pre-joined
+  PowerShell/cmd, not just Git Bash/WSL): the `codex`, `opencode`, `grok`, `pi`, and `cline` launches
+  need `shell:true` on win32 to resolve the `.cmd` shim. Cline streams its brief on stdin and uses the
+  child process cwd; the other launches quote spaceable args, and all value flags are token-validated.
+  The `claude` and `cursor-agent` launches serialize a pre-joined
   command string through the shell on win32 for the same shim reason; `agy`, `kimi`, current
-  `qodercli`, and `vibe` installs use native binaries. `zcode` is resolved rather than assumed —
-  PATH, then `--zcode-path`/`ZCODE_CLI`, then the desktop app's bundled `zcode.cjs` — so it takes
-  `shell:true` only when it resolved to a `.cmd`/`.bat` shim, never for a `node <bundle>` launch. Each changed launch still needs its own Windows
+  `qodercli`, `vibe`, and `aider` installs use native binaries (pip puts a real `aider.exe` in
+  Scripts, so that launch needs no `shell:true`). `zcode` is resolved rather than assumed —
+  `--zcode-path`/`ZCODE_CLI`, then PATH, then the desktop app's bundled `zcode.cjs` — so it takes
+  `shell:true` only when it resolved to a `.cmd`/`.bat` shim, never for a `node <bundle>` launch.
+  Each changed launch still needs its own Windows
   smoke before claiming support. Upstream Vibe works on Windows but officially supports and targets
-  UNIX; this repository's native Windows relay launch is unverified.
+  UNIX; this repository's native Windows Cline stdin launch and Vibe relay launch are unverified.
 - Keep the README's "Verification status" honest — claim only what's been run.
 
 ## Local Claude Code config
