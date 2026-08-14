@@ -264,6 +264,22 @@ export const IMPLEMENTERS = Object.freeze([
     supports: ["model", "timeout", "readOnly"],
     winShell: false,
   },
+  {
+    key: "freebuff",
+    skill: "freebuff-delegate",
+    binary: "freebuff",
+    versionArgs: ["--version"],
+    // Freebuff exposes `login`, but no documented credential-free login-status probe.
+    authProbe: null,
+    // No documented model-list command that is safe to probe without invoking a task.
+    modelProbe: null,
+    // No documented session-store layout that can be inspected without opening conversation content.
+    usageProbe: null,
+    // Freebuff currently exposes no documented read-only/model/permission lane dials.
+    // `timeout` is enforced by the relay, not Freebuff.
+    supports: ["timeout"],
+    winShell: true,
+  },
 ]);
 
 /** Prototype-free map so names like "toString" cannot pass as implementers. */

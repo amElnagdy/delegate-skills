@@ -16,7 +16,8 @@
         "vibe-delegate",
         "cursor-delegate",
         "pi-delegate",
-        "aider-delegate"
+        "aider-delegate",
+        "freebuff-delegate"
       ]
     },
     {
