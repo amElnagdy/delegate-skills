@@ -315,9 +315,10 @@ function runGit(gitPath, cwd, args) {
   );
 }
 
-function gitTouchedFiles(cwd) {
+function gitTouchedFiles(gitPath, cwd) {
+  if (!gitPath) return null;
   try {
-    const output = execFileSync("git", ["status", "--porcelain"], {
+    const output = execFileSync(gitPath, ["status", "--porcelain"], {
       cwd,
       encoding: "utf8",
       timeout: 10_000,
@@ -346,14 +347,19 @@ function updateFileHash(hash, path) {
 
 function pathHash(path) {
   const hash = createHash("sha256");
-  const stat = lstatSync(path);
-  if (stat.isSymbolicLink()) {
-    hash.update(`type:symlink\0mode:${stat.mode}\0target:${readlinkSync(path)}`);
-  } else if (stat.isFile()) {
-    hash.update(`type:file\0mode:${stat.mode}\0size:${stat.size}\0`);
-    updateFileHash(hash, path);
-  } else {
-    hash.update(`type:other\0mode:${stat.mode}\0size:${stat.size}`);
+  try {
+    const stat = lstatSync(path);
+    if (stat.isSymbolicLink()) {
+      hash.update(`type:symlink\0mode:${stat.mode}\0target:${readlinkSync(path)}`);
+    } else if (stat.isFile()) {
+      hash.update(`type:file\0mode:${stat.mode}\0size:${stat.size}\0`);
+      updateFileHash(hash, path);
+    } else {
+      hash.update(`type:other\0mode:${stat.mode}\0size:${stat.size}`);
+    }
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+    hash.update("missing");
   }
   return hash.digest("hex");
 }
@@ -422,7 +428,7 @@ function gitState(gitPath, cwd, includeWorktreeHash = false) {
     return {
       head,
       indexHash,
-      touchedFiles: includeWorktreeHash ? null : gitTouchedFiles(cwd),
+      touchedFiles: includeWorktreeHash ? null : gitTouchedFiles(gitPath, cwd),
       worktreeHash: workspace?.hash ?? null,
       workspace,
       unsupportedReason: null,
@@ -677,7 +683,7 @@ function preflightFailure(opts, run, error) {
     finalMessage: "",
     usage: null,
     durationMs: null,
-    touchedFiles: gitTouchedFiles(opts.cd),
+    touchedFiles: gitTouchedFiles(opts.gitPath, opts.cd),
     stderrTail: stderr ? stderr.split(/\r?\n/).slice(-20) : [],
     error: message,
   });
@@ -936,6 +942,13 @@ if (isInside(opts.cd, opts.commandCodePath)) {
   preflightFailure(opts, run, new Error("resolved Command Code entrypoint is inside target workspace"));
 }
 opts.gitPath = resolveExecutable("git");
+if (opts.gitPath) {
+  try {
+    opts.gitPath = realpathSync(opts.gitPath);
+  } catch {
+    opts.gitPath = null;
+  }
+}
 if (!opts.gitPath || isInside(opts.cd, opts.gitPath)) {
   opts.gitPath = null;
   preflightFailure(opts, run, new Error("trusted git executable not found outside target workspace"));

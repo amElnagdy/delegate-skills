@@ -68,7 +68,7 @@ Skip setup when you want one implementer or one-off dials. Pick the skill for a 
 | [`agy-delegate`](skills/agy-delegate/SKILL.md) | Google Antigravity (`agy`) | Antigravity's own `permissions`; bypass opt-in | `--read-only` (`plan` mode) | `--resume-last`, `--conversation <id>` |
 | [`claude-delegate`](skills/claude-delegate/SKILL.md) | [Claude Code](https://code.claude.com/docs/en/overview) (`claude`) | `acceptEdits` + explicit tool surface | `--read-only` (`plan` mode) | `--resume-last`, `--session <id>` |
 | [`cline-delegate`](skills/cline-delegate/SKILL.md) | [Cline](https://github.com/cline/cline) (`cline`) | `--auto-approve true` in act mode; upstream sandbox not configured by the relay | `--plan` + `--auto-approve false` (relay-enforced pair) | — (headless JSON resume unsupported) |
-| [`commandcode-delegate`](skills/commandcode-delegate/SKILL.md) | [Command Code](https://commandcode.ai/docs) (`command-code`) | `--yolo` bypass mode; explicit deny/ask rules still apply | `--read-only` (`--plan`) | `--resume-last`, `--session <id>` |
+| [`commandcode-delegate`](skills/commandcode-delegate/SKILL.md) | [Command Code](https://commandcode.ai/docs) (`command-code`) | `--yolo` bypass mode; destructive or outside-workspace scope needs separate human approval | `--read-only` (`--plan`) | `--resume-last`, `--session <id>` |
 | [`codex-delegate`](skills/codex-delegate/SKILL.md) | [OpenAI Codex](https://github.com/openai/codex) (`codex`) | `--sandbox workspace-write` | `--read-only` | `--resume-last`, `--session <id>` |
 | [`cursor-delegate`](skills/cursor-delegate/SKILL.md) | [Cursor Agent](https://cursor.com/cli) (`cursor-agent`) | `--force`; `--no-force` withholds command approval | `--read-only` (plan mode) | `--resume-last`, `--session <id>` |
 | [`grok-delegate`](skills/grok-delegate/SKILL.md) | Grok Build (`grok`) | workspace-scoped; `--full-access` opt-in | `--read-only` — best-effort [^grok] | `--resume-last`, `--session <id>` |
@@ -226,7 +226,8 @@ Per skill — platform, CLI version, and what the run exercised:
   a nested `claude`, and a `$HOME` write.
 - `commandcode-delegate` — Windows, `command-code` 1.24.0: authenticated live no-write `--plan` run
   using the configured model, with the brief delivered on stdin, NDJSON result parsed to final text
-  `OK`, session and usage captured, and clean Git/read-only tripwires. Contract-tested against the
+  `OK`, session and usage captured, with `gitMutationViolation: false` and `readOnlyViolation: false`.
+  Contract-tested against the
   shared matrix for timeout bounds and whole-process-tree cleanup, bounded version preflight,
   atomic result publication, fleet lanes, exact/latest resume flags, and missing-binary handling.
   No live Command Code run is recorded on macOS or Linux.

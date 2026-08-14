@@ -137,4 +137,29 @@ export async function runCommandCode(h) {
     h.check("commandcode staged-index violation: relay fails closed",
       run.status === 1 && result.status === "failed" && result.gitMutationViolation === true);
   }
+
+  {
+    const outDir = join(h.scratch, "out-read-only-delete-commandcode");
+    const workDir = h.freshRepo("work-read-only-delete-commandcode");
+    const tracked = join(workDir, "deleted.txt");
+    writeFileSync(tracked, "tracked\n");
+    spawnSync("git", ["-C", workDir, "add", "deleted.txt"]);
+    spawnSync("git", ["-C", workDir, "-c", "user.name=Smoke", "-c", "user.email=smoke@example.invalid", "commit", "-qm", "fixture"]);
+    const run = spawnSync(process.execPath, [
+      h.relayPath("commandcode"), "--brief", h.briefPath, "--cd", workDir,
+      "--out-dir", outDir, "--read-only",
+    ], {
+      env: {
+        ...h.baseEnv,
+        SMOKE_MODE: "commandcode-read-only",
+        SMOKE_CAPTURE_FILE: join(h.scratch, "capture-read-only-delete-commandcode.json"),
+        SMOKE_DELETE_FILE: tracked,
+      },
+      encoding: "utf8",
+      timeout: 15_000,
+    });
+    const result = existsSync(join(outDir, "result.json")) ? h.result(outDir) : {};
+    h.check("commandcode tracked deletion: read-only violation remains explicit",
+      run.status === 1 && result.status === "failed" && result.readOnlyViolation === true);
+  }
 }

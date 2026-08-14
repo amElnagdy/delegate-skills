@@ -50,6 +50,7 @@ if (process.env.SMOKE_MODE === "capture") {
 if (process.env.SMOKE_WRITE_FILE) {
   fs.writeFileSync(process.env.SMOKE_WRITE_FILE, "written by fake cli\n");
 }
+if (process.env.SMOKE_DELETE_FILE) fs.unlinkSync(process.env.SMOKE_DELETE_FILE);
 if (process.env.SMOKE_APPEND_INVALID_UTF8) {
   fs.appendFileSync(Buffer.from(process.env.SMOKE_APPEND_INVALID_UTF8, "hex"), "appended by fake cli\n");
 }

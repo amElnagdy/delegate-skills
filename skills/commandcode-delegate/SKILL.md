@@ -95,6 +95,10 @@ neutralize `--yolo`; then mutating calls fail or require policy changes rather t
 access. Read-only runs use `--plan` and never add `--yolo`; the relay rejects repositories containing
 submodules because its raw snapshot does not recurse into nested worktrees.
 
+General delegation approval covers ordinary scoped edits inside the target workspace. Before a brief
+authorizes destructive operations or any path outside that workspace, get separate explicit human
+approval and name that scope in the brief. The relay cannot enforce a workspace sandbox for `--yolo`.
+
 Detailed mechanics: [references/dispatch-and-poll.md](references/dispatch-and-poll.md).
 
 ### 3. Wait for completion

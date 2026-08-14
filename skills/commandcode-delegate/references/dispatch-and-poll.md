@@ -93,8 +93,7 @@ Important fields:
 - `commandCodeShimPath`: absolute npm shim found through PATH/PATHEXT.
 - `commandCodePath`: canonical npm package entrypoint executed through `process.execPath`.
 - `nodePath`: Node executable used for the package entrypoint.
-- `gitPath`: canonical git executable used for HEAD, index, and raw worktree probes. Final
-  `touchedFiles` follows the shared relay helper's PATH lookup.
+- `gitPath`: canonical git executable used for every repository probe, including `touchedFiles`.
 - `commandCodeVersion`: executable version used.
 - `sessionId`: id returned by Command Code for exact continuation.
 - `requestedSessionId`: id supplied through relay `--session`, if any.
@@ -113,8 +112,8 @@ Important fields:
   and also fails completion.
 - `gitWorktreeHashBefore`, `gitWorktreeHashAfter`: read-only hashes of raw tracked files and
   nonignored untracked content, including assume-unchanged and skip-worktree paths.
-- `readOnlyViolation`: present for read-only runs; `true` or `false` when git can compare raw worktree
-  state, otherwise `null`.
+- `readOnlyViolation`: present for read-only runs; `true` means a change was detected, `false` means
+  before/after raw worktree state matched, and `null` means comparison was unavailable or incomplete.
 - `stderrTail`: last stderr lines on failed runs when stderr is nonempty.
 - `error`: launch, result, or missing-result error on failed runs.
 - `briefPath`, `eventsPath`, `stderrPath`, `finalPath`: artifact paths.

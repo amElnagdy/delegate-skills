@@ -83,7 +83,7 @@ export const IMPLEMENTERS = Object.freeze([
     skill: "commandcode-delegate",
     binary: "command-code",
     versionArgs: ["--no-auto-update", "--version"],
-    authProbe: { args: ["status", "--json"], jsonField: "authenticated" },
+    authProbe: { args: ["--no-auto-update", "status", "--json"], jsonField: "authenticated" },
     modelProbe: null,
     // No documented stable session-store path; usage stays unknown rather than guessed.
     usageProbe: null,
