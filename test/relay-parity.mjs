@@ -4,13 +4,14 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const RELAYS = ["claude", "cline", "codex", "opencode", "agy", "grok", "kimi", "qoder", "vibe", "cursor", "pi", "aider"];
+const RELAYS = ["claude", "cline", "commandcode", "codex", "opencode", "agy", "grok", "kimi", "qoder", "vibe", "cursor", "pi", "aider"];
+const SHARED_GIT_LOOKUP_RELAYS = RELAYS.filter((relay) => relay !== "commandcode");
 const READ_ONLY_TRIPWIRE_RELAYS = ["claude", "grok"];
 const SYMBOLS = [
   ["MAX_TIMER_MS", "const", RELAYS],
   ["parseDuration", "function", RELAYS],
   ["killChild", "function", RELAYS],
-  ["gitTouchedFiles", "function", RELAYS],
+  ["gitTouchedFiles", "function", SHARED_GIT_LOOKUP_RELAYS],
   ["FINGERPRINT_UNREADABLE", "const", READ_ONLY_TRIPWIRE_RELAYS],
   ["FINGERPRINT_DIRECTORY", "const", READ_ONLY_TRIPWIRE_RELAYS],
   ["gitRepoRoot", "function", READ_ONLY_TRIPWIRE_RELAYS],

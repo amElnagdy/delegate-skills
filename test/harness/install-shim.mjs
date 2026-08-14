@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { copyFileSync, readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from "node:fs";
+import { copyFileSync, readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync, symlinkSync } from "node:fs";
 import { join, delimiter } from "node:path";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
@@ -13,9 +13,21 @@ export function installShim(h) {
   mkdirSync(shimDir);
   copyFileSync(join(fixturesDir, "fake-cli.cjs"), join(shimDir, "fake-cli.cjs"));
 
+  const commandCodePackage = join(shimDir, "node_modules", "command-code");
+  mkdirSync(commandCodePackage, { recursive: true });
+  copyFileSync(join(fixturesDir, "fake-cli.cjs"), join(commandCodePackage, "index.cjs"));
+  chmodSync(join(commandCodePackage, "index.cjs"), 0o755);
+  writeFileSync(join(commandCodePackage, "package.json"), JSON.stringify({
+    name: "command-code",
+    version: "0.0.0-smoke",
+    bin: { "command-code": "index.cjs" },
+  }));
+
   if (WIN) {
-    for (const skill of ["claude", "cline", "codex", "opencode", "grok", "cursor", "pi"]) {
-      writeFileSync(join(shimDir, `${binaryName(skill)}.cmd`), `@node "%~dp0fake-cli.cjs" %*\r\n`);
+    for (const skill of ["claude", "cline", "commandcode", "codex", "opencode", "grok", "cursor", "pi"]) {
+      writeFileSync(join(shimDir, `${binaryName(skill)}.cmd`), skill === "commandcode"
+        ? "@exit /b 99\r\n"
+        : `@node "%~dp0fake-cli.cjs" %*\r\n`);
     }
     const windir = process.env.WINDIR || "C:\\Windows";
     const csc = [
@@ -42,7 +54,8 @@ export function installShim(h) {
   } else {
     for (const skill of SKILLS) {
       const shim = join(shimDir, binaryName(skill));
-      writeFileSync(shim, `#!/bin/sh\nexec node "$(dirname "$0")/fake-cli.cjs" "$@"\n`);
+      if (skill === "commandcode") symlinkSync(join(commandCodePackage, "index.cjs"), shim);
+      else writeFileSync(shim, `#!/bin/sh\nexec node "$(dirname "$0")/fake-cli.cjs" "$@"\n`);
       chmodSync(shim, 0o755);
     }
   }

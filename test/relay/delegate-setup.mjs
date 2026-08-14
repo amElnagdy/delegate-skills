@@ -27,7 +27,7 @@ export function runDelegateSetup(h) {
   h.check("discover reports version", report?.version === "delegate-discover.v1");
   h.check("discover lists discovered or missing", Array.isArray(report?.discovered) && Array.isArray(report?.missing));
   h.check(
-    "discover covers all twelve implementers",
+    "discover covers all thirteen implementers",
     Array.isArray(report?.discovered) &&
       Array.isArray(report?.missing) &&
       report.discovered.length + report.missing.length === h.SKILLS.length,
@@ -155,6 +155,7 @@ if (observation === "models") {
         feature: { implementer: "opencode", model: "opencode/grok", variant: "high" },
         tests: { implementer: "grok", effort: "medium" },
         "codex-review": { implementer: "codex", readOnly: true },
+        "commandcode-review": { implementer: "commandcode", model: "fake/model", effort: "high", timeout: "5s", readOnly: true },
         "opencode-review": { implementer: "opencode", model: "opencode/grok", readOnly: true },
       },
     };
@@ -534,6 +535,37 @@ if (observation === "models") {
       encoding: "utf8",
       env: process.env,
     });
+
+    const commandCodeLaneOut = join(h.scratch, "out-lane-commandcode");
+    const commandCodeLaneCapture = join(h.scratch, "capture-lane-commandcode.json");
+    const commandCodeLane = spawnSync(process.execPath, [
+      h.relayPath("commandcode"),
+      "--brief", laneBrief,
+      "--cd", cfgRepo,
+      "--out-dir", commandCodeLaneOut,
+      "--lane", "commandcode-review",
+      "--resume-last",
+    ], {
+      encoding: "utf8",
+      env: {
+        ...fleetEnv,
+        SMOKE_MODE: "commandcode-read-only",
+        SMOKE_CAPTURE_FILE: commandCodeLaneCapture,
+      },
+    });
+    const commandCodeLaneArgs = existsSync(commandCodeLaneCapture)
+      ? JSON.parse(readFileSync(commandCodeLaneCapture, "utf8")).args
+      : [];
+    h.check("relay --lane: Command Code applies model, effort, timeout, and readOnly dials",
+      commandCodeLane.status === 0 &&
+        h.pair(commandCodeLaneArgs, "--model", "fake/model") &&
+        h.pair(commandCodeLaneArgs, "--effort", "high") &&
+        commandCodeLaneArgs.includes("--plan") &&
+        commandCodeLaneArgs.includes("--continue") &&
+        !commandCodeLaneArgs.includes("--yolo") &&
+        h.result(commandCodeLaneOut).timeout === "5s" &&
+        h.result(commandCodeLaneOut).lane === "commandcode-review" &&
+        h.result(commandCodeLaneOut).laneSource === "global");
 
     const laneDispatch = spawnSync(
       process.execPath,
