@@ -79,6 +79,18 @@ export const IMPLEMENTERS = Object.freeze([
     winShell: true,
   },
   {
+    key: "commandcode",
+    skill: "commandcode-delegate",
+    binary: "command-code",
+    versionArgs: ["--no-auto-update", "--version"],
+    authProbe: { args: ["status", "--json"], jsonField: "authenticated" },
+    modelProbe: null,
+    // No documented stable session-store path; usage stays unknown rather than guessed.
+    usageProbe: null,
+    supports: ["model", "effort", "timeout", "readOnly"],
+    winShell: true,
+  },
+  {
     key: "codex",
     skill: "codex-delegate",
     binary: "codex",

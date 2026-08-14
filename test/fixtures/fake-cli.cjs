@@ -140,7 +140,24 @@ if (process.env.SMOKE_MODE === "grok-read-only") {
   console.log(JSON.stringify({ type: "end", sessionId: "grok-session-1" }));
   process.exit(0);
 }
-if (["pi-success", "pi-error"].includes(process.env.SMOKE_MODE)) {
+if (["commandcode-success", "commandcode-read-only"].includes(process.env.SMOKE_MODE)) {
+  let brief = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (chunk) => { brief += chunk; });
+  process.stdin.on("end", () => {
+    fs.writeFileSync(process.env.SMOKE_CAPTURE_FILE, JSON.stringify({ args, brief }));
+    console.log(JSON.stringify({ type: "event", event: { type: "tool_running", toolName: "read_file" } }));
+    console.log(JSON.stringify({
+      type: "result",
+      subtype: "success",
+      sessionId: "commandcode-session-1",
+      stopReason: "end_turn",
+      usage: { inputTokens: 7, outputTokens: 2, totalTokens: 9 },
+      durationMs: 42,
+      finalText: "fake command code completed",
+    }));
+  });
+} else if (["pi-success", "pi-error"].includes(process.env.SMOKE_MODE)) {
   let brief = "";
   process.stdin.setEncoding("utf8");
   process.stdin.on("data", (chunk) => { brief += chunk; });
