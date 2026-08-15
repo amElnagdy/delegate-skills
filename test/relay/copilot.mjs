@@ -146,6 +146,28 @@ for (const scenario of [
     env: fleetEnv,
   });
   h.check("copilot lane: global readOnly lane is written", writeCfg.status === 0);
+  // Control: the lane's readOnly dial applies on its own.
+  const controlOut = join(h.scratch, "out-lane-control-copilot");
+  const controlArgsFile = join(h.scratch, "args-lane-control-copilot");
+  const control = spawnSync(process.execPath, [
+    h.relayPath("copilot"),
+    "--brief", h.briefPath,
+    "--cd", cfgRepo,
+    "--out-dir", controlOut,
+    "--lane", "review",
+  ], {
+    env: { ...fleetEnv, SMOKE_MODE: "copilot-success", SMOKE_ARGS_FILE: controlArgsFile },
+    encoding: "utf8",
+  });
+  const controlArgs = existsSync(controlArgsFile)
+    ? JSON.parse(readFileSync(controlArgsFile, "utf8"))
+    : [];
+  h.check("copilot lane: readOnly dial applies without an override flag",
+    control.status === 0 &&
+    controlArgs.includes("--mode") &&
+    controlArgs.includes("plan") &&
+    h.result(controlOut).readOnly === true &&
+    h.result(controlOut).allowAllTools === false);
   const outDir = join(h.scratch, "out-lane-copilot");
   const argsFile = join(h.scratch, "args-lane-copilot");
   const run = spawnSync(process.execPath, [
@@ -212,19 +234,20 @@ if (!h.WIN) {
   const preflight = h.runRelay("copilot", workDir, outDir, ["--timeout", "1s"], {
     SMOKE_MODE: "copilot-version-hang",
   });
-  h.check("copilot preflight abort: run artifacts are prepared",
-    await h.until(() => existsSync(join(outDir, "events.jsonl")), 2000));
-  preflight.kill("SIGTERM");
-  const exited = await new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(false), 5000);
+  // Attach the close promise immediately so an early exit cannot miss it.
+  const exited = new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), 10000);
     preflight.on("close", () => {
       clearTimeout(timer);
       resolve(true);
     });
   });
+  h.check("copilot preflight abort: run artifacts are prepared",
+    await h.until(() => existsSync(join(outDir, "events.jsonl")), 2000));
+  preflight.kill("SIGTERM");
   const value = existsSync(join(outDir, "result.json")) ? h.result(outDir) : {};
   h.check("copilot preflight abort: result is aborted and dispatch never starts",
-    exited &&
+    (await exited) &&
     value.status === "aborted" &&
     value.signal === "SIGTERM" &&
     value.error?.includes("version preflight") &&

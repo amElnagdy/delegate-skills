@@ -56,7 +56,8 @@ Add extra blocks only when the task needs them:
   unknown).
 - **Research or recommendations** — add `<research_mode>` (separate observed facts, inferences,
   and open questions), and dispatch with `--read-only`; copilot runs in `--mode plan`, which
-  disables edit tools so project files can't be changed by direct edits (shell commands still run).
+  disables edit tools so project files can't be changed by direct edits (shell commands still
+  run). If the repository must not change at all, dispatch against a clean or isolated worktree.
 
 ## Always ask for the report explicitly
 
@@ -121,12 +122,13 @@ Report: (1) the root cause and fix, (2) files touched, (3) pytest and ruff outco
 
 The relay hands the brief to copilot via `-p @<brief.txt>` — the CLI's
 `@`-prefixed file prompt channel (verified on copilot 1.0.78), the same shape
-grok's relay uses with `--prompt-file`. The brief never rides argv: it stays
-out of the host process list, isn't bounded by the OS arg-length cap, and a
-brief that starts with "-" cannot be misread as a flag. On a shared machine
-keep secrets out of the brief anyway — reference them by a path or environment
-variable the workspace can read. The brief is also preserved in the run's
-`brief.txt` artifact.
+grok's relay uses with `--prompt-file`. The brief content never rides argv —
+only the `@<brief.txt>` reference does, plus a fixed execution directive on
+resume. The content stays out of the host process list, isn't bounded by the
+OS arg-length cap, and a brief that starts with "-" cannot be misread as a
+flag. On a shared machine keep secrets out of the brief anyway — reference
+them by a path or environment variable the workspace can read. The brief is
+also preserved in the run's `brief.txt` artifact.
 
 On resume (`--session` / `--resume-last` with a delta brief) the relay wraps
 the reference in a fixed directive so the resumed session executes it rather
