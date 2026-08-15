@@ -27,7 +27,8 @@
  * auto-denied by copilot, and the relay detects denial events and reports
  * `status: "failed"` with the CLI's own error message plus a hint to pass
  * `--allow-all-tools`. `--allow-all-tools` explicitly opts in to full tool
- * autonomy. `--read-only` selects `--mode plan`, which is genuinely read-only
+ * autonomy. `--read-only` selects `--mode plan`, which disables edit tools so
+ * project files can't be changed by direct edits (shell commands still run),
  * and works without `--allow-all-tools`. `--read-only` and `--allow-all-tools`
  * are mutually exclusive.
  *
@@ -170,7 +171,7 @@ function applyFleetLane(opts, flagged) {
     if (field === "sandbox" && (flagged.has("sandbox") || flagged.has("readOnly"))) continue;
     if (field === "permissionMode" && (flagged.has("permissionMode") || flagged.has("readOnly"))) continue;
     if (field === "planOnly" && (flagged.has("planOnly") || flagged.has("readOnly"))) continue;
-    if (field === "readOnly" && flagged.has("readOnly")) continue;
+    if (field === "readOnly" && (flagged.has("readOnly") || flagged.has("allowAllTools"))) continue;
     if (field === "force" && flagged.has("force")) continue;
     opts[field] = value;
   }

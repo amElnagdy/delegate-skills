@@ -128,6 +128,47 @@ for (const scenario of [
   h.check("copilot conflict: --read-only + --allow-all-tools exits 2",
     conflict.status === 2);
 }
+// A readOnly lane must not block an explicit --allow-all-tools (flags win).
+{
+  const setupDir = join(h.testDir, "..", "skills", "delegate-setup", "scripts");
+  const cfgHome = join(h.scratch, "home-lane-copilot");
+  const cfgRepo = h.freshRepo("work-lane-copilot");
+  mkdirSync(cfgHome, { recursive: true });
+  const laneFile = join(cfgRepo, "copilot-readonly.json");
+  writeFileSync(laneFile, `${JSON.stringify({
+    version: "delegate-fleet.v1",
+    lanes: { review: { implementer: "copilot", readOnly: true } },
+  })}\n`);
+  const fleetEnv = { ...h.baseEnv, HOME: cfgHome, USERPROFILE: cfgHome };
+  delete fleetEnv.XDG_CONFIG_HOME;
+  const writeCfg = spawnSync(process.execPath, [join(setupDir, "config.mjs"), "write", "--scope", "global", laneFile], {
+    encoding: "utf8",
+    env: fleetEnv,
+  });
+  h.check("copilot lane: global readOnly lane is written", writeCfg.status === 0);
+  const outDir = join(h.scratch, "out-lane-copilot");
+  const argsFile = join(h.scratch, "args-lane-copilot");
+  const run = spawnSync(process.execPath, [
+    h.relayPath("copilot"),
+    "--brief", h.briefPath,
+    "--cd", cfgRepo,
+    "--out-dir", outDir,
+    "--lane", "review",
+    "--allow-all-tools",
+  ], {
+    env: { ...fleetEnv, SMOKE_MODE: "copilot-success", SMOKE_ARGS_FILE: argsFile },
+    encoding: "utf8",
+  });
+  const args = existsSync(argsFile)
+    ? JSON.parse(readFileSync(argsFile, "utf8"))
+    : [];
+  h.check("copilot lane: explicit --allow-all-tools wins over a readOnly lane",
+    run.status === 0 &&
+    args.includes("--allow-all-tools") &&
+    !args.some((a) => a === "--mode" || a === "plan") &&
+    h.result(outDir).allowAllTools === true &&
+    h.result(outDir).readOnly === false);
+}
 for (const [mode, expectedStatus, expectedExit] of [
   ["copilot-version-hang", "timeout", 124],
   ["copilot-version-fail", "failed", 7],

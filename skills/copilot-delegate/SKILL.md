@@ -8,7 +8,7 @@ description: >-
   coding tasks through Copilot while staying the reviewer. DO NOT USE for tasks small enough to do
   inline, or when the user wants the code written directly without delegating.
 license: MIT
-compatibility: Requires the `copilot` CLI installed and authenticated (`copilot login`), Node 18+, and git. The orchestrator must be able to run shell commands and read files.
+compatibility: Requires the `copilot` CLI installed and authenticated (`copilot login`), Node 18+ to run the relay (the copilot CLI itself requires Node 22+), and git. The orchestrator must be able to run shell commands and read files.
 metadata:
   version: 0.4.2
 ---
@@ -28,11 +28,12 @@ The loop needs only a shell command and file access, so any comparable orchestra
 - The `copilot` CLI is not installed or authenticated.
 - You need a hard sandbox. Copilot exposes sandbox controls, but they are upstream-experimental
   (MXC-based, controlled via the `/sandbox` command and settings, disabled by default) — this relay
-  does not configure them. Use `--read-only` when the run must be read-only.
+  does not configure them. Use `--read-only` when the run must not edit project files.
 
 ## Prerequisites (check once)
 
-1. Install `copilot` (`npm install -g @github/copilot`; the relay probes `copilot version`).
+1. Install `copilot` (`npm install -g @github/copilot`; the CLI requires Node 22+, the relay
+   itself runs on Node 18+ — the relay probes `copilot version`).
 2. Authenticate: run `copilot login` (interactive web/device flow), or set
    `COPILOT_GITHUB_TOKEN` / `GH_TOKEN` / `GITHUB_TOKEN` in the environment.
 3. Confirm `copilot version` succeeds.
@@ -111,8 +112,9 @@ message and a hint to pass `--allow-all-tools`. This is the honest default — t
 the failure rather than a silent no-op.
 
 `--allow-all-tools` explicitly grants full tool autonomy. `--read-only` selects `--mode plan`,
-which is genuinely read-only and works without `--allow-all-tools`. The two flags are mutually
-exclusive.
+which disables edit tools so project files can't be changed by direct edits; it works without
+`--allow-all-tools`. Shell commands still run in plan mode, so it guards against edits, not
+against everything. The two flags are mutually exclusive.
 
 Copilot also exposes sandbox controls, but they are upstream-experimental (MXC-based, controlled
 via the `/sandbox` command and settings, disabled by default). This relay does not configure them.

@@ -10,7 +10,8 @@ command -v copilot
 copilot version
 ```
 
-Install `copilot` (`npm install -g @github/copilot`); on Windows it installs as an npm `.cmd` shim
+Install `copilot` (`npm install -g @github/copilot`; the CLI requires Node 22+, the relay itself
+runs on Node 18+); on Windows it installs as an npm `.cmd` shim
 (the relay launches it with `shell:true`). Authenticate with `copilot login` or set
 `COPILOT_GITHUB_TOKEN` / `GH_TOKEN` / `GITHUB_TOKEN`. A headless run that is not authenticated
 fails with `status: "failed"` (exit 1).

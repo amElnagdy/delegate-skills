@@ -55,8 +55,8 @@ Add extra blocks only when the task needs them:
   first plausible cause) and `<missing_context_gating>` (find missing repo facts or state what is
   unknown).
 - **Research or recommendations** — add `<research_mode>` (separate observed facts, inferences,
-  and open questions), and dispatch with `--read-only`; copilot runs in `--mode plan`, genuinely
-  read-only.
+  and open questions), and dispatch with `--read-only`; copilot runs in `--mode plan`, which
+  disables edit tools so project files can't be changed by direct edits (shell commands still run).
 
 ## Always ask for the report explicitly
 
