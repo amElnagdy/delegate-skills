@@ -372,7 +372,7 @@ function copilotVersion(timeoutMs) {
 }
 
 function buildArgv(opts, briefPath) {
-  // ponytail: shell:true on win32 (needed for the copilot.cmd shim) doesn't quote
+  // shell:true on win32 (needed for the copilot.cmd shim) doesn't quote
   // args, so a path with spaces splits. Quote the spaceable path args;
   // --model/--effort/--session are already restricted to safe tokens at parse time.
   const quotePath = (p) => (process.platform === "win32" ? `"${p}"` : p);

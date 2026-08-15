@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -50,8 +50,8 @@ for (const scenario of [
   },
   {
     name: "model and effort",
-    relayArgs: ["--model", "gpt-5.4", "--effort", "high"],
-    forwarded: ["--output-format", "json", "--no-color", "--stream", "off", "--model", "gpt-5.4", "--effort", "high"],
+    relayArgs: ["--model", "fake-model", "--effort", "high"],
+    forwarded: ["--output-format", "json", "--no-color", "--stream", "off", "--model", "fake-model", "--effort", "high"],
     readOnly: false,
     allowAllTools: false,
     resumed: false,
