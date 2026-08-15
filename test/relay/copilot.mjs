@@ -245,9 +245,10 @@ if (!h.WIN) {
   h.check("copilot preflight abort: run artifacts are prepared",
     await h.until(() => existsSync(join(outDir, "events.jsonl")), 2000));
   preflight.kill("SIGTERM");
+  const didExit = await exited;
   const value = existsSync(join(outDir, "result.json")) ? h.result(outDir) : {};
   h.check("copilot preflight abort: result is aborted and dispatch never starts",
-    (await exited) &&
+    didExit &&
     value.status === "aborted" &&
     value.signal === "SIGTERM" &&
     value.error?.includes("version preflight") &&
