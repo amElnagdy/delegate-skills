@@ -7,7 +7,7 @@
  * not complete:
  *
  *   1. timeout  — the watchdog kills the implementer's WHOLE process tree and
- *                 result.json reports status "timeout". Driven for all twelve
+ *                 result.json reports status "timeout". Driven for all thirteen
  *                 relays on both platforms. On Windows, claude and cursor
  *                 launch a .cmd shim through a serialized cmd.exe invocation,
  *                 while codex/opencode/grok/pi/cline use shell:true. These are exactly the
@@ -23,7 +23,7 @@
  *   2. aborted  — killing the relay itself still produces result.json with
  *                 status "aborted", and files the implementer flushes during
  *                 the shutdown grace window appear in the refreshed
- *                 touchedFiles. Driven for all twelve relays on POSIX; Windows
+ *                 touchedFiles. Driven for all thirteen relays on POSIX; Windows
  *                 delivers no catchable SIGTERM, so the scenario cannot be
  *                 driven there (the skill docs carry the same caveat).
  *
@@ -31,7 +31,7 @@
  * `changelog`), and can be told to hang or fail that probe by mode name, so a
  * relay whose preflight is unbounded — wedging before any result.json exists —
  * or which reports a broken CLI as a missing one is caught here.
- * A shared matrix also drives all twelve through the --timeout values no
+ * A shared matrix also drives all thirteen through the --timeout values no
  * watchdog can honour — malformed, zero, and past Node's timer ceiling — each of
  * which would otherwise fire on the next tick as a silent instant "timeout".
  * Quick Claude, Cline, Cursor, Qoder, Vibe, and Pi success cases verify brief

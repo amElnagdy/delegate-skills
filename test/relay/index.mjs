@@ -16,6 +16,7 @@ import { runTimeoutTree } from "./timeout-tree.mjs";
 import { runAbort } from "./abort.mjs";
 import { runDelegateSetup } from "./delegate-setup.mjs";
 import { runAider } from "./aider.mjs";
+import { runCopilot } from "./copilot.mjs";
 
 export const runners = [
   ["package-shape", runPackageShape],
@@ -32,6 +33,7 @@ export const runners = [
   ["pi", runPi],
   ["claude", runClaude],
   ["aider", runAider],
+  ["copilot", runCopilot],
   ["read-only-tripwire", runReadOnlyTripwire],
   ["timeout-tree", runTimeoutTree],
   ["abort", runAbort],

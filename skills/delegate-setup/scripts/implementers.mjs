@@ -264,6 +264,21 @@ export const IMPLEMENTERS = Object.freeze([
     supports: ["model", "timeout", "readOnly"],
     winShell: false,
   },
+  {
+    key: "copilot",
+    skill: "copilot-delegate",
+    binary: "copilot",
+    versionArgs: ["version"],
+    // No status command exposes login state; copilot login is interactive only
+    // and there is no `copilot auth status` equivalent.
+    authProbe: null,
+    // No credential-free model listing command exists.
+    modelProbe: null,
+    // No documented local session store path is verified.
+    usageProbe: null,
+    supports: ["model", "effort", "timeout", "readOnly"],
+    winShell: true,
+  },
 ]);
 
 /** Prototype-free map so names like "toString" cannot pass as implementers. */

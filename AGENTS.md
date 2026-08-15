@@ -2,11 +2,11 @@
 
 This repo is a [Skills CLI](https://github.com/vercel-labs/skills) package of **delegation skills** —
 skills that let an orchestrating agent drive a separate CLI coding agent as an implementer, then review
-and land the result. Twelve implementer skills ship today: `claude-delegate` (Claude Code),
+and land the result. Thirteen implementer skills ship today: `claude-delegate` (Claude Code),
 `cline-delegate` (Cline CLI), `codex-delegate` (OpenAI Codex), `opencode-delegate` (OpenCode),
 `agy-delegate` (Google Antigravity), `grok-delegate` (Grok Build), `kimi-delegate` (Kimi Code),
 `qoder-delegate` (Qoder CLI), `vibe-delegate` (Mistral Vibe), `cursor-delegate` (Cursor Agent CLI),
-`pi-delegate` (Pi CLI), and `aider-delegate` (Aider); siblings like `gemini-delegate` can be added
+`pi-delegate` (Pi CLI), `aider-delegate` (Aider), and `copilot-delegate` (GitHub Copilot CLI); siblings like `gemini-delegate` can be added
 later without renaming the repo. One **utility** skill
 ships alongside them: `delegate-setup` (configure fleet lanes — setup only, never dispatches).
 
@@ -19,7 +19,7 @@ jargon. Use these terms; don't invent synonyms.
 | --- | --- | --- |
 | **delegate** / **delegation** | the activity, and this skill family | "relay" (as the activity), "hand-off", "offload" |
 | **orchestrator** | the driving agent (Claude Code, …) | "controller", "driver" |
-| **implementer** | the separate agent (Claude, Cline, Codex, OpenCode, Antigravity, Grok, Kimi, Qoder, Vibe, Cursor, Pi, Aider) | "worker", "sub-agent", "executor" |
+| **implementer** | the separate agent (Claude, Cline, Codex, OpenCode, Antigravity, Grok, Kimi, Qoder, Vibe, Cursor, Pi, Aider, Copilot) | "worker", "sub-agent", "executor" |
 | **brief** | the self-contained task spec sent to the implementer | "task file", "the prompt", "the spec" |
 | **gates** | the project's test/lint/build commands | "checks", "CI" |
 | **dispatch** | sending the brief to the implementer | "fire off", "kick off" |
@@ -40,6 +40,7 @@ jargon. Use these terms; don't invent synonyms.
 | `--prompt`, `--output` (`streaming`/`json`/`text`), `--agent` (`plan`/`accept-edits`/`auto-approve`), `--max-turns`, `--max-price`, `--max-tokens`, `--trust`, `--resume`, `--continue`, `--enabled-tools`, `--disabled-tools` | Mistral Vibe's own terms — use verbatim when discussing `vibe` | don't invent a Vibe sandbox enum; `--trust` is not a permission mode |
 | `session`, `--continue`, `--session`, `print mode`, `--mode json`, `tools`, `context files`, `project trust` | Pi's own terms — use verbatim when discussing `pi` | don't paraphrase them |
 | `--message-file`, `--yes-always`, `--suggest-shell-commands`, `--auto-commits`/`--dirty-commits`, `--dry-run`, `--edit-format`, `--architect`, `--file`/`--read`, `chat history` | Aider's own terms — use verbatim when discussing `aider` | Aider has no sandbox, no permission modes, and no session ids; don't imply any. `--file`/`--read` scope the chat context — never call them a boundary |
+| `session`, `-p`/`--prompt`, `--output-format json` (JSONL), `tools`, `--allow-all-tools`, `mode plan`, `--resume`/`--continue`, `--model`, `--effort`, `copilot login` / env tokens, `sandbox` (experimental, MXC) | GitHub Copilot CLI's own terms — use verbatim when discussing `copilot` | don't paraphrase them |
 
 Banned on sight: coined umbrella terms in user-facing surfaces (README headings, `skills.sh.json`
 titles); any reference to the author's local machine or config; model/version pins (`GPT-5.x` →
@@ -48,7 +49,7 @@ version a run was made against is what makes the claim checkable; and claims tha
 ("verified" without a run → hedge or cut). Every
 CLI flag, field, and command in the docs must match the installed implementer CLI (`claude` /
 `cline` / `codex` / `opencode` / `agy` / `grok` / `kimi` / `qodercli` / `vibe` / `cursor-agent` / `pi` /
-`aider`) and the skill's `relay.mjs`.
+`aider` / `copilot`) and the skill's `relay.mjs`.
 
 ## Conventions
 
@@ -83,7 +84,7 @@ CLI flag, field, and command in the docs must match the installed implementer CL
 - Smoke-test any changed script directly (e.g. `node skills/<skill>/scripts/relay.mjs --help`, and a
   no-write or read-only run against a throwaway repo) before relying on it.
 - If you touch how a `relay.mjs` launches its implementer CLI, smoke-test on Windows too (native
-  PowerShell/cmd, not just Git Bash/WSL): the `codex`, `opencode`, `grok`, `pi`, and `cline` launches
+  PowerShell/cmd, not just Git Bash/WSL): the `codex`, `opencode`, `grok`, `pi`, `cline`, and `copilot` launches
   need `shell:true` on win32 to resolve the `.cmd` shim. Cline streams its brief on stdin and uses the
   child process cwd; the other launches quote spaceable args, and all value flags are token-validated.
   The `claude` and `cursor-agent` launches serialize a pre-joined
