@@ -56,8 +56,9 @@ Run these five steps per task. Steps 1, 4, and 5 are your judgment; 2 and 3 are 
 
 Antigravity sees only the text you send plus what it can inspect in the workspace - no chat history, no
 shared context. Everything the task needs goes in the brief: the goal, the current state, what to
-change, what to leave untouched, the project's **actual** gate commands, and a report contract. Tell
-Antigravity it will **not** commit (you will). Keep one task per brief. Full guidance and a template:
+change, what to leave untouched, and a report contract. For an edit-only implementer, explicitly reserve
+shell commands, tests, lint, typecheck, and builds for the orchestrator. Tell Antigravity it will
+**not** commit (you will). Keep one task per brief. Full guidance and a template:
 [references/writing-the-brief.md](references/writing-the-brief.md).
 
 ### 2. Dispatch
@@ -98,7 +99,8 @@ the `finalMessage` field in `result.json` (also printed in full on stdout betwee
 Antigravity's `result.json` includes its own final message and any gate claims. **Re-verify, don't
 accept:**
 
-- **Re-run the project's gates yourself** (the test/lint/build commands from step 1).
+- **Run the project's gates yourself** after the edit-only implementer returns; do not delegate validation
+  commands to Antigravity.
 - **Read the diff** against the brief: did Antigravity do what was asked, nothing more and nothing less?
   `touchedFiles` in the result is your starting point.
 - **Run the relevant guard skills** on the diff if you have them installed.
@@ -142,7 +144,7 @@ going beyond the brief, ask - don't expand the mandate yourself). The full treat
 ## References
 
 - [references/writing-the-brief.md](references/writing-the-brief.md) - how to write a brief Antigravity
-  can execute blind: structure, XML blocks, the report contract, and real gate commands.
+  can execute blind: structure, XML blocks, the edit-only boundary, and the report contract.
 - [references/dispatch-and-poll.md](references/dispatch-and-poll.md) - `relay.mjs` flags, the
   `result.json` contract, backgrounding per orchestrator, and recovery when a run misbehaves.
 - [references/review-and-land.md](references/review-and-land.md) - the review checklist, the commit

@@ -49,6 +49,10 @@ class FakeCli {
       Console.Error.WriteLine("jetski: no output produced — a tool required the \"write_file\" permission that headless\nmode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow\nin settings.json (e.g. write_file(<target>)). Alternatively, re-run with\n--dangerously-skip-permissions to auto-approve all tools.");
       return 0;
     }
+    if (mode == "agy-error") {
+      Console.Error.WriteLine("fake agy provider failure");
+      return 7;
+    }
     if (mode == "agy-analysis") {
       var argsFile = Environment.GetEnvironmentVariable("SMOKE_ARGS_FILE");
       if (!String.IsNullOrEmpty(argsFile)) File.WriteAllLines(argsFile, args);

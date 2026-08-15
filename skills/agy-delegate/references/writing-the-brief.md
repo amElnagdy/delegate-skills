@@ -26,13 +26,10 @@ change, and explicitly what to leave untouched. The "leave untouched" list is wh
 from wandering into unrelated refactors.
 </task>
 
-<verification_loop>
-Run these before finishing and fix anything they surface, don't just report it:
-  <the project's real test command>
-  <the project's real lint/format command>
-  <the project's real build/typecheck command>
-Confirm the working tree shows only the intended changes afterward.
-</verification_loop>
+<edit_only>
+Edit files only. Do not run shell commands, tests, lint, formatters, typecheck, builds, package managers,
+Git commands, or other executables. The orchestrator owns all validation after the edit returns.
+</edit_only>
 
 <action_safety>
 Keep changes scoped to the task. No unrelated refactors, renames, or cleanup unless required for
@@ -44,7 +41,7 @@ work uncommitted in the working tree.
 End with a report in this exact shape:
   1. What changed and why
   2. Files touched
-  3. Gate outcomes (paste the test/lint counts)
+  3. Validation not run by design (the orchestrator owns it)
   4. Anything you deviated on, left open, or want a decision on
 </structured_output_contract>
 ```
@@ -64,12 +61,12 @@ The relay captures `agy --print` stdout as `finalMessage`. If Antigravity finish
 summary, the result is not useful to review. The `<structured_output_contract>` block is what guarantees
 a report you can read.
 
-## Discover the real gates
+## Keep validation with the orchestrator
 
-`<verification_loop>` is only useful if it names the project's *actual* commands. Read the repo's
-`AGENTS.md` / `CLAUDE.md` / `Makefile` / `package.json` first and copy the real ones in (`make test`,
-`npm run lint`, `cargo test`, `pytest -q`, whatever it is). A brief that says "run the tests" without
-naming them gets you an implementer that guesses - or skips.
+Do not copy test, lint, typecheck, build, package-manager, or other shell commands into an edit-only
+brief. Discover the project's real gates yourself, run them after Antigravity returns, and repair
+confirmed in-scope findings by resuming the same conversation with another edit-only delta brief.
+This keeps the edit-only implementer focused on file edits and makes validation evidence the orchestrator's own.
 
 ## Honor the repo's conventions
 
@@ -102,12 +99,11 @@ key before creating a new one. Touch only services/billing/refund.py and its tes
 path, API routes, and data models untouched.
 </task>
 
-<verification_loop>
-Run and make green before finishing:
-  pytest tests/billing/ -q
-  ruff check services/billing/
-Confirm git status shows only refund.py and its test file changed.
-</verification_loop>
+<edit_only>
+Edit files only. Do not run shell commands, tests, lint, formatters, typecheck, builds, package managers,
+Git commands, or other executables. The orchestrator will inspect the diff and run the real project
+gates after you return.
+</edit_only>
 
 <action_safety>
 Scope strictly to the refund idempotency fix. No unrelated refactors. Do NOT git add or commit; leave
@@ -115,7 +111,7 @@ changes in the working tree for review.
 </action_safety>
 
 <structured_output_contract>
-Report: (1) the root cause and your fix, (2) files touched, (3) pytest + ruff outcomes with counts,
+Report: (1) the root cause and your fix, (2) files touched, (3) validation not run by design,
 (4) anything you left open or want decided.
 </structured_output_contract>
 ```

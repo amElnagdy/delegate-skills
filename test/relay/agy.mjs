@@ -48,6 +48,95 @@ export async function runAgy(h) {
     return { result, value: existsSync(join(outDir, "result.json")) ? h.result(outDir) : {} };
   };
 
+  const freshWorkDir = h.freshRepo("fresh-args-agy");
+  const extraWorkspace = join(h.scratch, "extra-workspace-agy");
+  mkdirSync(extraWorkspace);
+  const freshOutDir = join(h.scratch, "out-fresh-args-agy");
+  const freshArgsFile = join(h.scratch, "args-fresh-args-agy");
+  const freshDispatch = spawnSync(process.execPath, [
+    h.relayPath("agy"),
+    "--brief", h.briefPath,
+    "--cd", freshWorkDir,
+    "--out-dir", freshOutDir,
+    "--model", "fixture-model",
+    "--effort", "high",
+    "--add-dir", extraWorkspace,
+  ], {
+    env: { ...h.baseEnv, SMOKE_MODE: "agy-analysis", SMOKE_ARGS_FILE: freshArgsFile },
+    encoding: "utf8",
+    timeout: 15_000,
+  });
+  const freshArgs = readArgs(freshArgsFile);
+  const freshValue = existsSync(join(freshOutDir, "result.json")) ? h.result(freshOutDir) : {};
+  const freshAddDirs = freshArgs.flatMap((arg, index) => arg === "--add-dir" ? [freshArgs[index + 1]] : []);
+  h.check("agy fresh dispatch: relay exits successfully", freshDispatch.status === 0);
+  h.check("agy fresh dispatch: model and effort are forwarded",
+    h.pair(freshArgs, "--model", "fixture-model") &&
+    h.pair(freshArgs, "--effort", "high"));
+  h.check("agy fresh dispatch: repository and extra workspace are pinned",
+    freshAddDirs.length === 2 &&
+    freshAddDirs[0] === freshWorkDir &&
+    freshAddDirs[1] === extraWorkspace);
+  h.check("agy fresh dispatch: starts a project and delivers the brief without bypass",
+    freshArgs.includes("--new-project") &&
+    freshArgs.some((arg) => arg.startsWith("--print=")) &&
+    !freshArgs.includes("--dangerously-skip-permissions"));
+  h.check("agy fresh dispatch: captures a completed result", freshValue.status === "completed");
+
+  const conversationOutDir = join(h.scratch, "out-conversation-agy");
+  const conversationArgsFile = join(h.scratch, "args-conversation-agy");
+  const conversationDispatch = spawnSync(process.execPath, [
+    h.relayPath("agy"),
+    "--brief", h.briefPath,
+    "--cd", freshWorkDir,
+    "--out-dir", conversationOutDir,
+    "--conversation", "conversation-1",
+  ], {
+    env: { ...h.baseEnv, SMOKE_MODE: "agy-analysis", SMOKE_ARGS_FILE: conversationArgsFile },
+    encoding: "utf8",
+    timeout: 15_000,
+  });
+  const conversationArgs = readArgs(conversationArgsFile);
+  const conversationValue = existsSync(join(conversationOutDir, "result.json")) ? h.result(conversationOutDir) : {};
+  h.check("agy conversation resume: preserves conversation and omits fresh workspace flags",
+    conversationDispatch.status === 0 &&
+    h.pair(conversationArgs, "--conversation", "conversation-1") &&
+    !conversationArgs.includes("--new-project") &&
+    !conversationArgs.includes("--add-dir") &&
+    conversationValue.resumed === true);
+
+  const latestOutDir = join(h.scratch, "out-resume-last-agy");
+  const latestArgsFile = join(h.scratch, "args-resume-last-agy");
+  const latestDispatch = spawnSync(process.execPath, [
+    h.relayPath("agy"),
+    "--brief", h.briefPath,
+    "--cd", freshWorkDir,
+    "--out-dir", latestOutDir,
+    "--resume-last",
+  ], {
+    env: { ...h.baseEnv, SMOKE_MODE: "agy-analysis", SMOKE_ARGS_FILE: latestArgsFile },
+    encoding: "utf8",
+    timeout: 15_000,
+  });
+  const latestArgs = readArgs(latestArgsFile);
+  h.check("agy resume-last: uses --continue without fresh workspace flags",
+    latestDispatch.status === 0 &&
+    latestArgs.includes("--continue") &&
+    !latestArgs.includes("--add-dir"));
+
+  const unsupportedOutDir = join(h.scratch, "out-exclude-path-agy");
+  const unsupportedExclude = spawnSync(process.execPath, [
+    h.relayPath("agy"),
+    "--brief", h.briefPath,
+    "--cd", freshWorkDir,
+    "--out-dir", unsupportedOutDir,
+    "--exclude-path", "protected.txt",
+  ], { env: h.baseEnv, encoding: "utf8" });
+  h.check("agy unsupported --exclude-path: rejected instead of presented as protection",
+    unsupportedExclude.status === 2 &&
+    !existsSync(join(unsupportedOutDir, "result.json")) &&
+    unsupportedExclude.stderr.includes("unknown option: --exclude-path"));
+
   const denied = run("permission-denied", "agy-permission-denied");
   h.check("agy permission denial: exit-zero no-op is reported as failed with diagnostics",
     denied.result.status === 1 &&
@@ -55,6 +144,13 @@ export async function runAgy(h) {
     denied.value.exitCode === 1 &&
     denied.value.error?.includes("headless --print") &&
     denied.value.stderrTail?.some((line) => line.includes("auto-denied")));
+
+  const providerError = run("provider-error", "agy-error");
+  h.check("agy provider error: non-zero exit and stderr are captured deterministically",
+    providerError.result.status === 7 &&
+    providerError.value.status === "failed" &&
+    providerError.value.exitCode === 7 &&
+    providerError.value.stderrTail?.some((line) => line.includes("fake agy provider failure")));
 
   const silent = run("silent-noop", "agy-silent-noop");
   h.check("agy silent no-op: no final message or edits cannot report completed",
