@@ -427,6 +427,7 @@ async function main() {
   let activeChild = null;
   let shuttingDown = false;
   let forceTimer = null;
+  let watchdogFired = false;
   const write = (status, code, signal, error) => {
     const result = resultObject(opts, run, status, code, signal, error);
     result.paths.result = run.resultPath;
@@ -443,10 +444,17 @@ async function main() {
       killTree(activeChild);
       forceTimer = setTimeout(() => killTree(activeChild, true), 2_000);
     }
+    // Write the aborted result immediately. A delayed write in an unref'd timer
+    // can be lost: once the implementer's close drains the event loop, the
+    // process exits before the timer fires, leaving no result.json.
+    write("aborted", 130, signal, `relay received ${signal}`);
+    // Keep the process alive through the grace window so files the implementer
+    // flushes during shutdown appear in the refreshed touchedFiles snapshot.
     setTimeout(() => {
-      if (!run.resultPath || !existsSync(run.resultPath)) write("aborted", 130, signal, `relay received ${signal}`);
+      if (activeChild) killTree(activeChild, true);
+      write("aborted", 130, signal, `relay received ${signal}`);
       process.exit(130);
-    }, 2_100).unref();
+    }, 2_100);
   };
   process.once("SIGTERM", () => abort("SIGTERM"));
   process.once("SIGINT", () => abort("SIGINT"));
@@ -502,12 +510,16 @@ async function main() {
   const timer = setTimeout(() => {
     if (shuttingDown) return;
     run.killed = "timeout";
+    watchdogFired = true;
     killTree(activeChild);
     forceTimer = setTimeout(() => killTree(activeChild, true), 2_000);
   }, timeoutMs);
   const [code, signal] = await new Promise((resolveExit) => activeChild.once("close", (c, s) => resolveExit([c, s])));
   clearTimeout(timer);
   if (forceTimer) clearTimeout(forceTimer);
+  // A descendant that ignored SIGTERM must not outlive the timeout report: once the
+  // parent is down, sweep the group (no-op where taskkill already felled the tree).
+  if (watchdogFired) killTree(activeChild, true);
   activeChild = null;
   if (shuttingDown) return;
   const status = run.killed === "timeout" ? "timeout" : (code === 0 && !run.sawError && (run.sawResult || run.finalMessage) ? "completed" : "failed");
