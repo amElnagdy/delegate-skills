@@ -76,6 +76,7 @@ Skip setup when you want one implementer or one-off dials. Pick the skill for a 
 | [`pi-delegate`](skills/pi-delegate/SKILL.md) | [Pi](https://github.com/earendil-works/pi-mono) (`pi`) | full local tools — no sandbox, no permission modes [^none]; project trust opt-in | `--read-only` (`read,grep,find,ls`) | `--resume-last`, `--session <id>` |
 | [`qoder-delegate`](skills/qoder-delegate/SKILL.md) | [Qoder](https://docs.qoder.com/en/cli/quick-start) (`qodercli`) | `auto` permission mode; bypass opt-in | `--permission-mode plan` | `--resume-last`, `--resume <id>` |
 | [`vibe-delegate`](skills/vibe-delegate/SKILL.md) | [Mistral Vibe](https://github.com/mistralai/mistral-vibe) (`vibe`) | `accept-edits`; `--full-access` opt-in | `--plan-only` (`plan` agent) | `--resume-last`, `--session <id>` |
+| [`copilot-delegate`](skills/copilot-delegate/SKILL.md) | [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-cli) (`copilot`) | `--allow-all-tools` opt-in; headless auto-deny otherwise | `--read-only` (`--mode plan`) | `--resume-last`, `--session <id>` |
 
 [^none]: No CLI-enforced read-only mode. `touchedFiles` and the diff, not a flag, are the guarantee.
 
@@ -247,6 +248,14 @@ Per skill — platform, CLI version, and what the run exercised:
   `sessionId`/`finalPath`, bounded version preflight, missing binary, result parsing, and whole-process-tree
   timeout/abort cleanup. The contributor also reported a native Windows 3.0.51 edit run against the
   earlier positional-brief commit; that does not verify this exact stdin-based head on Windows.
+- `copilot-delegate` — Windows, `copilot` 1.0.78: `--read-only` plan-mode run completed with a clean
+  tree and captured session id; `--allow-all-tools` edit run created the requested file; the headless
+  auto-deny path was exercised live (denial detected from the data-wrapped event shape, run reported
+  failed with the `--allow-all-tools` hint); `--session <id>` and `--resume-last` resume runs executed
+  their delta briefs via the directive-wrapped `-p @<file>` prompt. Contract-tested: argv exactness
+  (including the resume directive), denial shape, `--read-only`/`--allow-all-tools` conflict
+  validation, bounded version preflight, missing binary, result parsing, and whole-process-tree
+  timeout/abort cleanup.
 - `delegate-setup` — contract-tested: discover JSON shape, config validate/write/load, whole-lane
   project overlay, global write without creating `.delegate/`, and `--lane` resolve / wrong-skill /
   flag-override against relays. The smoke suite runs live discovery against installed CLIs

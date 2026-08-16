@@ -264,6 +264,21 @@ export const IMPLEMENTERS = Object.freeze([
     supports: ["model", "timeout", "readOnly"],
     winShell: false,
   },
+  {
+    key: "copilot",
+    skill: "copilot-delegate",
+    binary: "copilot",
+    versionArgs: ["version"],
+    // No status command exposes login state; copilot login is interactive only
+    // and there is no `copilot auth status` equivalent.
+    authProbe: null,
+    // No credential-free model listing command exists.
+    modelProbe: null,
+    // No documented local session store path is verified.
+    usageProbe: null,
+    supports: ["model", "effort", "timeout", "readOnly"],
+    winShell: true,
+  },
 ]);
 
 /** Prototype-free map so names like "toString" cannot pass as implementers. */
@@ -276,6 +291,7 @@ export const IMPLEMENTER_BY_KEY = Object.freeze(
 
 export const CLAUDE_EFFORT = Object.freeze(["low", "medium", "high", "xhigh", "max", "ultracode"]);
 export const AGY_EFFORT = Object.freeze(["low", "medium", "high"]);
+export const COPILOT_EFFORT = Object.freeze(["low", "medium", "high", "xhigh", "max"]);
 export const CODEX_SANDBOX = Object.freeze(["read-only", "workspace-write", "danger-full-access"]);
 export const GROK_SANDBOX = Object.freeze(["workspace", "read-only", "off"]);
 export const QODER_PERMISSION = Object.freeze([

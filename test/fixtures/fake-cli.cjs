@@ -188,6 +188,17 @@ if (["pi-success", "pi-error"].includes(process.env.SMOKE_MODE)) {
     }));
     process.exit(failed ? 1 : 0);
   });
+} else if (process.env.SMOKE_MODE === "copilot-success") {
+  fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify(args));
+  console.log(JSON.stringify({ type: "assistant.message", data: { content: "working" }, ephemeral: false }));
+  console.log(JSON.stringify({ type: "assistant.message", data: { content: "fake copilot completed" }, ephemeral: false }));
+  console.log(JSON.stringify({ type: "result", sessionId: "copilot-session-1", exitCode: 0, usage: { codeChanges: { linesAdded: 5, linesRemoved: 2, filesModified: ["src/main.js"] } } }));
+  process.exit(0);
+} else if (process.env.SMOKE_MODE === "copilot-denied") {
+  fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify(args));
+  console.log(JSON.stringify({ type: "tool.execution_complete", data: { success: false, error: { message: "Permission denied and could not request permission from user", code: "denied" } } }));
+  console.log(JSON.stringify({ type: "result", sessionId: "copilot-session-denied", exitCode: 0, usage: { codeChanges: { linesAdded: 0, linesRemoved: 0, filesModified: [] } } }));
+  process.exit(0);
 } else if (["cursor-success", "claude-success", "claude-read-only-write", "claude-read-only-clean", "claude-read-only-append", "claude-chunked"].includes(process.env.SMOKE_MODE)) {
   let brief = "";
   process.stdin.setEncoding("utf8");

@@ -27,7 +27,7 @@ export function runDelegateSetup(h) {
   h.check("discover reports version", report?.version === "delegate-discover.v1");
   h.check("discover lists discovered or missing", Array.isArray(report?.discovered) && Array.isArray(report?.missing));
   h.check(
-    "discover covers all twelve implementers",
+    "discover covers all thirteen implementers",
     Array.isArray(report?.discovered) &&
       Array.isArray(report?.missing) &&
       report.discovered.length + report.missing.length === h.SKILLS.length,
@@ -333,6 +333,19 @@ if (observation === "models") {
     });
     h.check("config validate rejects unknown Agy effort",
       rejectAgy.status === 2 && /low, medium, high/.test(rejectAgy.stderr));
+
+    const badCopilot = {
+      version: "delegate-fleet.v1",
+      lanes: { feature: { implementer: "copilot", effort: "foo" } },
+    };
+    const badCopilotFile = join(cfgRepo, "bad-copilot.json");
+    writeFileSync(badCopilotFile, `${JSON.stringify(badCopilot)}\n`);
+    const rejectCopilot = spawnSync(process.execPath, [join(setupDir, "config.mjs"), "validate", badCopilotFile], {
+      encoding: "utf8",
+      env: process.env,
+    });
+    h.check("config validate rejects unknown copilot effort",
+      rejectCopilot.status === 2 && /low, medium, high, xhigh, max/.test(rejectCopilot.stderr));
 
     const badCursorSandbox = {
       version: "delegate-fleet.v1",

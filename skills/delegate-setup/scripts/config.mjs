@@ -30,6 +30,7 @@ import {
   AGY_EFFORT,
   ALL_DIALS,
   CLAUDE_EFFORT,
+  COPILOT_EFFORT,
   CODEX_SANDBOX,
   CONFIG_VERSION,
   GROK_SANDBOX,
@@ -221,6 +222,9 @@ function validateDialValue(implementer, field, value, laneName, label) {
     }
     if (implementer === "claude" && !CLAUDE_EFFORT.includes(value)) {
       return `${label}: lane ${laneName}.effort must be one of: ${CLAUDE_EFFORT.join(", ")}`;
+    }
+    if (implementer === "copilot" && !COPILOT_EFFORT.includes(value)) {
+      return `${label}: lane ${laneName}.effort must be one of: ${COPILOT_EFFORT.join(", ")}`;
     }
     if ((implementer === "codex" || implementer === "grok") && !/^[a-z][a-z0-9-]*$/i.test(value)) {
       return `${label}: lane ${laneName}.effort must be a bare token`;
