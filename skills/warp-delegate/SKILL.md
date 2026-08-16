@@ -11,7 +11,7 @@ description: >-
 license: MIT
 compatibility: Requires the `oz` CLI (Warp Agent CLI) installed and authenticated (`oz login`, or `WARP_API_KEY` for a headless host; Warp AI features need an eligible Warp plan or your own provider key), Node 18+, and git. The orchestrating agent must be able to run shell commands and read files. Shell examples assume bash/zsh (macOS/Linux, or Git Bash/WSL on Windows).
 metadata:
-  version: 0.4.2
+  version: 0.5.0
 ---
 
 # Warp Delegate
