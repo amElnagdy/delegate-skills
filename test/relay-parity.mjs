@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const RELAYS = ["claude", "cline", "codex", "opencode", "agy", "grok", "kimi", "qoder", "vibe", "cursor", "pi", "aider", "copilot"];
+const RELAYS = ["claude", "cline", "codex", "opencode", "agy", "grok", "kimi", "qoder", "vibe", "cursor", "pi", "aider", "copilot", "warp"];
 const READ_ONLY_TRIPWIRE_RELAYS = ["claude", "grok"];
 const SYMBOLS = [
   ["MAX_TIMER_MS", "const", RELAYS],
@@ -27,9 +27,9 @@ const SYMBOLS = [
   ["fingerprintDirtyPaths", "function", READ_ONLY_TRIPWIRE_RELAYS],
   ["changedDirtyPaths", "function", READ_ONLY_TRIPWIRE_RELAYS],
   ["readOnlyVerdict", "function", READ_ONLY_TRIPWIRE_RELAYS],
-  ["MAX_BUFFERED_CHARS", "const", ["claude", "cline", "copilot", "cursor", "grok", "kimi", "opencode", "pi", "qoder", "vibe"]],
+  ["MAX_BUFFERED_CHARS", "const", ["claude", "cline", "copilot", "cursor", "grok", "kimi", "opencode", "pi", "qoder", "vibe", "warp"]],
   ["makeLineScanner", "function", ["vibe", "copilot"]],
-  ["makeEventScanner", "function", ["claude", "cline", "cursor", "grok", "kimi", "opencode", "pi", "qoder"]],
+  ["makeEventScanner", "function", ["claude", "cline", "cursor", "grok", "kimi", "opencode", "pi", "qoder", "warp"]],
 ];
 let failed = 0;
 const check = (name, condition) => {

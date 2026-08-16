@@ -279,6 +279,29 @@ export const IMPLEMENTERS = Object.freeze([
     supports: ["model", "effort", "timeout", "readOnly"],
     winShell: true,
   },
+  {
+    key: "warp",
+    skill: "warp-delegate",
+    binary: "oz",
+    versionArgs: ["--version"],
+    // `--output-format text` prints one `type:id` line; the default `pretty` format
+    // spells the type out ("User ID: …") and so reads differently per principal. A
+    // headless host authenticated with WARP_API_KEY is a service account, not a
+    // user, so the probe must accept both or it reports CI as logged out.
+    authProbe: {
+      args: ["whoami", "--output-format", "text"],
+      successPattern: /^(?:user|service_account):\S/m,
+    },
+    // `oz model list` emits a JSON array of {id} objects, which none of the shared
+    // list formats parse; ids are read from the CLI directly instead of probed.
+    modelProbe: null,
+    // Conversations live server-side, so there is no local session directory to count.
+    usageProbe: null,
+    // `oz agent run` exposes no sandbox, permission-mode, or read-only flag, so
+    // those dials are deliberately absent — the relay refuses a lane that sets one.
+    supports: ["model", "timeout"],
+    winShell: false,
+  },
 ]);
 
 /** Prototype-free map so names like "toString" cannot pass as implementers. */

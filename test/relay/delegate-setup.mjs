@@ -27,7 +27,7 @@ export function runDelegateSetup(h) {
   h.check("discover reports version", report?.version === "delegate-discover.v1");
   h.check("discover lists discovered or missing", Array.isArray(report?.discovered) && Array.isArray(report?.missing));
   h.check(
-    "discover covers all thirteen implementers",
+    "discover covers every implementer in the smoke matrix",
     Array.isArray(report?.discovered) &&
       Array.isArray(report?.missing) &&
       report.discovered.length + report.missing.length === h.SKILLS.length,
