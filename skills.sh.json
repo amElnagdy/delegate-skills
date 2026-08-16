@@ -17,6 +17,7 @@
         "cursor-delegate",
         "pi-delegate",
         "aider-delegate",
+        "copilot-delegate",
         "zcode-delegate"
       ]
     },
