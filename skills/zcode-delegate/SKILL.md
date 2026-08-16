@@ -32,17 +32,47 @@ designed-for, not yet proven.)
 ## Prerequisites (check once)
 
 1. **ZCode is installed.** The CLI ships **inside the desktop app** — it is not on PATH and not on
-   npm. The relay finds it automatically on Windows and macOS. You can also point at it explicitly
-   with `--zcode-path <file>` or the `ZCODE_CLI` environment variable. On Linux the app is an
-   AppImage with no fixed install path, so one of those two is required.
-2. **A model provider is configured for the CLI.** The CLI keeps its own config at
-   `~/.zcode/cli/config.json`, separate from the desktop app's. `zcode login` is the intended path;
-   where it fails with `OAuth response is not valid JSON`, supply the key by environment instead —
-   `ZCODE_API_KEY`, `ANTHROPIC_API_KEY`, or `ZAI_API_KEY`.
+   npm. The relay resolves it in this order: `--zcode-path <file>` or `ZCODE_CLI` first, then PATH,
+   then the installed app bundle. On Linux the app is an AppImage with no fixed install path, so
+   the flag or the environment variable is required there — the relay guesses nothing.
+2. **A model provider is configured for the CLI**, with a key it can actually reach. Being signed
+   into the desktop app is *not* enough — see below.
 3. You are in (or will point `--cd` at) the target git repository.
 
 The relay records the CLI version and how it was resolved into `result.json`, so a surprising
 install is visible after the fact.
+
+## Authenticating the headless CLI
+
+**Signing into the ZCode desktop app does not authenticate the CLI this relay drives.** The CLI
+keeps its own config at `~/.zcode/cli/config.json`, separate from the desktop app's, and nothing
+bridges the two. `zcode login` is the intended path, but where it fails with `OAuth response is
+not valid JSON` the way in is a Z.AI API key.
+
+Two pieces are needed, and they are separate:
+
+1. **The provider block** must exist in `~/.zcode/cli/config.json`. It defines the provider, its
+   endpoint and its models — the environment cannot supply this:
+
+   ```jsonc
+   {
+     "provider": {
+       "zai": {
+         "kind": "anthropic",
+         "options": { "apiKeyRequired": true, "baseURL": "https://api.z.ai/api/anthropic" },
+         "models": { "glm-5.1": { "name": "GLM-5.1" } }
+       }
+     },
+     "model": { "main": "zai/glm-5.1" }
+   }
+   ```
+
+2. **The key** can live either in `provider.zai.options.apiKey` in that file, or in the
+   environment as any one of `ZAI_API_KEY`, `ZCODE_API_KEY`, or `ANTHROPIC_API_KEY`. Prefer the
+   environment — it keeps the secret off disk.
+
+If a run fails with `Model provider is missing an API key: <provider>`, the provider block resolved
+but no key was found: set one of those variables and re-run.
 
 ## Autonomy — read this before dispatching
 
