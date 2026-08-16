@@ -378,7 +378,7 @@ async function probeOzVersion(timeoutMs, onChild) {
     child.on("close", (code) => finish({ code, error: null, timedOut }));
     timer = setTimeout(() => {
       timedOut = true;
-      killChild(child, "SIGKILL");
+      killChild(child, process.platform === "win32" ? "SIGTERM" : "SIGKILL");
     }, limit);
   });
 
