@@ -13,7 +13,7 @@ description: >-
 license: MIT
 compatibility: Requires the `aider` CLI (`python -m pip install aider-chat`), Node 18+, and git. Aider must be able to authenticate to a model before dispatch - export the provider key it expects (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, …) or set it in Aider's own config; a local OpenAI-compatible endpoint still needs a non-empty `OPENAI_API_KEY`. The orchestrating agent must be able to run shell commands and read files. Shell examples assume bash/zsh (macOS/Linux, or Git Bash/WSL on Windows).
 metadata:
-  version: 0.4.2
+  version: 0.5.0
 ---
 
 # Aider Delegate

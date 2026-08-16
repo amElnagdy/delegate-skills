@@ -10,7 +10,7 @@ description: >-
 license: MIT
 compatibility: Requires the `copilot` CLI installed and authenticated (`copilot login`), Node 18+ to run the relay (the copilot CLI itself requires Node 22+), and git. The orchestrator must be able to run shell commands and read files.
 metadata:
-  version: 0.4.2
+  version: 0.5.0
 ---
 
 # Copilot Delegate

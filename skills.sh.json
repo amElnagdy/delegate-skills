@@ -18,6 +18,7 @@
         "pi-delegate",
         "aider-delegate",
         "copilot-delegate",
+        "warp-delegate",
         "zcode-delegate"
       ]
     },

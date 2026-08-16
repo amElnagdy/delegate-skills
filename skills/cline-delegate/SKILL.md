@@ -10,7 +10,7 @@ description: >-
 license: MIT
 compatibility: Requires the `cline` CLI installed and authenticated with `cline auth`, Node 18+, and git. The orchestrator must be able to run shell commands and read files.
 metadata:
-  version: 0.4.2
+  version: 0.5.0
 ---
 
 # Cline Delegate

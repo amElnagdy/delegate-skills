@@ -77,9 +77,12 @@ Skip setup when you want one implementer or one-off dials. Pick the skill for a 
 | [`qoder-delegate`](skills/qoder-delegate/SKILL.md) | [Qoder](https://docs.qoder.com/en/cli/quick-start) (`qodercli`) | `auto` permission mode; bypass opt-in | `--permission-mode plan` | `--resume-last`, `--resume <id>` |
 | [`vibe-delegate`](skills/vibe-delegate/SKILL.md) | [Mistral Vibe](https://github.com/mistralai/mistral-vibe) (`vibe`) | `accept-edits`; `--full-access` opt-in | `--plan-only` (`plan` agent) | `--resume-last`, `--session <id>` |
 | [`copilot-delegate`](skills/copilot-delegate/SKILL.md) | [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-cli) (`copilot`) | `--allow-all-tools` opt-in; headless auto-deny otherwise | `--read-only` (`--mode plan`) | `--resume-last`, `--session <id>` |
+| [`warp-delegate`](skills/warp-delegate/SKILL.md) | [Warp Agent CLI](https://docs.warp.dev/cli/) (`oz`) | full local tools — no sandbox, no permission modes [^none] | — [^none] | `--conversation <id>` |
 | [`zcode-delegate`](skills/zcode-delegate/SKILL.md) | [Z.AI ZCode](https://zcode.z.ai) (`zcode`) [^zcode] | `--mode yolo` | `--read-only` (`plan` mode) | `--resume-last`, `--session <id>` |
 
-[^none]: No CLI-enforced read-only mode. `touchedFiles` and the diff, not a flag, are the guarantee.
+[^none]: No CLI-enforced read-only mode. `touchedFiles` and the diff are what you review against, not
+a guarantee: they are post-run `git status` in the workspace, so they cannot show ignored files,
+reverted edits, or writes outside the repository.
 
 [^aider]: Aider is the one implementer here that commits by default. Its `--auto-commits` and
 `--dirty-commits` both default to `True`, the second of which commits your pre-existing uncommitted
@@ -248,6 +251,20 @@ Per skill — platform, CLI version, and what the run exercised:
   `--session`, and `--resume-last` runs are contributor-reported.
 - `qoder-delegate` — macOS, `qodercli` 1.0.47, by the contributor: Lite edit run, `accept_edits`,
   explicit model and 32768-token context window, no commit.
+- `warp-delegate` — macOS, `oz` 0.2026.05.27.15.44.stable_01: **live edit run verified**. A relay
+  dispatch against a throwaway git repository had Warp add a function plus four assertions across
+  two files; both project gates were re-run independently by the orchestrator, the diff matched the
+  brief, and `HEAD` was untouched. Verified end to end: version preflight, launch, ndjson parsing
+  (`run_started` → `runId`/`runUrl`, `conversation_started` → `conversationId`), report extraction
+  from `{"type":"agent","text":…}` events with `agent_reasoning` excluded, `touchedFiles`, and
+  `status: "completed"` / exit 0. A second dispatch with `--conversation` verified resume: a delta
+  brief saying only "the function you just added" — never naming it — produced exactly the right
+  edit, with `resumed: true` and the conversation id preserved. Also observed on a prior run:
+  `touchedFiles: []` on a clean tree and exit 1 → `status: "failed"`. Two caveats are documented in the skill rather than fixed,
+  because they are Warp's behaviour and not the relay's: `finalMessage` is the agent's full
+  narration rather than a distinct final-message event, and `--cwd` governed shell commands while
+  the agent's file tool resolved bare relative paths against `$HOME`. `--no-snapshot`, `--profile`,
+  `--skill`, and `--mcp` are contract-tested only.
 - `zcode-delegate` — Windows, `zcode` 0.16.1: read-only (`plan`) run leaving a clean tree with the
   Git tripwire false; write run under `yolo` creating the briefed file and reporting it in
   `touchedFiles`; `--session` resume with an attached delta brief, which recalled the earlier turn;

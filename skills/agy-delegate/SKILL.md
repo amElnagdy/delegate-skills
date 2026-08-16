@@ -10,7 +10,7 @@ description: >-
 license: MIT
 compatibility: Requires the `agy` CLI installed and authenticated, Node.js, and git. The orchestrator must be able to run shell commands and read files. Shell examples assume bash/zsh (macOS/Linux, or Git Bash/WSL on Windows).
 metadata:
-  version: 0.4.2
+  version: 0.5.0
 ---
 
 # Antigravity Delegate

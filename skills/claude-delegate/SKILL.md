@@ -10,7 +10,7 @@ description: >-
 license: MIT
 compatibility: Requires the `claude` CLI (Claude Code) installed and authenticated, Node 18+, and git. The orchestrating agent must be able to run shell commands and read files. Claude's shell sandbox requires macOS, Linux, or WSL2; native Windows launch is pending verification.
 metadata:
-  version: 0.4.2
+  version: 0.5.0
 ---
 
 # Claude Delegate
