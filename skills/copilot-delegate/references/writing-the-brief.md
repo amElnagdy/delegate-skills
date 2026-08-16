@@ -12,8 +12,8 @@ the brief so the implementer does not have to infer which rules matter for this 
 
 Copilot picks a default model when `--model` is omitted, so a fresh dispatch does not require it.
 Pass `--model <name>` only when the human asked for a specific model. `--effort <level>` sets the
-reasoning effort (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`). The relay forwards
-model and effort values made of letters, digits, `. _ : / -` only.
+reasoning effort (`low`, `medium`, `high`, `xhigh`, `max`). The relay rejects any other effort
+value before dispatch. Model values still accept letters, digits, and `. _ : / -` only.
 
 ## The shape that works
 

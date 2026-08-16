@@ -128,6 +128,22 @@ for (const scenario of [
   h.check("copilot conflict: --read-only + --allow-all-tools exits 2",
     conflict.status === 2);
 }
+// Unknown --effort is a usage error: exit 2, no result.json, no dispatch.
+{
+  const workDir = h.freshRepo("work-bad-effort-copilot");
+  const outDir = join(h.scratch, "out-bad-effort-copilot");
+  const bad = spawnSync(process.execPath, [
+    h.relayPath("copilot"),
+    "--brief", h.briefPath,
+    "--cd", workDir,
+    "--out-dir", outDir,
+    "--effort", "foo",
+  ], { env: h.baseEnv, encoding: "utf8" });
+  h.check("copilot invalid effort: exits 2 before dispatch",
+    bad.status === 2 &&
+    /invalid --effort "foo"/.test(bad.stderr) &&
+    !existsSync(join(outDir, "result.json")));
+}
 // A readOnly lane must not block an explicit --allow-all-tools (flags win).
 {
   const setupDir = join(h.testDir, "..", "skills", "delegate-setup", "scripts");

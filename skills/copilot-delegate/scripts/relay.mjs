@@ -47,7 +47,7 @@
  *   --lane <name>           Fleet lane from delegate-setup config (dials apply; explicit flags win).
  *   --model <name>          Copilot model (default: copilot's own default, `auto`).
  *                           Letters, digits, and . _ : / - only.
- *   --effort <level>        Reasoning effort for this run (none|minimal|low|medium|high|xhigh|max).
+ *   --effort <level>        Reasoning effort for this run (low|medium|high|xhigh|max).
  *   --read-only             Read-only plan mode (`--mode plan`); works without
  *                           `--allow-all-tools`. Mutually exclusive with
  *                           `--allow-all-tools`.
@@ -106,8 +106,10 @@ const MAX_TIMER_MS = 2_147_483_647;
 const PROBE_TIMEOUT_MS = 10_000;
 
 // --model and --effort values reach a shell on win32 (shell:true for the .cmd
-// shim), so they are restricted to safe tokens.
+// shim), so they are restricted to safe tokens. Effort is then checked against
+// Copilot's documented enum (low|medium|high|xhigh|max).
 const SAFE_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
+const EFFORT_LEVELS = new Set(["low", "medium", "high", "xhigh", "max"]);
 
 const IMPLEMENTER_KEY = "copilot";
 
@@ -239,6 +241,9 @@ function parseArgs(argv) {
     if (opts[flag] !== null && !SAFE_TOKEN.test(opts[flag])) {
       fail(`--${flag} value contains unsupported characters (allowed: letters, digits, . _ : / -)`);
     }
+  }
+  if (opts.effort !== null && !EFFORT_LEVELS.has(opts.effort)) {
+    fail(`invalid --effort "${opts.effort}" (expected: ${[...EFFORT_LEVELS].join(", ")})`);
   }
   if (parseDuration(opts.timeout) === null) {
     fail(`--timeout "${opts.timeout}" is not a positive schedulable duration; use h/m/s strings like 30m, 90s, or 1h30m (maximum ~24.8 days)`);

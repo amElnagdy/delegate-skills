@@ -28,7 +28,8 @@ The loop needs only a shell command and file access, so any comparable orchestra
 - The `copilot` CLI is not installed or authenticated.
 - You need a hard sandbox. Copilot exposes sandbox controls, but they are upstream-experimental
   (MXC-based, controlled via the `/sandbox` command and settings, disabled by default) — this relay
-  does not configure them. Use `--read-only` when the run must not edit project files.
+  does not configure them. `--read-only` only disables edit tools (`--mode plan`); shell commands
+  still run. If project files must not change at all, dispatch against a clean or isolated worktree.
 
 ## Prerequisites (check once)
 
@@ -47,7 +48,8 @@ The relay accepts letters, digits, and `. _ : / -` only (the value reaches a she
 ## Choose the effort (optional)
 
 Copilot supports a reasoning effort dial: `--effort <level>` with values
-`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`.
+`low`, `medium`, `high`, `xhigh`, or `max`. The relay rejects any other value
+before dispatch.
 
 ## The loop
 

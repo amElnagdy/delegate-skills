@@ -30,7 +30,7 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 | `--cd <dir>` | Working root and child process cwd (default: current directory). |
 | `--lane <name>` | Fleet lane from `delegate-setup` config. Applies that lane's dials; fails if the lane's `implementer` is not this relay. Explicit dial flags win. |
 | `--model <name>` | Copilot model (default: copilot's own default, `auto`). Token-validated: letters, digits, `. _ : / -`. |
-| `--effort <level>` | Reasoning effort (`none`\|`minimal`\|`low`\|`medium`\|`high`\|`xhigh`\|`max`). Token-validated. |
+| `--effort <level>` | Reasoning effort (`low`\|`medium`\|`high`\|`xhigh`\|`max`). Rejected before dispatch if unknown. |
 | `--read-only` | Read-only plan mode (`--mode plan`); works without `--allow-all-tools`. Mutually exclusive with `--allow-all-tools`. |
 | `--allow-all-tools` | Full tool autonomy. Without this, headless tool calls are auto-denied and the relay reports `status: "failed"`. Mutually exclusive with `--read-only`. |
 | `--resume-last` | Resume the most recent session (`--continue`). |
