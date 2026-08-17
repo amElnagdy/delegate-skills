@@ -30,7 +30,7 @@
  *     missMeansFalse?: boolean,
  *   },
  *   modelProbe: null
- *     | { args: string[], format: "lines"|"cursor"|"grok"|"table" }
+ *     | { args: string[], format: "lines"|"cursor"|"grok"|"table"|"commandcode" }
  *     | { envDir: string, homeSubdir: string, file: string, format: "codex-cache" }
  *     | { static: readonly string[] },
  *   usageProbe: null | {
@@ -108,6 +108,30 @@ export const IMPLEMENTERS = Object.freeze([
     },
     supports: ["model", "effort", "sandbox", "timeout", "readOnly"],
     winShell: true,
+  },
+  {
+    key: "commandcode",
+    skill: "commandcode-delegate",
+    // Command Code's binary; on Windows the name is cmd.exe, so its relay requires
+    // COMMANDCODE_BIN and discovery here can only report what PATH resolves to.
+    binary: "cmd",
+    versionArgs: ["--version"],
+    authProbe: { args: ["status"], successPattern: /Authenticated/i, failPattern: /not authenticated|logged out/i },
+    // Must stay a flag: `cmd models` would be read as a prompt. --list-models prints
+    // "vendor/name  description" rows under section headers.
+    modelProbe: { args: ["--list-models"], format: "commandcode" },
+    // projects/<project-slug>/<session-uuid>.jsonl, with a sibling
+    // <session-uuid>.checkpoints.jsonl that must not count as a second session.
+    usageProbe: {
+      homeSubdir: ".commandcode",
+      path: ["projects", "*"],
+      entry: "file",
+      match: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jsonl$/i,
+    },
+    // No sandbox or permissionMode dial: headless Command Code has only the withheld-tools
+    // default and --yolo, and --permission-mode does not change either.
+    supports: ["model", "effort", "timeout", "readOnly"],
+    winShell: false,
   },
   {
     key: "opencode",

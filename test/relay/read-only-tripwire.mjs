@@ -92,7 +92,9 @@ async function runScenario(h, skill, scenario) {
   const child = h.runRelay(skill, workDir, outDir, ["--read-only"], {
     SMOKE_MODE: skill === "grok"
       ? "grok-read-only"
-      : appendFile ? "claude-read-only-append" : "claude-read-only-clean",
+      : skill === "commandcode"
+        ? (appendFile ? "commandcode-read-only-append" : "commandcode-read-only-clean")
+        : appendFile ? "claude-read-only-append" : "claude-read-only-clean",
     ...(appendFile ? { SMOKE_APPEND_FILE: appendFile } : {}),
     ...(scenario.untrackedDirectory ? { SMOKE_WRITE_FILE: join("loose", "new.txt") } : {}),
     ...(scenario.invalidUtf8 ? { SMOKE_APPEND_INVALID_UTF8: "696e76616c69642dff" } : {}),
@@ -160,7 +162,7 @@ export async function runReadOnlyTripwire(h) {
     ...(!h.WIN ? [{ name: "raw-symlink-target-write", rawSymlinkTarget: true, expected: true }] : []),
     ...(!h.WIN ? [{ name: "artifact-symlink-target-write", artifactsInside: true, artifactSymlink: true, expected: true }] : []),
   ];
-  for (const skill of ["claude", "grok"]) {
+  for (const skill of ["claude", "grok", "commandcode"]) {
     for (const scenario of scenarios) await runScenario(h, skill, scenario);
   }
 

@@ -217,6 +217,12 @@ function parseModelLines(raw, format) {
     identifiers = lines
       .filter((line) => line.startsWith("* "))
       .map((line) => line.slice(2).replace(/\s*\(default\)$/, "").trim());
+  } else if (format === "commandcode") {
+    // "vendor/name  description" rows, grouped under plain-text section headers and a
+    // count line. A slash in the first column is what separates a model row from those.
+    identifiers = lines
+      .map((line) => line.split(/\s+/, 1)[0])
+      .filter((first) => first.includes("/"));
   } else if (format === "table") {
     identifiers = lines
       .slice(1)

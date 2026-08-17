@@ -188,6 +188,39 @@ if (["pi-success", "pi-error"].includes(process.env.SMOKE_MODE)) {
     }));
     process.exit(failed ? 1 : 0);
   });
+} else if ([
+  "commandcode-success",
+  "commandcode-unfinished",
+  "commandcode-read-only-clean",
+  "commandcode-read-only-append",
+].includes(process.env.SMOKE_MODE)) {
+  let brief = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (chunk) => { brief += chunk; });
+  process.stdin.on("end", () => {
+    const unfinished = process.env.SMOKE_MODE === "commandcode-unfinished";
+    if (process.env.SMOKE_MODE === "commandcode-read-only-append") {
+      fs.appendFileSync(process.env.SMOKE_APPEND_FILE ?? "already-dirty.txt", "appended by fake commandcode\n");
+    }
+    if (process.env.SMOKE_ARGS_FILE) fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify({ args, brief, cwd: process.cwd() }));
+    console.log(JSON.stringify({ type: "event", event: { type: "turn_end", turnNumber: 1, hadToolCalls: true } }));
+    // run_end carries the session id nested, as the real CLI does; the result line repeats it.
+    console.log(JSON.stringify({
+      type: "event",
+      event: { type: "run_end", result: { nextState: { sessionId: "commandcode-session-1" } } },
+    }));
+    console.log(JSON.stringify({
+      type: "result",
+      subtype: unfinished ? "max_turns" : "success",
+      sessionId: "commandcode-session-1",
+      stopReason: unfinished ? "max_turns" : "end_turn",
+      usage: { inputTokens: 7, outputTokens: 2, cacheReadTokens: 1, cacheWriteTokens: 0 },
+      durationMs: 42,
+      finalText: unfinished ? "ran out of turns partway" : "fake commandcode completed",
+    }));
+    // The real CLI exits 0 for a clean run even when the task did not finish.
+    process.exit(0);
+  });
 } else if (process.env.SMOKE_MODE === "copilot-success") {
   fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify(args));
   console.log(JSON.stringify({ type: "assistant.message", data: { content: "working" }, ephemeral: false }));

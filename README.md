@@ -69,6 +69,7 @@ Skip setup when you want one implementer or one-off dials. Pick the skill for a 
 | [`claude-delegate`](skills/claude-delegate/SKILL.md) | [Claude Code](https://code.claude.com/docs/en/overview) (`claude`) | `acceptEdits` + explicit tool surface | `--read-only` (`plan` mode) | `--resume-last`, `--session <id>` |
 | [`cline-delegate`](skills/cline-delegate/SKILL.md) | [Cline](https://github.com/cline/cline) (`cline`) | `--auto-approve true` in act mode; upstream sandbox not configured by the relay | `--plan` + `--auto-approve false` (relay-enforced pair) | — (headless JSON resume unsupported) |
 | [`codex-delegate`](skills/codex-delegate/SKILL.md) | [OpenAI Codex](https://github.com/openai/codex) (`codex`) | `--sandbox workspace-write` | `--read-only` | `--resume-last`, `--session <id>` |
+| [`commandcode-delegate`](skills/commandcode-delegate/SKILL.md) | [Command Code](https://commandcode.ai/docs/headless) (`cmd`) | `--yolo` — the only headless write state; no sandbox [^commandcode] | `--read-only` (withheld tools + `plan`) | `--continue-last`, `--session <id>` |
 | [`cursor-delegate`](skills/cursor-delegate/SKILL.md) | [Cursor Agent](https://cursor.com/cli) (`cursor-agent`) | `--force`; `--no-force` withholds command approval | `--read-only` (plan mode) | `--resume-last`, `--session <id>` |
 | [`grok-delegate`](skills/grok-delegate/SKILL.md) | Grok Build (`grok`) | workspace-scoped; `--full-access` opt-in | `--read-only` — best-effort [^grok] | `--resume-last`, `--session <id>` |
 | [`kimi-delegate`](skills/kimi-delegate/SKILL.md) | [Kimi Code](https://moonshotai.github.io/kimi-code/en/) (`kimi`) | `auto permission mode`, always | — [^none] | `--resume-last`, `--session <id>` |
@@ -78,6 +79,12 @@ Skip setup when you want one implementer or one-off dials. Pick the skill for a 
 | [`vibe-delegate`](skills/vibe-delegate/SKILL.md) | [Mistral Vibe](https://github.com/mistralai/mistral-vibe) (`vibe`) | `accept-edits`; `--full-access` opt-in | `--plan-only` (`plan` agent) | `--resume-last`, `--session <id>` |
 | [`copilot-delegate`](skills/copilot-delegate/SKILL.md) | [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-cli) (`copilot`) | `--allow-all-tools` opt-in; headless auto-deny otherwise | `--read-only` (`--mode plan`) | `--resume-last`, `--session <id>` |
 | [`warp-delegate`](skills/warp-delegate/SKILL.md) | [Warp Agent CLI](https://docs.warp.dev/cli/) (`oz`) | full local tools — no sandbox, no permission modes [^none] | — [^none] | `--conversation <id>` |
+
+[^commandcode]: Command Code's headless mode has two states and nothing between them: a `-p` run
+withholds the write, edit, and shell tools, and `--yolo` (alias `--dangerously-skip-permissions`)
+allows every tool anywhere the process can reach. `--permission-mode auto-accept` and `--tools-all`
+do **not** lift the write gate. So an implementation run is full-trust with no path restriction —
+scope it with the brief and a clean tree, and read `touchedFiles` for writes outside it.
 
 [^none]: No CLI-enforced read-only mode. `touchedFiles` and the diff are what you review against, not
 a guarantee: they are post-run `git status` in the workspace, so they cannot show ignored files,
@@ -241,6 +248,18 @@ Per skill — platform, CLI version, and what the run exercised:
   `--session`, and `--resume-last` runs are contributor-reported.
 - `qoder-delegate` — macOS, `qodercli` 1.0.47, by the contributor: Lite edit run, `accept_edits`,
   explicit model and 32768-token context window, no commit.
+- `commandcode-delegate` — macOS, `cmd` 1.26.0: **live read-only run verified**, plus the full smoke
+  matrix (timeout, abort, atomic result publication, preflight hang/fail, and the whole
+  read-only tripwire scenario set, which this relay now enters alongside `claude` and `grok`). The
+  live dispatch verified version preflight, launch, NDJSON parsing (`sessionId` from the nested
+  `run_end` state and the `result` line, `finalText` → `finalMessage` + `final.txt`,
+  `subtype`/`stopReason`/`usage`), `readOnlyViolation: false` on a clean tree, and `status:
+  "completed"` / exit 0. The autonomy claim is verified negatively too: separate live runs confirmed
+  that `--tools-all` and `--permission-mode auto-accept` leave the headless write gate closed, and
+  that `--yolo` opens it. Write and `--session` resume runs were exercised live against the raw CLI
+  while mapping its contract, but not yet end to end through the relay — that pairing is
+  contract-tested only. Windows is untested and the relay refuses to guess there (the binary name
+  `cmd` is `cmd.exe`); it requires `COMMANDCODE_BIN` to name a real executable.
 - `warp-delegate` — macOS, `oz` 0.2026.05.27.15.44.stable_01: **live edit run verified**. A relay
   dispatch against a throwaway git repository had Warp add a function plus four assertions across
   two files; both project gates were re-run independently by the orchestrator, the diff matched the

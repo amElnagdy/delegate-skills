@@ -4,8 +4,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const RELAYS = ["claude", "cline", "codex", "opencode", "agy", "grok", "kimi", "qoder", "vibe", "cursor", "pi", "aider", "copilot", "warp"];
-const READ_ONLY_TRIPWIRE_RELAYS = ["claude", "grok"];
+const RELAYS = ["claude", "cline", "codex", "opencode", "agy", "grok", "kimi", "qoder", "vibe", "cursor", "pi", "aider", "copilot", "warp", "commandcode"];
+const READ_ONLY_TRIPWIRE_RELAYS = ["claude", "grok", "commandcode"];
 const SYMBOLS = [
   ["MAX_TIMER_MS", "const", RELAYS],
   ["parseDuration", "function", RELAYS],
