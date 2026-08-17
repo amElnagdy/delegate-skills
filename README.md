@@ -248,18 +248,31 @@ Per skill — platform, CLI version, and what the run exercised:
   `--session`, and `--resume-last` runs are contributor-reported.
 - `qoder-delegate` — macOS, `qodercli` 1.0.47, by the contributor: Lite edit run, `accept_edits`,
   explicit model and 32768-token context window, no commit.
-- `commandcode-delegate` — macOS, `cmd` 1.26.0: **live read-only run verified**, plus the full smoke
-  matrix (timeout, abort, atomic result publication, preflight hang/fail, and the whole
-  read-only tripwire scenario set, which this relay now enters alongside `claude` and `grok`). The
-  live dispatch verified version preflight, launch, NDJSON parsing (`sessionId` from the nested
-  `run_end` state and the `result` line, `finalText` → `finalMessage` + `final.txt`,
-  `subtype`/`stopReason`/`usage`), `readOnlyViolation: false` on a clean tree, and `status:
-  "completed"` / exit 0. The autonomy claim is verified negatively too: separate live runs confirmed
-  that `--tools-all` and `--permission-mode auto-accept` leave the headless write gate closed, and
-  that `--yolo` opens it. Write and `--session` resume runs were exercised live against the raw CLI
-  while mapping its contract, but not yet end to end through the relay — that pairing is
-  contract-tested only. Windows is untested and the relay refuses to guess there (the binary name
-  `cmd` is `cmd.exe`); it requires `COMMANDCODE_BIN` to name a real executable.
+- `commandcode-delegate` — macOS, `cmd` 1.26.0: **live edit run verified**. A relay dispatch against a
+  throwaway git repository had Command Code fix a remainder-dropping bug in a money-splitting function
+  and add three tests; the project gate was re-run independently by the orchestrator (2 tests before,
+  5 passing after), the diff matched the brief with no writes outside the two named files, and `HEAD`
+  was untouched — the relay does not commit, and the run did not either. A second dispatch with
+  `--session <id>` verified resume through the relay: a one-line delta brief amended exactly the comment
+  it named, with the session id from the first run. A `--read-only` dispatch verified the other
+  direction, returning `readOnlyViolation: false` on a clean tree. Also verified negatively: separate
+  live runs confirmed `--tools-all` and `--permission-mode auto-accept` leave the headless write gate
+  closed and only `--yolo` opens it.
+
+  Live running surfaced a CLI limitation the relay now handles. `cmd` ends a run with a `run_end` event
+  embedding the whole conversation, then exits with `process.exit`, discarding whatever is still queued
+  in its stdout pipe: both write runs lost their `result` line entirely (one cut ~8 KB into `run_end`,
+  the other losing its last ~780 events). So nothing load-bearing is read from that tail — `sessionId`
+  comes from `run_start`, the first line of the stream, and the report from the last `message_end` or
+  its streamed deltas — the event log is written in batches so the relay drains the pipe as fast as it
+  can, `resultLine` reports `complete`/`truncated`/`absent` so a consumer knows which fields are
+  trustworthy, and exit 0 with a lost result line is treated as success rather than failure, since
+  `cmd` still exits non-zero for auth, rate-limit, turn-cap, and credit failures. A smoke case pins
+  that contract. On a long run the report itself can land in the discarded region, so the diff is the
+  deliverable and a thin report means missing information, not a failed run.
+
+  Windows is untested and the relay refuses to guess there (the binary name `cmd` is `cmd.exe`); it
+  requires `COMMANDCODE_BIN` to name a real executable.
 - `warp-delegate` — macOS, `oz` 0.2026.05.27.15.44.stable_01: **live edit run verified**. A relay
   dispatch against a throwaway git repository had Warp add a function plus four assertions across
   two files; both project gates were re-run independently by the orchestrator, the diff matched the

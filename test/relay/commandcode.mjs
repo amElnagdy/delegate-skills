@@ -55,6 +55,7 @@ for (const scenario of [
     value.status === "completed" &&
     value.finalMessage === "fake commandcode completed" &&
     value.sessionId === "commandcode-session-1" &&
+    value.resultLine === "complete" &&
     value.resultSubtype === "success" &&
     value.stopReason === "end_turn" &&
     value.usage?.outputTokens === 2 &&
@@ -76,6 +77,20 @@ for (const scenario of [
     value.stopReason === "max_turns" &&
     value.error?.includes("max_turns") &&
     value.finalMessage === "ran out of turns partway");
+}
+// cmd embeds the whole transcript in run_end and exits without draining stdout, so the
+// result line is routinely lost. A successful run must survive that, with the loss named.
+{
+  const { run, outDir } = dispatch(h, "truncated-tail", [], { SMOKE_MODE: "commandcode-truncated-tail" });
+  const value = existsSync(join(outDir, "result.json")) ? h.result(outDir) : {};
+  h.check("commandcode truncated tail: exit 0 is still a completed run", run.status === 0 && value.status === "completed");
+  h.check("commandcode truncated tail: the loss is named, not hidden",
+    value.resultLine === "truncated" &&
+    value.resultSubtype === null &&
+    value.usage === null);
+  h.check("commandcode truncated tail: session id and report survive via the early events",
+    value.sessionId === "commandcode-session-1" &&
+    value.finalMessage === "fake commandcode completed");
 }
 // The read-only guarantee is the CLI's permission layer, not a sandbox, so the relay
 // proves it after the fact — both directions.

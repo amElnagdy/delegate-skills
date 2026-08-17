@@ -92,6 +92,8 @@ brief immediately.
   (global "most recent", which another run can steal)
 - `finalMessage` — Command Code's own final report (the `<structured_output_contract>` you asked for),
   lifted from `finalText` on its result line and also written to `finalPath`
+- `resultLine` — how much of the tail survived: `complete`, `truncated`, or `absent`. See the
+  truncation section below; the three fields under it are null unless this says `complete`
 - `resultSubtype` / `stopReason` / `usage` / `durationMs` — straight from that result line: `success`,
   `error`, or `max_turns`; why the turn ended; token counts; wall-clock
 - `touchedFiles` — `git status --porcelain` lines in the working root: your review starting point.
@@ -113,6 +115,31 @@ brief immediately.
 
 The helper also prints a summary to stdout and exits with Command Code's exit code, so a wrapping
 script can branch on success/failure directly.
+
+## The tail is not reliable — read `resultLine`
+
+`cmd` ends a run with a `run_end` event that embeds the **entire conversation** — every tool call,
+its arguments, and its result — and then exits with `process.exit`, which discards whatever is still
+queued in its stdout pipe. On any run big enough to matter, the tail therefore arrives cut mid-write
+and the `result` line after it never lands. Measured on `cmd` 1.26.0: two successful write runs lost
+their result line, one cut at ~8 KB into the `run_end` line, the other losing the last ~780 events
+outright. A synthetic writer that exits the same way loses the stream down to whatever fits the OS
+pipe buffer, no matter how fast the reader is — so this is the CLI's flush behavior, not the relay's
+read speed (the relay batches its event-log writes precisely so it drains as fast as it can).
+
+What the relay does about it, and what it means for you:
+
+- Nothing load-bearing is read from the tail. `sessionId` comes from `run_start`, the **first** line of
+  the stream, so resume always works. The report is taken from the last `message_end`, falling back to
+  the streamed `text_delta`s of a message whose `message_end` was lost.
+- `resultLine` tells you which case you got. Under `truncated` or `absent`, `resultSubtype`,
+  `stopReason`, `usage`, and `durationMs` are `null` because the CLI never delivered them — not because
+  the run lacked them. The summary prints a note saying so.
+- `finalMessage` can still come back short or empty when the report itself was in the discarded
+  region. **The diff is the deliverable, not the report** — review `touchedFiles` and `git diff`, and
+  treat a thin report as missing information rather than as a failed run.
+- Read-only runs are small and usually keep a `complete` result line, so the second-opinion use is
+  unaffected.
 
 **A zero exit is not a completed task.** Command Code exits `0` for a run that ended cleanly with the
 work unfinished — including the case where every write was refused because `--yolo` was absent. The

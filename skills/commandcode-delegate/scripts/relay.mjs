@@ -79,9 +79,17 @@
  *
  * Result: written to <out-dir>/result.json and summarized on stdout —
  *   status, exitCode, signal, commandCodeVersion, sessionId (for a later --session),
- *   resultSubtype/stopReason/usage from Command Code's own result line, finalMessage
- *   (its report), touchedFiles (git porcelain, null if git can't report),
- *   readOnlyViolation, and the paths to events.jsonl and final.txt.
+ *   resultLine plus resultSubtype/stopReason/usage from Command Code's own result
+ *   line, finalMessage (its report), touchedFiles (git porcelain, null if git
+ *   can't report), readOnlyViolation, and the paths to events.jsonl and final.txt.
+ *
+ * A caveat that shapes the parsing: cmd's `run_end` event embeds the entire
+ * conversation, so on a real run the tail of the stream exceeds a pipe buffer and
+ * cmd exits without waiting for it to drain — the tail arrives cut mid-write and
+ * the result line after it is simply lost (seen on cmd 1.26.0). `resultLine`
+ * reports which happened ("complete" | "truncated" | "absent"), and everything
+ * load-bearing is read from the small early events instead: sessionId from
+ * `run_start`, the report from the last `message_end`.
  *
  * Exit codes: a pre-run usage error (bad/missing args, empty brief) exits 2
  * before any run and writes no result file; a missing `cmd` binary exits 127;
@@ -89,6 +97,8 @@
  * authenticated, 5 rate limited, 8 max turns, 10 out of credits, …). A run that
  * exits 0 while its own result line says `subtype: "error"` is reported failed
  * with exit 1 — Command Code can end a run cleanly with the task unfinished.
+ * Where that line was truncated or lost, exit 0 is taken at face value: cmd still
+ * exits non-zero for the failures that matter.
  * If the child dies on a signal, the exit code is 128 plus the signal number and
  * `result.json` records the signal.
  * Once the brief validates, `result.json` is written on every outcome —
@@ -121,6 +131,10 @@ import { createHash } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
 import { TextDecoder } from "node:util";
 
+const MAX_BUFFERED_CHARS = 1_048_576;
+// Batch size for the event log; small enough to bound memory, large enough that the
+// stdout pipe keeps draining while we write.
+const EVENT_FLUSH_CHARS = 262_144;
 const VERSION_PROBE_TIMEOUT_MS = 10_000;
 const MAX_TIMER_MS = 2_147_483_647;
 const SAFE_SESSION = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
@@ -679,8 +693,18 @@ function buildArgv(opts) {
 /**
  * Command Code streams NDJSON: `{"type":"event",…}` lines, then one
  * `{"type":"result",…}` line carrying finalText, sessionId, subtype, stopReason,
- * and usage. The last result line wins; a sessionId on any line is a fallback for
- * runs that die before the result line lands.
+ * and usage.
+ *
+ * That tail cannot be relied on. The `run_end` event just before it embeds the
+ * entire conversation — every tool call, argument, and result — so on a real run
+ * it is far larger than a pipe buffer, and cmd exits without waiting for the
+ * write to drain: the tail arrives cut mid-string and the result line never
+ * lands at all (observed on cmd 1.26.0, a successful run truncated at ~8 KB).
+ * So everything load-bearing is taken from the small early events instead —
+ * `run_start` carries the sessionId as the very first line, and each
+ * `message_end` carries that message's text blocks, the last of which is the
+ * report. The result line is still parsed when it survives, because its subtype
+ * is the only place a clean-exit failure is named.
  */
 function scanEventLine(line, state) {
   let event;
@@ -689,9 +713,26 @@ function scanEventLine(line, state) {
   } catch {
     return; // progress noise, or a partial line; events.jsonl keeps it either way
   }
-  if (typeof event?.sessionId === "string" && event.sessionId) state.sessionId = event.sessionId;
-  const nested = event?.event?.result?.nextState?.sessionId;
-  if (typeof nested === "string" && nested) state.sessionId = nested;
+  const inner = event?.event;
+  for (const candidate of [event?.sessionId, inner?.sessionId, inner?.result?.nextState?.sessionId]) {
+    if (typeof candidate === "string" && candidate) state.sessionId = candidate;
+  }
+  // Streamed text, kept per message: the report often arrives as deltas long before
+  // the message_end that collects them, and on a cut stream the deltas are all there is.
+  if (inner?.type === "message_start") state.deltas = [];
+  if (inner?.type === "text_delta" && typeof inner.delta === "string") state.deltas.push(inner.delta);
+  if (inner?.type === "text_end" && typeof inner.text === "string" && inner.text.trim()) {
+    state.lastText = inner.text.trim();
+  }
+  // The report as the model actually sent it, before the oversized tail.
+  if (inner?.type === "message_end" && Array.isArray(inner.content)) {
+    const text = inner.content
+      .filter((block) => block?.type === "text" && typeof block.text === "string")
+      .map((block) => block.text)
+      .join("\n")
+      .trim();
+    if (text) state.lastText = text;
+  }
   if (event?.type !== "result") return;
   state.result = {
     subtype: typeof event.subtype === "string" ? event.subtype : null,
@@ -703,9 +744,31 @@ function scanEventLine(line, state) {
   };
 }
 
-function recordEventLine(eventsPath, line, state) {
-  appendFileSync(eventsPath, `${line}\n`, "utf8");
+/**
+ * Buffer the event log instead of appending per line, because reading speed decides
+ * how much of the stream survives. cmd ends with `process.exit`, which discards
+ * whatever is still queued in the stdout pipe, so a relay that blocks on a
+ * synchronous write for every line loses the tail: appending each of ~2000 lines
+ * individually kept only 51 of them in a reproduction, while buffering keeps the
+ * whole stream. Lines are parsed in memory as they arrive and flushed in batches.
+ */
+function recordEventLine(run, line, state) {
+  state.pending.push(line, "\n");
+  state.pendingChars += line.length + 1;
+  if (state.pendingChars >= EVENT_FLUSH_CHARS) flushEvents(run, state);
   scanEventLine(line, state);
+}
+
+function flushEvents(run, state) {
+  if (state.pending.length === 0) return;
+  const batch = state.pending.join("");
+  state.pending = [];
+  state.pendingChars = 0;
+  try {
+    appendFileSync(run.eventsPath, batch, "utf8");
+  } catch {
+    // The log is a diagnostic aid; losing it must not lose the run's result.
+  }
 }
 
 /** The relay's own files, excluded from the read-only tripwire: --out-dir may sit inside the repo. */
@@ -761,6 +824,7 @@ function makeResultWriter(opts, version, run, beforeTree, beforeFingerprints) {
       finalPath: existsSync(run.finalPath) ? run.finalPath : null,
       // Absent on write-capable runs would read as "not checked"; null says the
       // question does not apply, and only --read-only replaces it with a verdict.
+      resultLine: null,
       readOnlyViolation: null,
       ...extra,
     };
@@ -826,7 +890,7 @@ function dispatchToCommandCode(opts, brief, run, writeResult, env) {
   // detached on POSIX: the child leads a new process group so killChild can fell the whole tree.
   const child = spawn(BIN, argv, { cwd: opts.cd, stdio: ["pipe", "pipe", "pipe"], shell: false, detached: process.platform !== "win32", env });
 
-  const state = { sessionId: null, result: null };
+  const state = { sessionId: null, result: null, lastText: null, truncatedTail: false, deltas: [], pending: [], pendingChars: 0 };
   let stdoutBuf = "";
   const stderrTail = [];
 
@@ -842,7 +906,15 @@ function dispatchToCommandCode(opts, brief, run, writeResult, env) {
       const line = stdoutBuf.slice(0, nl);
       stdoutBuf = stdoutBuf.slice(nl + 1);
       if (!line.trim()) continue;
-      recordEventLine(run.eventsPath, line, state);
+      recordEventLine(run, line, state);
+    }
+    // A run_end event embeds the whole transcript, so one line can be arbitrarily
+    // large. Flush it as a fragment rather than growing the buffer without bound;
+    // the fragment cannot be parsed, which is exactly what a truncated tail is.
+    if (stdoutBuf.length > MAX_BUFFERED_CHARS) {
+      recordEventLine(run, stdoutBuf, state);
+      stdoutBuf = "";
+      state.truncatedTail = true;
     }
   });
 
@@ -855,10 +927,14 @@ function dispatchToCommandCode(opts, brief, run, writeResult, env) {
     while (stderrTail.length > 20) stderrTail.shift();
   });
 
-  // Command Code has no -o flag, so the final report only exists inside the NDJSON
-  // result line; the relay writes final.txt itself once that line arrives.
+  // Command Code has no -o flag, so the report exists only in the event stream and
+  // the relay writes final.txt itself. Prefer the result line's finalText, and fall
+  // back to the last message_end text — which is the same report, delivered earlier
+  // and small enough to survive a truncated tail.
   const persistFinal = () => {
-    const text = state.result?.finalText ?? "";
+    // Last resort: the deltas of a message whose message_end never arrived.
+    const streamed = state.deltas.join("").trim();
+    const text = state.result?.finalText || state.lastText || streamed || "";
     if (!text) return "";
     writeFileSync(run.finalPath, `${text}\n`, "utf8");
     return text.trim();
@@ -906,7 +982,7 @@ function dispatchToCommandCode(opts, brief, run, writeResult, env) {
         resultSubtype: state.result?.subtype ?? null,
         stopReason: state.result?.stopReason ?? null,
         usage: state.result?.usage ?? null,
-        finalMessage: persistFinal(),
+        finalMessage: (flushEvents(run, state), persistFinal()),
         touchedFiles: touched,
         stderrTail: stderrTail.slice(-20),
         error: `the relay was killed by ${sig}; cmd was terminated with it — inspect the working tree before re-dispatching`,
@@ -953,27 +1029,38 @@ function dispatchToCommandCode(opts, brief, run, writeResult, env) {
     // a descendant that ignored SIGTERM must not outlive the timeout report: once the
     // parent is down, sweep the group (no-op where taskkill already felled the tree)
     if (watchdogFired) killChild(child, "SIGKILL");
-    if (stdoutBuf.trim()) recordEventLine(run.eventsPath, stdoutBuf, state);
+    if (stdoutBuf.trim()) {
+      recordEventLine(run, stdoutBuf, state);
+      // Leftover bytes with no closing newline are a cut-off write, not a final line.
+      state.truncatedTail = true;
+    }
+    flushEvents(run, state);
     const finalMessage = persistFinal();
-    // Command Code can exit 0 with its own result line reporting an error or a turn
-    // cap; a clean process exit is not a completed task. No result line at all means
-    // the stream never got there — also not a completion.
-    const cliOk = code === 0 && state.result !== null && state.result.subtype === "success";
+    // Command Code can exit 0 with its own result line reporting an error or a turn cap,
+    // so a clean process exit is not proof of a completed task where that line exists.
+    // Where it does NOT, the exit code is the authority: cmd truncates its oversized tail
+    // on exit, and treating that lost line as a failure would fail every large successful
+    // run. It still exits non-zero for the real failures (3 auth, 5 rate limit, 8 turn
+    // cap, 10 credits), so nothing is being waved through.
+    const cliOk = code === 0 && (state.result === null || state.result.subtype === "success");
     const succeeded = cliOk && !watchdogFired;
     const mapped = code ?? (constants.signals[signal] ? 128 + constants.signals[signal] : 1);
     const touched = gitTouchedFiles(opts.cd);
     const cliError = state.result?.error
       ? `Command Code reported ${state.result.subtype ?? "an error"}: ${state.result.error}`
       : code === 0 && !cliOk
-        ? state.result === null
-          ? "Command Code exited 0 without a result line; the run ended before it reported"
-          : `Command Code exited 0 but reported subtype "${state.result.subtype}" (stopReason ${state.result.stopReason ?? "unknown"})`
+        ? `Command Code exited 0 but reported subtype "${state.result.subtype}" (stopReason ${state.result.stopReason ?? "unknown"})`
         : null;
     const result = writeResult({
       status: succeeded ? "completed" : watchdogFired ? "timeout" : "failed",
       exitCode: succeeded ? 0 : mapped === 0 ? 1 : mapped,
       signal: signal ?? null,
       sessionId: state.sessionId,
+      // How much of the tail survived, so a consumer knows which fields are trustworthy:
+      // "complete" = the result line landed, "truncated" = it was cut off mid-write,
+      // "absent" = it never arrived. Under the last two, subtype/stopReason/usage are
+      // null because cmd never delivered them — not because the run lacked them.
+      resultLine: state.result !== null ? "complete" : state.truncatedTail ? "truncated" : "absent",
       resultSubtype: state.result?.subtype ?? null,
       stopReason: state.result?.stopReason ?? null,
       usage: state.result?.usage ?? null,
@@ -1040,6 +1127,9 @@ function printSummary(result, resultPath) {
   if (result.continueLast) lines.push("mode: continued most recent session");
   if (result.session) lines.push(`mode: resumed session ${result.session}`);
   if (result.sessionId) lines.push(`session id (resume with: --session ${result.sessionId})`);
+  if (result.resultLine === "truncated" || result.resultLine === "absent") {
+    lines.push(`note: cmd's result line was ${result.resultLine} (its oversized run_end tail is not flushed on exit), so subtype/usage are unavailable; the report and session id come from the earlier events.`);
+  }
   if (result.resultSubtype && result.resultSubtype !== "success") {
     lines.push(`Command Code result: ${result.resultSubtype}${result.stopReason ? ` (stopReason ${result.stopReason})` : ""}`);
   }
