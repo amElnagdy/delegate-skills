@@ -30,7 +30,8 @@ export function runDelegateSetup(h) {
     "discover covers every implementer in the smoke matrix",
     Array.isArray(report?.discovered) &&
       Array.isArray(report?.missing) &&
-      report.discovered.length + report.missing.length === h.SKILLS.length,
+      [...report.discovered, ...report.missing].map((entry) => entry.key).sort().join(",") ===
+        [...h.SKILLS].sort().join(","),
   );
 
   const agyProbeDir = join(h.scratch, "discover-agy");
