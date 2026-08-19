@@ -347,6 +347,19 @@ if (observation === "models") {
     h.check("config validate rejects unknown copilot effort",
       rejectCopilot.status === 2 && /low, medium, high, xhigh, max/.test(rejectCopilot.stderr));
 
+    const badOmp = {
+      version: "delegate-fleet.v1",
+      lanes: { feature: { implementer: "omp", effort: "inherit" } },
+    };
+    const badOmpFile = join(cfgRepo, "bad-omp.json");
+    writeFileSync(badOmpFile, `${JSON.stringify(badOmp)}\n`);
+    const rejectOmp = spawnSync(process.execPath, [join(setupDir, "config.mjs"), "validate", badOmpFile], {
+      encoding: "utf8",
+      env: process.env,
+    });
+    h.check("config validate rejects unknown omp thinking effort",
+      rejectOmp.status === 2 && /off, auto, minimal, low, medium, high, xhigh, max/.test(rejectOmp.stderr));
+
     const badCursorSandbox = {
       version: "delegate-fleet.v1",
       lanes: { feature: { implementer: "cursor", sandbox: "workspace-write" } },
@@ -417,6 +430,39 @@ if (observation === "models") {
         grokDials?.dials?.readOnly === undefined,
     );
     // Restore the multi-lane global map for the rest of the fleet suite.
+    spawnSync(process.execPath, [join(setupDir, "config.mjs"), "write", "--scope", "global", goodFile], {
+      encoding: "utf8",
+      env: process.env,
+    });
+
+    const ompThinking = {
+      version: "delegate-fleet.v1",
+      lanes: { feature: { implementer: "omp", effort: "high", model: "google/fake-model" } },
+    };
+    const ompThinkingFile = join(cfgRepo, "omp-thinking.json");
+    writeFileSync(ompThinkingFile, `${JSON.stringify(ompThinking)}\n`);
+    spawnSync(process.execPath, [join(setupDir, "config.mjs"), "write", "--scope", "global", ompThinkingFile], {
+      encoding: "utf8",
+      env: process.env,
+    });
+    const ompResolve = spawnSync(
+      process.execPath,
+      [join(setupDir, "lane.mjs"), "resolve", "--cwd", bare, "--lane", "feature", "--implementer", "omp"],
+      { encoding: "utf8", env: process.env },
+    );
+    let ompDials = null;
+    try {
+      ompDials = JSON.parse(ompResolve.stdout);
+    } catch {
+      ompDials = null;
+    }
+    h.check(
+      "lane resolve: omp effort → thinking",
+      ompResolve.status === 0 &&
+        ompDials?.dials?.thinking === "high" &&
+        ompDials?.dials?.effort === undefined &&
+        ompDials?.dials?.model === "google/fake-model",
+    );
     spawnSync(process.execPath, [join(setupDir, "config.mjs"), "write", "--scope", "global", goodFile], {
       encoding: "utf8",
       env: process.env,
