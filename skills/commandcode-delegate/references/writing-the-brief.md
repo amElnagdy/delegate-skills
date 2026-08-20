@@ -54,21 +54,23 @@ profile calls for them:
 - **Research / recommendations** — add `<research_mode>` (separate observed facts, inferences, open
   questions).
 
-## Path discipline is the sandbox
+## Path discipline is scope guidance
 
 An implementation run goes out under `--yolo`, which means no filesystem boundary: Command Code can
-write anywhere the process can reach, not just under `--cd`. The brief's path list is therefore doing
-the job a sandbox would do elsewhere. Name the files or directories it may change, say plainly that
-everything else is off limits, and keep `<action_safety>` in every write-capable brief. Then verify it
-held — `touchedFiles` in the result is the check, and it is worth reading even when the report says
-the change was small.
+write anywhere the process can reach, not just under `--cd`. Name the files or directories it may
+change, say plainly that everything else is off limits, and keep `<action_safety>` in every
+write-capable brief. That is guidance, not a sandbox. A worktree isolates the checkout but does not
+contain the process; use a container or another OS-enforced boundary when writes outside the target
+tree are unacceptable. `touchedFiles` is only a review aid: it cannot show ignored files or writes
+outside the repository.
 
 ## `git commit` is not blocked, only forbidden
 
 Sibling delegates can rely on a sandbox refusing to write `.git`. This one cannot: under `--yolo`,
-Command Code is perfectly able to commit, so the brief has to tell it not to. Keep the "do NOT run
-git add or git commit" line — and if a run commits anyway, unpick it (`git reset --soft HEAD~1`) before
-reviewing, so you are reviewing a diff rather than history.
+Command Code can commit, so the brief has to tell it not to. Record `HEAD` before dispatch and keep the
+"do NOT run git add or git commit" line. If `HEAD` changed, inspect status, staged and unstaged diffs,
+and the intervening log first. Only after confirming the whole commit range belongs to the run, use
+`git reset --soft <recorded-baseline>` so you can review that range as a diff.
 
 ## Discover the real gates — don't hardcode
 

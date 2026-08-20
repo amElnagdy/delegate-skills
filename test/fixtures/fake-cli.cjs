@@ -102,6 +102,42 @@ if (process.env.SMOKE_MODE === "agy-silent-edit") {
   process.exit(0);
 }
 if (process.env.SMOKE_MODE === "agy-silent-noop") process.exit(0);
+if (process.env.SMOKE_MODE === "zcode-success") {
+  fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify(args));
+  // ZCode's bundled AI SDK prints this banner with console.info — i.e. on stdout,
+  // ahead of the JSON document. The relay must parse past it.
+  console.log("AI SDK Warning System: To turn off warning logging, set the AI_SDK_LOG_WARNINGS global to false.");
+  console.log(JSON.stringify({
+    sessionId: "sess_smoke-1",
+    traceId: "trace-1",
+    turnId: "turn_1",
+    response: "fake zcode completed",
+    usage: {
+      source: "provider",
+      modelRequestCount: 1,
+      inputTokens: 7,
+      outputTokens: 2,
+      totalTokens: 9,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      reasoningTokens: 0,
+    },
+    eventCount: 12,
+    projection: {
+      status: "idle",
+      turnCount: 1,
+      totalTokenCount: 9,
+      contextUsed: 9,
+      contextWindow: 200000,
+    },
+  }, null, 2));
+  process.exit(0);
+}
+if (process.env.SMOKE_MODE === "zcode-garbled") {
+  // Exit 0 with output that never parses: the relay must still complete, but say so.
+  console.log("not json at all");
+  process.exit(0);
+}
 if (process.env.SMOKE_MODE === "qoder-success") {
   fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify(args));
   console.log(JSON.stringify({
@@ -140,7 +176,31 @@ if (process.env.SMOKE_MODE === "grok-read-only") {
   console.log(JSON.stringify({ type: "end", sessionId: "grok-session-1" }));
   process.exit(0);
 }
-if (["pi-success", "pi-error"].includes(process.env.SMOKE_MODE)) {
+if (["omp-success", "omp-error"].includes(process.env.SMOKE_MODE)) {
+  let brief = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (chunk) => { brief += chunk; });
+  process.stdin.on("end", () => {
+    const failed = process.env.SMOKE_MODE === "omp-error";
+    fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify({ args, brief }));
+    console.log(JSON.stringify({ type: "session", version: 3, id: "omp-session-1", timestamp: "2026-01-01T00:00:00.000Z", cwd: process.cwd() }));
+    console.log(JSON.stringify({ type: "agent_start" }));
+    console.log(JSON.stringify({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: failed ? "fake omp failed" : "fake omp completed" }],
+        provider: "google",
+        model: "fake-model",
+        usage: { input: 7, output: 2, cacheRead: 1, cacheWrite: 0, totalTokens: 10, cost: { total: 0.001 } },
+        stopReason: failed ? "error" : "stop",
+        ...(failed ? { errorMessage: "fake provider failure" } : {}),
+      },
+    }));
+    console.log(JSON.stringify({ type: "agent_end", messages: [] }));
+    process.exit(0);
+  });
+} else if (["pi-success", "pi-error"].includes(process.env.SMOKE_MODE)) {
   let brief = "";
   process.stdin.setEncoding("utf8");
   process.stdin.on("data", (chunk) => { brief += chunk; });

@@ -16,9 +16,11 @@
         "vibe-delegate",
         "cursor-delegate",
         "pi-delegate",
+        "omp-delegate",
         "aider-delegate",
         "copilot-delegate",
         "warp-delegate",
+        "zcode-delegate",
         "commandcode-delegate"
       ]
     },

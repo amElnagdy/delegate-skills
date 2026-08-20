@@ -112,8 +112,8 @@ export const IMPLEMENTERS = Object.freeze([
   {
     key: "commandcode",
     skill: "commandcode-delegate",
-    // Command Code's binary; on Windows the name is cmd.exe, so its relay requires
-    // COMMANDCODE_BIN and discovery here can only report what PATH resolves to.
+    // Command Code's PATH name on non-Windows. On Windows resolveLaunch requires
+    // COMMANDCODE_BIN so discovery never mistakes cmd.exe for this implementer.
     binary: "cmd",
     versionArgs: ["--version"],
     authProbe: { args: ["status"], successPattern: /Authenticated/i, failPattern: /not authenticated|logged out/i },
@@ -272,6 +272,27 @@ export const IMPLEMENTERS = Object.freeze([
     winShell: true,
   },
   {
+    key: "omp",
+    skill: "omp-delegate",
+    binary: "omp",
+    versionArgs: ["--version"],
+    authProbe: null,
+    // Must stay the `models` subcommand: `omp --list-models` is a stale flag and a
+    // hard error. Catalog output is grouped/JSON, not a stable identifier list, so
+    // this script does not parse it — the skill documents `omp models` instead.
+    modelProbe: null,
+    // ~/.omp/agent/sessions/<encoded-cwd>/<timestamp>_<sessionId>.jsonl.
+    usageProbe: {
+      envDir: "PI_CODING_AGENT_DIR",
+      homeSubdir: ".omp/agent",
+      path: ["sessions", "*"],
+      entry: "file",
+      match: /\.jsonl$/,
+    },
+    supports: ["provider", "model", "effort", "timeout", "readOnly"],
+    winShell: false,
+  },
+  {
     key: "aider",
     skill: "aider-delegate",
     binary: "aider",
@@ -326,6 +347,39 @@ export const IMPLEMENTERS = Object.freeze([
     supports: ["model", "timeout"],
     winShell: false,
   },
+  {
+    key: "zcode",
+    skill: "zcode-delegate",
+    binary: "zcode",
+    versionArgs: ["--version"],
+    // ZCode ships its CLI inside the desktop app rather than on PATH or npm, so
+    // discovery falls back to the installed bundle. Consulted only when `binary`
+    // is absent from PATH; the bundle is a Node bundle, hence the node launcher.
+    locate: {
+      launcher: "node",
+      candidates: {
+        win32: ["%LOCALAPPDATA%/Programs/ZCode/resources/glm/zcode.cjs"],
+        darwin: [
+          "/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs",
+          "~/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs",
+        ],
+        // Linux ships an AppImage with no fixed install path: nothing honest to guess.
+        linux: [],
+      },
+    },
+    // No auth-status command exists, and `zcode login` fails with ZaiCliOAuthError
+    // (seen on 0.16.1 and 0.16.3), so auth stays unknown rather than guessed.
+    authProbe: null,
+    // No --model flag: the model is chosen in the CLI's own config file.
+    modelProbe: null,
+    // ~/.zcode/cli holds sess_* directories under several subdirectories, but their
+    // counts disagree, so none is proven one-per-session. Unknown, not guessed.
+    usageProbe: null,
+    supports: ["permissionMode", "timeout", "readOnly"],
+
+    winShell: false,
+
+  },
 ]);
 
 /** Prototype-free map so names like "toString" cannot pass as implementers. */
@@ -339,6 +393,7 @@ export const IMPLEMENTER_BY_KEY = Object.freeze(
 export const CLAUDE_EFFORT = Object.freeze(["low", "medium", "high", "xhigh", "max", "ultracode"]);
 export const AGY_EFFORT = Object.freeze(["low", "medium", "high"]);
 export const COPILOT_EFFORT = Object.freeze(["low", "medium", "high", "xhigh", "max"]);
+export const OMP_THINKING = Object.freeze(["off", "auto", "minimal", "low", "medium", "high", "xhigh", "max"]);
 export const CODEX_SANDBOX = Object.freeze(["read-only", "workspace-write", "danger-full-access"]);
 export const GROK_SANDBOX = Object.freeze(["workspace", "read-only", "off"]);
 export const QODER_PERMISSION = Object.freeze([
@@ -349,6 +404,13 @@ export const QODER_PERMISSION = Object.freeze([
   "dont_ask",
   "plan",
 ]);
+/**
+ * ZCode's --mode, carried as the `permissionMode` dial. `build` and `edit` are
+ * deliberately absent: a headless run has no permission client, so they block
+ * every write tool and exit 0 having changed nothing. The relay rejects them for
+ * the same reason, so a lane must not be able to select one either.
+ */
+export const ZCODE_MODE = Object.freeze(["plan", "yolo"]);
 /** Positive h/m/s duration, same shape relays accept. */
 export const TIMEOUT_RE = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/;
 

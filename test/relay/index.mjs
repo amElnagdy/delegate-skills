@@ -10,6 +10,7 @@ import { runPreflight } from "./preflight.mjs";
 import { runTimeoutBounds } from "./timeout-bounds.mjs";
 import { runQoder } from "./qoder.mjs";
 import { runPi } from "./pi.mjs";
+import { runOmp } from "./omp.mjs";
 import { runClaude } from "./claude.mjs";
 import { runReadOnlyTripwire } from "./read-only-tripwire.mjs";
 import { runTimeoutTree } from "./timeout-tree.mjs";
@@ -18,6 +19,7 @@ import { runDelegateSetup } from "./delegate-setup.mjs";
 import { runAider } from "./aider.mjs";
 import { runCopilot } from "./copilot.mjs";
 import { runCommandcode } from "./commandcode.mjs";
+import { runZcode } from "./zcode.mjs";
 
 export const runners = [
   ["package-shape", runPackageShape],
@@ -32,6 +34,7 @@ export const runners = [
   ["timeout-bounds", runTimeoutBounds],
   ["qoder", runQoder],
   ["pi", runPi],
+  ["omp", runOmp],
   ["claude", runClaude],
   ["aider", runAider],
   ["copilot", runCopilot],
@@ -39,5 +42,6 @@ export const runners = [
   ["read-only-tripwire", runReadOnlyTripwire],
   ["timeout-tree", runTimeoutTree],
   ["abort", runAbort],
+  ["zcode", runZcode],
   ["delegate-setup", runDelegateSetup],
 ];

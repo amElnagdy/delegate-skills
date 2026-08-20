@@ -75,16 +75,21 @@ Skip setup when you want one implementer or one-off dials. Pick the skill for a 
 | [`kimi-delegate`](skills/kimi-delegate/SKILL.md) | [Kimi Code](https://moonshotai.github.io/kimi-code/en/) (`kimi`) | `auto permission mode`, always | — [^none] | `--resume-last`, `--session <id>` |
 | [`opencode-delegate`](skills/opencode-delegate/SKILL.md) | [OpenCode](https://opencode.ai) (`opencode`) | agent `build` (`--model` required) | `--read-only` (agent `plan`) | `--resume-last`, `--session <id>` |
 | [`pi-delegate`](skills/pi-delegate/SKILL.md) | [Pi](https://github.com/earendil-works/pi-mono) (`pi`) | full local tools — no sandbox, no permission modes [^none]; project trust opt-in | `--read-only` (`read,grep,find,ls`) | `--resume-last`, `--session <id>` |
+| [`omp-delegate`](skills/omp-delegate/SKILL.md) | [Oh My Pi](https://github.com/can1357/oh-my-pi) (`omp`) | `--yolo` (`tools.approvalMode: yolo`); project `.omp` extras off unless `--approve` | `--read-only` (`read,grep,glob`) | `--resume-last`, `--session <id>` |
 | [`qoder-delegate`](skills/qoder-delegate/SKILL.md) | [Qoder](https://docs.qoder.com/en/cli/quick-start) (`qodercli`) | `auto` permission mode; bypass opt-in | `--permission-mode plan` | `--resume-last`, `--resume <id>` |
 | [`vibe-delegate`](skills/vibe-delegate/SKILL.md) | [Mistral Vibe](https://github.com/mistralai/mistral-vibe) (`vibe`) | `accept-edits`; `--full-access` opt-in | `--plan-only` (`plan` agent) | `--resume-last`, `--session <id>` |
 | [`copilot-delegate`](skills/copilot-delegate/SKILL.md) | [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-cli) (`copilot`) | `--allow-all-tools` opt-in; headless auto-deny otherwise | `--read-only` (`--mode plan`) | `--resume-last`, `--session <id>` |
 | [`warp-delegate`](skills/warp-delegate/SKILL.md) | [Warp Agent CLI](https://docs.warp.dev/cli/) (`oz`) | full local tools — no sandbox, no permission modes [^none] | — [^none] | `--conversation <id>` |
+| [`zcode-delegate`](skills/zcode-delegate/SKILL.md) | [Z.AI ZCode](https://zcode.z.ai) (`zcode`) [^zcode] | `--mode yolo` | `--read-only` (`plan` mode) | `--resume-last`, `--session <id>` |
 
 [^commandcode]: Command Code's headless mode has two states and nothing between them: a `-p` run
 withholds the write, edit, and shell tools, and `--yolo` (alias `--dangerously-skip-permissions`)
 allows every tool anywhere the process can reach. `--permission-mode auto-accept` and `--tools-all`
 do **not** lift the write gate. So an implementation run is full-trust with no path restriction —
-scope it with the brief and a clean tree, and read `touchedFiles` for writes outside it.
+the brief's path list is guidance, not containment. A worktree isolates the checkout, while a
+container or another OS-enforced sandbox is required when writes outside the target tree are
+unacceptable. `touchedFiles` is a review aid based on `git status`; it cannot show ignored files or
+writes outside the repository.
 
 [^none]: No CLI-enforced read-only mode. `touchedFiles` and the diff are what you review against, not
 a guarantee: they are post-run `git status` in the workspace, so they cannot show ignored files,
@@ -97,6 +102,15 @@ is configurable through it.
 
 [^grok]: `grok` cannot be prevented from writing headlessly. The relay reports a tri-state
 `readOnlyViolation` tripwire for detected Git-visible changes; it does not enforce or attribute them.
+
+[^zcode]: ZCode ships its CLI **inside the desktop app** — there is no `zcode` on PATH, no npm
+package, and the public docs cover only the GUI. The relay resolves it from
+`--zcode-path`/`ZCODE_CLI`, then PATH, then the installed app bundle. Of ZCode's four documented
+modes only `plan` and `yolo` work headlessly: `build` and `edit` have no permission client there, so
+they block every write tool and exit 0 having changed nothing, and the relay rejects them rather
+than report that as success. ZCode offers `--disallowed-tools` but no `--allowed-tools`, so
+capability can be subtracted, never enumerated. Where `zcode login` fails with `OAuth response is
+not valid JSON`, the key comes from `ZCODE_API_KEY` / `ANTHROPIC_API_KEY` / `ZAI_API_KEY` instead.
 
 Each skill name links to its `SKILL.md`, which owns that implementer's prerequisites, flags, and
 caveats. Building one for another CLI? [Claim it first](../../issues?q=is%3Aissue+label%3Aimplementer),
@@ -246,6 +260,12 @@ Per skill — platform, CLI version, and what the run exercised:
 - `pi-delegate` — macOS: stdin brief delivery, explicit provider and model selection, JSON
   session/provider/model/usage capture, and a `--read-only` run leaving a clean tree. Write,
   `--session`, and `--resume-last` runs are contributor-reported.
+- `omp-delegate` — contract-tested, live run pending: stdin brief delivery, `omp --mode json`
+  argv (`--yolo`, `--tools read,grep,glob`, `--no-extensions --no-skills --no-rules`, `--thinking`),
+  session header / `message_end` parsing, `--approve` omitting the project-trust flags, `--continue`
+  resume, assistant `stopReason: error` reported as failed, `omp_unavailable`/127, and bounded
+  `--version` preflight. Native Windows launch is a native `omp.exe` (no `shell:true`); that path is
+  contract-tested via the smoke matrix's compiled fake, not against a live Oh My Pi install.
 - `qoder-delegate` — macOS, `qodercli` 1.0.47, by the contributor: Lite edit run, `accept_edits`,
   explicit model and 32768-token context window, no commit.
 - `commandcode-delegate` — macOS, `cmd` 1.26.0: **live edit run verified**. A relay dispatch against a
@@ -287,6 +307,20 @@ Per skill — platform, CLI version, and what the run exercised:
   narration rather than a distinct final-message event, and `--cwd` governed shell commands while
   the agent's file tool resolved bare relative paths against `$HOME`. `--no-snapshot`, `--profile`,
   `--skill`, and `--mcp` are contract-tested only.
+- `zcode-delegate` — Windows, `zcode` 0.16.1: read-only (`plan`) run leaving a clean tree with the
+  Git tripwire false; write run under `yolo` creating the briefed file and reporting it in
+  `touchedFiles`; `--session` resume with an attached delta brief, which recalled the earlier turn;
+  single-document `--json` parsing; `--version` preflight; discovery resolving the CLI from the app
+  bundle rather than PATH; and environment-variable auth under all three names ZCode accepts —
+  against an isolated home whose config carried no `apiKey`, a keyless run failed first, then
+  `ZAI_API_KEY`, `ZCODE_API_KEY`, and `ANTHROPIC_API_KEY` each completed the same read-only
+  dispatch. Contract-tested: `build`/`edit` rejection, the missing-CLI path, tolerance of the AI SDK
+  banner that ZCode can print on stdout ahead of the JSON (observed in direct CLI probes; exercised
+  in the suite by the fake), and the timeout matrix. The abort matrix is POSIX-only — Windows
+  delivers no catchable SIGTERM — so for this relay it first runs in CI. `zcode-delegate` is also
+  absent from the shared read-only tripwire scenario matrix, which runs `claude` and `grok` only —
+  its tripwire helpers are parity-enforced byte-identical, but no zcode-specific worktree-state run
+  is recorded. No macOS or Linux run is recorded.
 - `codex-delegate`, `opencode-delegate`, `vibe-delegate` — contract-tested only: argument validation,
   bounded version preflight, missing binary, result parsing, and whole-process-tree timeout/abort
   cleanup. No end-to-end run is recorded here.
@@ -311,7 +345,7 @@ Per skill — platform, CLI version, and what the run exercised:
   (versions vary by machine). Native Windows discover smoke not yet claimed.
 
 Not yet verified: native Windows launches for `claude`, exact-head `cline`, `grok`, `kimi`,
-`pi`, `qoder`, and `vibe` (`codex`/`opencode`/`grok` have contract-tested `.cmd` shim handling;
+`pi`, `qoder`, `vibe`, and `omp` (`codex`/`opencode`/`grok` have contract-tested `.cmd` shim handling;
 Cursor serializes a pre-joined, quoted command; Qoder and Vibe target their documented native executables).
 Claude's own shell sandbox is unsupported on native Windows regardless of launch mechanics, and upstream
 Vibe officially targets UNIX. A native Linux `cursor-agent` run is unverified. The full delegate →

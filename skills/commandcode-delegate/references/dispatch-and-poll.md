@@ -50,8 +50,8 @@ Options:
 | `--timeout <dur>` | Relay-side watchdog (e.g. `30m`, `2h`); on expiry the child is killed and `result.json` gets `status: "timeout"`. Off by default. |
 | `--out-dir <dir>` | Where artifacts go (default: a fresh dir under the system temp dir). |
 
-Artifacts default to the system temp dir on purpose: the repo under review stays clean, so the
-touched-files report shows only Command Code's edits and nothing of the helper's own.
+Artifacts default to the system temp dir so relay-created files stay out of the target repository.
+The touched-files report then shows Command Code's Git-visible edits without the helper's artifacts.
 
 `--clean-env` is not a security boundary: Command Code still reaches files and other same-user secrets
 through `HOME` (its own state lives in `~/.commandcode`) and OS facilities, and under `--yolo` there is
@@ -91,9 +91,10 @@ brief immediately.
 - `sessionId` — feed this to a later `--session <id>` (exact session; preferred) or `--continue-last`
   (global "most recent", which another run can steal)
 - `finalMessage` — Command Code's own final report (the `<structured_output_contract>` you asked for),
-  lifted from `finalText` on its result line and also written to `finalPath`
+  lifted from `finalText` on a complete result line or recovered from the last `message_end` or
+  `text_delta`; recovered text may be partial or empty, and is also written to `finalPath`
 - `resultLine` — how much of the tail survived: `complete`, `truncated`, or `absent`. See the
-  truncation section below; the three fields under it are null unless this says `complete`
+  truncation section below; the four fields under it are null unless this says `complete`
 - `resultSubtype` / `stopReason` / `usage` / `durationMs` — straight from that result line: `success`,
   `error`, or `max_turns`; why the turn ended; token counts; wall-clock
 - `touchedFiles` — `git status --porcelain` lines in the working root: your review starting point.

@@ -46,8 +46,9 @@ Command Code's headless mode has **exactly two states, with nothing in between**
 `--permission-mode auto-accept` and `--tools-all` do **not** lift the headless write gate (verified
 against `cmd` 1.26.0 — write, edit, and shell were all refused with both). So an implementation run
 through Command Code is a full-trust run: scope it with a tight brief and a clean working tree, not
-with a sandbox. If you need OS-enforced containment, use a sibling delegate whose CLI provides it
-(`codex-delegate`) or run this one inside a container or a git worktree.
+with a sandbox. The brief is guidance, and a git worktree isolates a checkout without containing the
+process. If writes outside the target tree are unacceptable, use an OS-enforced sandbox such as
+`codex-delegate` or run this one inside a container.
 
 ## Prerequisites (check once)
 
@@ -92,8 +93,9 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 # see all options:                          node .../relay.mjs --help
 ```
 
-The helper defaults to a write-capable (`--yolo`) run and writes its artifacts to a temp dir, so the
-repo under review stays clean. It **never commits** — see step 5. Mechanics, flags, and the
+The helper defaults to a write-capable (`--yolo`) run, which intentionally edits the target repository.
+Its temp directory keeps only relay artifacts out of that repository. The relay **never commits** —
+see step 5. Mechanics, flags, and the
 `result.json` shape: [references/dispatch-and-poll.md](references/dispatch-and-poll.md).
 
 ### 3. Wait for completion
@@ -129,9 +131,9 @@ Full checklist: [references/review-and-land.md](references/review-and-land.md).
 
 ### 5. Land it
 
-Command Code under `--yolo` *can* write `.git`, which is exactly why the relay does not let it:
-committing is the reviewer's act, and a self-committed run is one you have to unpick before you can
-review it. **The orchestrator commits.** Only after the gates pass and the diff holds:
+The relay never commits, but it cannot stop Command Code under `--yolo` from writing `.git`. The brief
+forbids implementer commits, and the reviewer compares `HEAD` with the recorded pre-dispatch baseline
+before landing anything. **The orchestrator commits.** Only after the gates pass and the diff holds:
 
 - Commit the verified work yourself, with a clear message.
 - If it needs changes, send a delta brief with `--session <sessionId>` from the prior `result.json`

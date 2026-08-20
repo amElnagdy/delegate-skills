@@ -57,11 +57,20 @@ later-edited project config fails closed until it is reviewed and written again 
 | `vibe` | vibe-delegate | `vibe` | timeout, readOnly |
 | `cursor` | cursor-delegate | `cursor-agent` | model, force, timeout, readOnly |
 | `pi` | pi-delegate | `pi` | provider, model, timeout, readOnly |
+| `omp` | omp-delegate | `omp` | provider, model, **effort** (`--thinking`), timeout, readOnly |
 | `aider` | aider-delegate | `aider` | model, timeout, readOnly |
 | `copilot` | copilot-delegate | `copilot` | model, effort, timeout, readOnly |
 | `warp` | warp-delegate | `oz` | model, timeout |
+| `zcode` | zcode-delegate | `zcode` | permissionMode, timeout, readOnly |
+
+ZCode carries its `--mode` as `permissionMode`, and only `plan` and `yolo` are accepted: ZCode also
+documents `build` and `edit`, but a headless run has no permission client, so those two block every
+write tool and exit 0 having changed nothing. ZCode has no `--model` flag — the model is chosen in
+the CLI's own config file — so `model` is not a dial for `zcode` lanes. ZCode also ships its CLI
+inside the desktop app rather than on PATH, so discovery falls back to the installed app bundle.
 
 OpenCode uses `variant` for reasoning intensity, not `effort`. Do not write `effort` on an `opencode` lane.
+Oh My Pi (`omp`) uses the lane `effort` dial for omp's `--thinking` (`off`, `auto`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`). Do not write `thinking` as a lane field.
 OpenCode lanes **require** `model` in `provider/model` form, with a non-empty provider before the first
 `/` and at least one non-`/` character after it. Cline accepts `provider` and `model` as separate
 dials and does not impose that shape.
@@ -70,7 +79,8 @@ Boolean dials: `readOnly`, `force`. All other dials are non-empty strings. Durat
 `timeout` use `h`/`m`/`s` (e.g. `30m`) and must fit the relay watchdog ceiling (~24.8 days).
 Do not combine `readOnly: true` with a write-capable `sandbox` / `permissionMode` / `force`.
 `model` / `provider` / OpenCode `variant` must match the bound relay’s token rules (e.g. Claude
-rejects spaces; Grok/Pi/OpenCode/Codex use a shell-safe token set on Windows `shell:true` launches).
+rejects spaces; Grok/Pi/Oh My Pi/OpenCode/Codex use a shell-safe token set — Windows `shell:true`
+launches, and Oh My Pi's flag-injection defense even without a shell).
 
 ## Helpers
 

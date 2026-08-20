@@ -26,6 +26,24 @@ function dispatch(h, name, relayArgs, env = {}) {
 }
 
 export async function runCommandcode(h) {
+if (h.WIN) {
+  // Windows support is unverified. Keep the collision guard covered without pretending
+  // the POSIX fixture scenarios exercise a native Command Code executable.
+  const workDir = h.freshRepo("work-win-guard-commandcode");
+  const outDir = join(h.scratch, "out-win-guard-commandcode");
+  const guarded = spawnSync(process.execPath, [
+    h.relayPath("commandcode"),
+    "--brief", h.briefPath,
+    "--cd", workDir,
+    "--out-dir", outDir,
+  ], { env: { ...h.baseEnv, COMMANDCODE_BIN: "" }, encoding: "utf8" });
+  h.check("commandcode windows guard: refuses to run without COMMANDCODE_BIN",
+    guarded.status === 2 &&
+    /COMMANDCODE_BIN/.test(guarded.stderr) &&
+    !existsSync(join(outDir, "result.json")));
+  console.log("  skip  commandcode dispatch scenarios: native Windows launch is unverified");
+  return;
+}
 for (const scenario of [
   { name: "default", relayArgs: [], forwarded: [...CONSTANT, "--yolo"], readOnly: false, toolsAll: false },
   { name: "read-only", relayArgs: ["--read-only"], forwarded: [...CONSTANT, "--permission-mode", "plan"], readOnly: true, toolsAll: false },
@@ -168,20 +186,5 @@ for (const [mode, expectedStatus, expectedExit, timeout] of [
   });
   h.check("commandcode unavailable: structured result replaces the stale one",
     missing.status === 127 && h.result(outDir).status === "commandcode_unavailable");
-}
-if (h.WIN) {
-  // The binary name IS the shell there, so guessing is refused outright.
-  const workDir = h.freshRepo("work-win-guard-commandcode");
-  const outDir = join(h.scratch, "out-win-guard-commandcode");
-  const guarded = spawnSync(process.execPath, [
-    h.relayPath("commandcode"),
-    "--brief", h.briefPath,
-    "--cd", workDir,
-    "--out-dir", outDir,
-  ], { env: { ...h.baseEnv, COMMANDCODE_BIN: "" }, encoding: "utf8" });
-  h.check("commandcode windows guard: refuses to run without COMMANDCODE_BIN",
-    guarded.status === 2 &&
-    /COMMANDCODE_BIN/.test(guarded.stderr) &&
-    !existsSync(join(outDir, "result.json")));
 }
 }

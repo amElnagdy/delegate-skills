@@ -74,7 +74,7 @@
  *                           and result.json gets status "timeout". Command Code has no
  *                           timeout flag of its own, so the watchdog is relay-only.
  *   --out-dir <dir>         Where to write run artifacts (default: a fresh dir under
- *                           the system temp dir, so the repo under review stays clean).
+ *                           the system temp dir, outside the target repository).
  *   -h, --help              Show this help.
  *
  * Result: written to <out-dir>/result.json and summarized on stdout —
@@ -778,8 +778,8 @@ function relayArtifacts(run) {
 
 function prepareRunDir(opts, brief) {
   const startedAt = new Date().toISOString();
-  // Default the run dir to system temp so the repo under review stays pristine —
-  // the touched-files report must show only Command Code's edits, not relay's artifacts.
+  // Keep relay artifacts outside the target repository so touchedFiles reports
+  // Command Code's Git-visible edits without the helper's own files.
   const outDir = opts.outDir || join(tmpdir(), "delegate-relay", `${basename(opts.cd) || "repo"}-${timestamp()}`);
   mkdirSync(outDir, { recursive: true });
   const run = {

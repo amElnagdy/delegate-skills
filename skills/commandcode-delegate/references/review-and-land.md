@@ -42,9 +42,10 @@ Open the diff (`touchedFiles` in the result is your starting list) and hold it a
 for:
 
 - **Out-of-scope writes** — this is the first check here, not an afterthought. Under `--yolo` there was
-  nothing stopping a write outside `--cd` or outside the paths the brief named. Scan the whole
-  `touchedFiles` list before you read any single file's diff, and if the run wrote somewhere unexpected,
-  understand why before continuing.
+  nothing stopping a write outside `--cd` or outside the paths the brief named. `touchedFiles` is a
+  `git status` review aid, not containment proof: it misses ignored files and anything outside the
+  repository. A worktree isolates the checkout but not the process. Use a container or another
+  OS-enforced boundary when writes outside the target tree are unacceptable.
 - **Scope creep** — did it change things the brief said to leave untouched? Unasked refactors, renames,
   "while I was here" edits. These are the most common quality problem in delegated work.
 - **Scope shortfall** — did it do the whole task, including the edge cases and cleanup, or stop at the
@@ -52,8 +53,9 @@ for:
   stopped mid-task rather than finishing.
 - **Quiet judgment calls** — sometimes Command Code makes a defensible decision the brief didn't
   anticipate. Don't just accept it because it looks reasonable; understand it and decide.
-- **A commit it made itself** — the brief forbids it, but nothing enforced that. Check `git log` against
-  your own last commit; if the run committed, `git reset --soft HEAD~1` and review the diff properly.
+- **A commit it made itself** — the brief forbids it, but nothing enforced that. Compare `HEAD` with
+  the pre-dispatch baseline, then inspect status, staged and unstaged diffs, and the intervening log.
+  If the whole range belongs to the run, `git reset --soft <recorded-baseline>` and review it as a diff.
 
 ## The implementer sweep
 

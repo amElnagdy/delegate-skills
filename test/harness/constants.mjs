@@ -1,6 +1,6 @@
 import { join } from "node:path";
 
-export const SKILLS = ["claude", "cline", "codex", "opencode", "agy", "grok", "kimi", "qoder", "vibe", "cursor", "pi", "aider", "copilot", "warp", "commandcode"];
+export const SKILLS = ["claude", "cline", "codex", "opencode", "agy", "grok", "kimi", "qoder", "vibe", "cursor", "pi", "omp", "aider", "copilot", "warp", "zcode", "commandcode"];
 
 export const EXTRA_ARGS = {
   claude: [],
@@ -14,9 +14,11 @@ export const EXTRA_ARGS = {
   vibe: [],
   cursor: [],
   pi: [],
+  omp: [],
   aider: [],
   copilot: [],
   warp: [],
+  zcode: [],
   commandcode: [],
 };
 

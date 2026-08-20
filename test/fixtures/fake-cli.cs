@@ -5,7 +5,7 @@ using System.Threading;
 class FakeCli {
   static int Main(string[] args) {
     // Mirrors the .cjs fake: any probe form, and hang/fail selected by the mode's suffix,
-    // so a native-binary relay (agy, kimi, qoder, vibe) enters the same preflight matrix.
+    // so a native-binary relay (agy, kimi, qoder, vibe, aider, oz, omp) enters the same preflight matrix.
     var mode = Environment.GetEnvironmentVariable("SMOKE_MODE") ?? "";
     bool versionProbe = Array.IndexOf(args, "--version") >= 0
       || (args.Length > 0 && (args[0] == "version" || args[0] == "changelog"));
@@ -74,6 +74,32 @@ class FakeCli {
       Console.WriteLine("{\"role\":\"assistant\",\"content\":\"fake vibe completed\"}");
       return 0;
     }
+    if (mode == "omp-success" || mode == "omp-error") {
+      var brief = Console.In.ReadToEnd() ?? "";
+      var failed = mode == "omp-error";
+      var argsFile = Environment.GetEnvironmentVariable("SMOKE_ARGS_FILE");
+      if (!String.IsNullOrEmpty(argsFile)) {
+        var payload = new System.Text.StringBuilder();
+        payload.Append("{\"args\":[");
+        for (int i = 0; i < args.Length; i++) {
+          if (i > 0) payload.Append(",");
+          payload.Append(JsonString(args[i]));
+        }
+        payload.Append("],\"brief\":");
+        payload.Append(JsonString(brief));
+        payload.Append("}");
+        File.WriteAllText(argsFile, payload.ToString());
+      }
+      Console.WriteLine("{\"type\":\"session\",\"version\":3,\"id\":\"omp-session-1\",\"timestamp\":\"2026-01-01T00:00:00.000Z\"}");
+      Console.WriteLine("{\"type\":\"agent_start\"}");
+      if (failed) {
+        Console.WriteLine("{\"type\":\"message_end\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"fake omp failed\"}],\"provider\":\"google\",\"model\":\"fake-model\",\"usage\":{\"input\":7,\"output\":2},\"stopReason\":\"error\",\"errorMessage\":\"fake provider failure\"}}");
+      } else {
+        Console.WriteLine("{\"type\":\"message_end\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"fake omp completed\"}],\"provider\":\"google\",\"model\":\"fake-model\",\"usage\":{\"input\":7,\"output\":2},\"stopReason\":\"stop\"}}");
+      }
+      Console.WriteLine("{\"type\":\"agent_end\",\"messages\":[]}");
+      return 0;
+    }
     var psi = new ProcessStartInfo {
       FileName = Environment.GetEnvironmentVariable("SMOKE_NODE"),
       Arguments = "-e setInterval(()=>{},1000)",
@@ -84,5 +110,9 @@ class FakeCli {
     File.WriteAllText(Environment.GetEnvironmentVariable("SMOKE_PID_FILE"), Process.GetCurrentProcess().Id.ToString());
     Thread.Sleep(Timeout.Infinite);
     return 0;
+  }
+  static string JsonString(string s) {
+    if (s == null) s = "";
+    return "\"" + s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", "\\r").Replace("\n", "\\n") + "\"";
   }
 }
