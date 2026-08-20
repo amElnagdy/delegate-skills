@@ -18,6 +18,7 @@ import { runAbort } from "./abort.mjs";
 import { runDelegateSetup } from "./delegate-setup.mjs";
 import { runAider } from "./aider.mjs";
 import { runCopilot } from "./copilot.mjs";
+import { runZcode } from "./zcode.mjs";
 
 export const runners = [
   ["package-shape", runPackageShape],
@@ -39,5 +40,6 @@ export const runners = [
   ["read-only-tripwire", runReadOnlyTripwire],
   ["timeout-tree", runTimeoutTree],
   ["abort", runAbort],
+  ["zcode", runZcode],
   ["delegate-setup", runDelegateSetup],
 ];

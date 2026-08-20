@@ -19,7 +19,8 @@
         "omp-delegate",
         "aider-delegate",
         "copilot-delegate",
-        "warp-delegate"
+        "warp-delegate",
+        "zcode-delegate"
       ]
     },
     {

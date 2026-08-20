@@ -79,6 +79,7 @@ Skip setup when you want one implementer or one-off dials. Pick the skill for a 
 | [`vibe-delegate`](skills/vibe-delegate/SKILL.md) | [Mistral Vibe](https://github.com/mistralai/mistral-vibe) (`vibe`) | `accept-edits`; `--full-access` opt-in | `--plan-only` (`plan` agent) | `--resume-last`, `--session <id>` |
 | [`copilot-delegate`](skills/copilot-delegate/SKILL.md) | [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-cli) (`copilot`) | `--allow-all-tools` opt-in; headless auto-deny otherwise | `--read-only` (`--mode plan`) | `--resume-last`, `--session <id>` |
 | [`warp-delegate`](skills/warp-delegate/SKILL.md) | [Warp Agent CLI](https://docs.warp.dev/cli/) (`oz`) | full local tools — no sandbox, no permission modes [^none] | — [^none] | `--conversation <id>` |
+| [`zcode-delegate`](skills/zcode-delegate/SKILL.md) | [Z.AI ZCode](https://zcode.z.ai) (`zcode`) [^zcode] | `--mode yolo` | `--read-only` (`plan` mode) | `--resume-last`, `--session <id>` |
 
 [^none]: No CLI-enforced read-only mode. `touchedFiles` and the diff are what you review against, not
 a guarantee: they are post-run `git status` in the workspace, so they cannot show ignored files,
@@ -91,6 +92,15 @@ is configurable through it.
 
 [^grok]: `grok` cannot be prevented from writing headlessly. The relay reports a tri-state
 `readOnlyViolation` tripwire for detected Git-visible changes; it does not enforce or attribute them.
+
+[^zcode]: ZCode ships its CLI **inside the desktop app** — there is no `zcode` on PATH, no npm
+package, and the public docs cover only the GUI. The relay resolves it from
+`--zcode-path`/`ZCODE_CLI`, then PATH, then the installed app bundle. Of ZCode's four documented
+modes only `plan` and `yolo` work headlessly: `build` and `edit` have no permission client there, so
+they block every write tool and exit 0 having changed nothing, and the relay rejects them rather
+than report that as success. ZCode offers `--disallowed-tools` but no `--allowed-tools`, so
+capability can be subtracted, never enumerated. Where `zcode login` fails with `OAuth response is
+not valid JSON`, the key comes from `ZCODE_API_KEY` / `ANTHROPIC_API_KEY` / `ZAI_API_KEY` instead.
 
 Each skill name links to its `SKILL.md`, which owns that implementer's prerequisites, flags, and
 caveats. Building one for another CLI? [Claim it first](../../issues?q=is%3Aissue+label%3Aimplementer),
@@ -262,6 +272,20 @@ Per skill — platform, CLI version, and what the run exercised:
   narration rather than a distinct final-message event, and `--cwd` governed shell commands while
   the agent's file tool resolved bare relative paths against `$HOME`. `--no-snapshot`, `--profile`,
   `--skill`, and `--mcp` are contract-tested only.
+- `zcode-delegate` — Windows, `zcode` 0.16.1: read-only (`plan`) run leaving a clean tree with the
+  Git tripwire false; write run under `yolo` creating the briefed file and reporting it in
+  `touchedFiles`; `--session` resume with an attached delta brief, which recalled the earlier turn;
+  single-document `--json` parsing; `--version` preflight; discovery resolving the CLI from the app
+  bundle rather than PATH; and environment-variable auth under all three names ZCode accepts —
+  against an isolated home whose config carried no `apiKey`, a keyless run failed first, then
+  `ZAI_API_KEY`, `ZCODE_API_KEY`, and `ANTHROPIC_API_KEY` each completed the same read-only
+  dispatch. Contract-tested: `build`/`edit` rejection, the missing-CLI path, tolerance of the AI SDK
+  banner that ZCode can print on stdout ahead of the JSON (observed in direct CLI probes; exercised
+  in the suite by the fake), and the timeout matrix. The abort matrix is POSIX-only — Windows
+  delivers no catchable SIGTERM — so for this relay it first runs in CI. `zcode-delegate` is also
+  absent from the shared read-only tripwire scenario matrix, which runs `claude` and `grok` only —
+  its tripwire helpers are parity-enforced byte-identical, but no zcode-specific worktree-state run
+  is recorded. No macOS or Linux run is recorded.
 - `codex-delegate`, `opencode-delegate`, `vibe-delegate` — contract-tested only: argument validation,
   bounded version preflight, missing binary, result parsing, and whole-process-tree timeout/abort
   cleanup. No end-to-end run is recorded here.
