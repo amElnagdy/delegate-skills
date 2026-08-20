@@ -27,7 +27,7 @@ const SYMBOLS = [
   ["fingerprintDirtyPaths", "function", READ_ONLY_TRIPWIRE_RELAYS],
   ["changedDirtyPaths", "function", READ_ONLY_TRIPWIRE_RELAYS],
   ["readOnlyVerdict", "function", READ_ONLY_TRIPWIRE_RELAYS],
-  ["MAX_BUFFERED_CHARS", "const", ["claude", "cline", "copilot", "cursor", "grok", "kimi", "opencode", "pi", "omp", "qoder", "vibe", "warp", "zcode"]],
+  ["MAX_BUFFERED_CHARS", "const", ["claude", "cline", "copilot", "cursor", "grok", "kimi", "opencode", "pi", "omp", "qoder", "vibe", "warp", "zcode", "commandcode"]],
   ["makeLineScanner", "function", ["vibe", "copilot"]],
   ["makeEventScanner", "function", ["claude", "cline", "cursor", "grok", "kimi", "opencode", "pi", "omp", "qoder", "warp"]],
 ];

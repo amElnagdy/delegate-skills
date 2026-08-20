@@ -106,6 +106,7 @@ function resolveLaunch(impl) {
   if (process.platform === "win32" && impl.key === "commandcode") {
     if (!process.env.COMMANDCODE_BIN) return null;
     const command = resolve(process.env.COMMANDCODE_BIN);
+    if (/\.(?:cmd|bat)$/i.test(command)) return null;
     try {
       if (statSync(command).isFile()) return { path: command, command, prefixArgs: [] };
     } catch {

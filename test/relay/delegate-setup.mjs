@@ -55,6 +55,18 @@ export function runDelegateSetup(h) {
       configuredCommandCode.discovered.some(({ key, path }) =>
         key === "commandcode" && path === h.baseEnv.COMMANDCODE_BIN),
     );
+    const commandCodeShim = join(h.scratch, "commandcode.cmd");
+    writeFileSync(commandCodeShim, "@exit /b 0\r\n");
+    const withCommandCodeShim = spawnSync(process.execPath, [join(setupDir, "discover.mjs")], {
+      encoding: "utf8",
+      env: { ...h.baseEnv, COMMANDCODE_BIN: commandCodeShim },
+    });
+    const shimmedCommandCode = JSON.parse(withCommandCodeShim.stdout);
+    h.check(
+      "discover rejects a Command Code .cmd shim that the relay cannot launch",
+      shimmedCommandCode.missing.some(({ key }) => key === "commandcode") &&
+        !shimmedCommandCode.discovered.some(({ key }) => key === "commandcode"),
+    );
   }
 
   const agyProbeDir = join(h.scratch, "discover-agy");
