@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { delimiter, dirname, join, relative } from "node:path";
 
 // Every dispatch carries these, in this order: JSON output is what makes the run
 // machine-readable, and the other three keep an automated run from stalling on
@@ -236,6 +236,39 @@ for (const [mode, expectedStatus, expectedExit, timeout] of [
     value.status === expectedStatus &&
     value.error?.includes("version preflight") &&
     value.error?.includes("was not dispatched"));
+}
+if (!h.WIN) {
+  const workDir = h.freshRepo("work-snapshot-abort-commandcode");
+  const outDir = join(h.scratch, "out-snapshot-abort-commandcode");
+  const shimDir = join(h.scratch, "slow-git-commandcode");
+  const readyPath = join(h.scratch, "slow-git-ready-commandcode");
+  mkdirSync(shimDir);
+  const realGit = spawnSync("which", ["git"], { env: h.baseEnv, encoding: "utf8" }).stdout.trim();
+  const gitShim = join(shimDir, "git");
+  writeFileSync(gitShim, `#!/bin/sh
+if [ "$1" = status ]; then
+  : > ${JSON.stringify(readyPath)}
+  sleep 1
+fi
+exec ${JSON.stringify(realGit)} "$@"
+`);
+  chmodSync(gitShim, 0o755);
+  const snapshot = h.runRelay("commandcode", workDir, outDir, ["--read-only"], {
+    PATH: `${shimDir}${delimiter}${h.baseEnv.PATH}`,
+  });
+  h.check("commandcode snapshot abort: Git snapshot is in progress",
+    await h.until(() => existsSync(readyPath), 2_000));
+  snapshot.kill("SIGTERM");
+  const exited = await new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), 5_000);
+    snapshot.on("close", () => {
+      clearTimeout(timer);
+      resolve(true);
+    });
+  });
+  const value = existsSync(join(outDir, "result.json")) ? h.result(outDir) : {};
+  h.check("commandcode snapshot abort: result exists with an unknown read-only verdict",
+    exited && value.status === "aborted" && value.signal === "SIGTERM" && value.readOnlyViolation === null);
 }
 if (!h.WIN) {
   const workDir = h.freshRepo("work-abort-preflight-commandcode");

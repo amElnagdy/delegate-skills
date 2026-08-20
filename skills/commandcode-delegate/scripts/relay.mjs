@@ -820,21 +820,20 @@ function prepareRunDir(opts, brief) {
     briefPath: join(outDir, "brief.txt"),
     resultPath: join(outDir, "result.json"),
   };
-  // Exact relay files may be reused. Leave final.txt symlinks alone so the
-  // read-only tripwire observes their targets; the other endpoints must never
-  // follow a stale symlink outside the output directory.
+  // Exact relay files may be reused, but no stale artifact endpoint may survive:
+  // final.txt is written after dispatch and would otherwise follow its symlink.
   for (const path of [run.finalPath, run.resultPath, run.briefPath, run.eventsPath]) {
     let exactLeaf = false;
     try { exactLeaf = readdirSync(dirname(path)).includes(basename(path)); } catch { /* handled below */ }
     if (!exactLeaf) continue;
     try {
       const artifact = lstatSync(path);
-      if (artifact.isFile() || (path !== run.finalPath && artifact.isSymbolicLink())) {
+      if (artifact.isFile() || artifact.isSymbolicLink()) {
         rmSync(path, { force: true });
       }
     } catch { /* the writer will report an unusable artifact path */ }
   }
-  // Exclusive creation also closes the cleanup-to-write race and refuses a
+  // Exclusive creation closes the cleanup-to-write race and refuses a
   // differently cased endpoint on case-insensitive filesystems.
   writeFileSync(run.briefPath, brief, { encoding: "utf8", mode: PRIVATE_FILE_MODE, flag: "wx" });
   writeFileSync(run.eventsPath, "", { encoding: "utf8", mode: PRIVATE_FILE_MODE, flag: "wx" });
@@ -1015,9 +1014,15 @@ function dispatchToCommandCode(opts, brief, run, writeResult, env) {
     // Last resort: the deltas of a message whose message_end never arrived.
     const streamed = state.deltas.join("").trim();
     const text = state.result?.finalText || state.lastText || streamed || "";
-    if (!text) return "";
-    writeFileSync(run.finalPath, `${text}\n`, { encoding: "utf8", mode: PRIVATE_FILE_MODE });
-    return text.trim();
+    if (!text) return { text: "", error: null };
+    try {
+      // final.txt is deliberately created only once. This refuses a symlink or
+      // case-aliased endpoint introduced after prepareRunDir completed.
+      writeFileSync(run.finalPath, `${text}\n`, { encoding: "utf8", mode: PRIVATE_FILE_MODE, flag: "wx" });
+      return { text: text.trim(), error: null };
+    } catch (error) {
+      return { text: text.trim(), error: `could not safely create final.txt: ${error.code || error.message}` };
+    }
   };
 
   let settled = false;
@@ -1054,6 +1059,8 @@ function dispatchToCommandCode(opts, brief, run, writeResult, env) {
       settled = true;
       clearWatchdog();
       const touched = gitTouchedFiles(opts.cd);
+      flushEvents(run, state);
+      const final = persistFinal();
       const abortedFields = {
         status: "aborted",
         exitCode: 128 + (constants.signals[sig] || 15),
@@ -1062,10 +1069,10 @@ function dispatchToCommandCode(opts, brief, run, writeResult, env) {
         resultSubtype: state.result?.subtype ?? null,
         stopReason: state.result?.stopReason ?? null,
         usage: state.result?.usage ?? null,
-        finalMessage: (flushEvents(run, state), persistFinal()),
+        finalMessage: final.text,
         touchedFiles: touched,
         stderrTail: stderrTail.slice(-20),
-        error: `the relay was killed by ${sig}; cmd was terminated with it — inspect the working tree before re-dispatching`,
+        error: final.error || `the relay was killed by ${sig}; cmd was terminated with it — inspect the working tree before re-dispatching`,
       };
       const result = writeResult(abortedFields);
       printSummary(result, run.resultPath);
@@ -1115,14 +1122,14 @@ function dispatchToCommandCode(opts, brief, run, writeResult, env) {
       state.truncatedTail = true;
     }
     flushEvents(run, state);
-    const finalMessage = persistFinal();
+    const final = persistFinal();
     // Command Code can exit 0 with its own result line reporting an error or a turn cap,
     // so a clean process exit is not proof of a completed task where that line exists.
     // Where it does NOT, the exit code is the authority: cmd truncates its oversized tail
     // on exit, and treating that lost line as a failure would fail every large successful
     // run. Non-zero child failures are still preserved, so nothing is waved through.
     const cliOk = code === 0 && (state.result === null || state.result.subtype === "success");
-    const succeeded = cliOk && !watchdogFired;
+    const succeeded = cliOk && !watchdogFired && final.error === null;
     const mapped = code ?? (constants.signals[signal] ? 128 + constants.signals[signal] : 1);
     const touched = gitTouchedFiles(opts.cd);
     const cliError = state.result?.error
@@ -1144,10 +1151,12 @@ function dispatchToCommandCode(opts, brief, run, writeResult, env) {
       stopReason: state.result?.stopReason ?? null,
       usage: state.result?.usage ?? null,
       durationMs: state.result?.durationMs ?? null,
-      finalMessage,
+      finalMessage: final.text,
       touchedFiles: touched,
       ...(succeeded ? {} : { stderrTail: stderrTail.slice(-20) }),
-      ...(watchdogFired
+      ...(final.error
+        ? { error: final.error }
+        : watchdogFired
         ? { error: `cmd did not finish within --timeout ${opts.timeout}; killed by the relay watchdog` }
         : cliError
           ? { error: cliError }
@@ -1173,17 +1182,21 @@ async function main() {
   // Prepare the run dir before probing, so a preflight that times out or fails still has
   // somewhere to publish result.json rather than exiting silently.
   const run = prepareRunDir(opts, brief);
-  // Both baselines are taken before anything is dispatched, and only for a read-only run:
-  // the tripwire compares against the tree as it stood at dispatch, not as it stands now.
-  const beforeTree = opts.readOnly ? gitTripwireState(opts.cd, relayArtifacts(run)) : null;
-  const beforeFingerprints = opts.readOnly ? fingerprintDirtyPaths(opts.cd, relayArtifacts(run)) : null;
-  const probeTimeoutMs = versionProbeTimeout(opts);
-  const env = commandCodeEnv(opts);
-  let writeResult = makeResultWriter(opts, null, run, beforeTree, beforeFingerprints);
+  // Keep the preflight handler live while synchronous Git snapshots run. Node queues
+  // signals during those calls, so yield before publishing a completed baseline; an
+  // abort in that window must honestly report the read-only verdict as unknown.
+  let resultWriter = makeResultWriter(opts, null, run, null, null);
+  const writeResult = (extra) => resultWriter(extra);
   let preflightChild = null;
   const clearPreflightSignals = installPreflightSignalHandlers(opts, run, writeResult, () => preflightChild);
+  const beforeTree = opts.readOnly ? gitTripwireState(opts.cd, relayArtifacts(run)) : null;
+  const beforeFingerprints = opts.readOnly ? fingerprintDirtyPaths(opts.cd, relayArtifacts(run)) : null;
+  await new Promise((resolveYield) => setImmediate(resolveYield));
+  resultWriter = makeResultWriter(opts, null, run, beforeTree, beforeFingerprints);
+  const probeTimeoutMs = versionProbeTimeout(opts);
+  const env = commandCodeEnv(opts);
   const probe = await commandCodeVersion(probeTimeoutMs, env, (child) => { preflightChild = child; });
-  writeResult = makeResultWriter(opts, probe.version, run, beforeTree, beforeFingerprints);
+  resultWriter = makeResultWriter(opts, probe.version, run, beforeTree, beforeFingerprints);
 
   if (!probe.version && !probe.error) {
     clearPreflightSignals();
