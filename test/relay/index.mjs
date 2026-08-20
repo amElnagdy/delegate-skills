@@ -10,6 +10,7 @@ import { runPreflight } from "./preflight.mjs";
 import { runTimeoutBounds } from "./timeout-bounds.mjs";
 import { runQoder } from "./qoder.mjs";
 import { runPi } from "./pi.mjs";
+import { runOmp } from "./omp.mjs";
 import { runClaude } from "./claude.mjs";
 import { runReadOnlyTripwire } from "./read-only-tripwire.mjs";
 import { runTimeoutTree } from "./timeout-tree.mjs";
@@ -32,6 +33,7 @@ export const runners = [
   ["timeout-bounds", runTimeoutBounds],
   ["qoder", runQoder],
   ["pi", runPi],
+  ["omp", runOmp],
   ["claude", runClaude],
   ["aider", runAider],
   ["copilot", runCopilot],

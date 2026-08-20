@@ -105,11 +105,15 @@ function normalizeDials(implementerKey, raw) {
     if (dials.permissionMode === undefined) dials.permissionMode = "plan";
     delete dials.readOnly;
   }
+  if (implementerKey === "omp" && typeof dials.effort === "string") {
+    dials.thinking = dials.effort;
+    delete dials.effort;
+  }
   if (implementerKey === "vibe" && dials.readOnly === true) {
     dials.planOnly = true;
     delete dials.readOnly;
   }
-  // agy / claude / cursor / pi keep readOnly as a boolean on opts
+  // agy / claude / cursor / pi / omp keep readOnly as a boolean on opts
   return dials;
 }
 
@@ -141,6 +145,7 @@ export function mergeDials(opts, dials, flagged) {
       continue;
     }
     if (field === "force" && flagged.has("force")) continue;
+    if (field === "thinking" && flagged.has("thinking")) continue;
     opts[field] = value;
   }
 }
