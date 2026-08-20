@@ -56,7 +56,8 @@
  *   --tools-all             Also pass --tools-all, so no tool stays withheld. Ignored under
  *                           --read-only (it does not lift the write gate anyway).
  *   --max-turns <n>         Cap conversation turns (default: Command Code's own, 100).
- *                           A run that hits the cap exits 8 and reports stopReason max_turns.
+ *                           Command Code may exit 0 at the cap; a complete max_turns result
+ *                           makes the relay report failure and exit 1.
  *   --session <id>          Continue a specific session by id (the sessionId from a prior
  *                           result.json); send only the delta brief. Mutually exclusive
  *                           with --continue-last.
@@ -92,10 +93,9 @@
  *
  * Exit codes: a pre-run usage error (bad/missing args, empty brief) exits 2
  * before any run and writes no result file; a missing `cmd` binary exits 127;
- * otherwise the exit code mirrors Command Code's own (0 success, 1 error, 3 not
- * authenticated, 5 rate limited, 8 max turns, 10 out of credits, …). A run that
- * exits 0 while its own result line says `subtype: "error"` is reported failed
- * with exit 1 — Command Code can end a run cleanly with the task unfinished.
+ * otherwise the relay preserves Command Code's non-zero exit code. A run that
+ * exits 0 while its own complete result line reports any non-success subtype is
+ * reported failed with exit 1 — Command Code can end a run cleanly with the task unfinished.
  * Where that line was truncated or lost, exit 0 is taken at face value: cmd still
  * exits non-zero for the failures that matter.
  * If the child dies on a signal, the exit code is 128 plus the signal number and
@@ -1051,8 +1051,7 @@ function dispatchToCommandCode(opts, brief, run, writeResult, env) {
     // so a clean process exit is not proof of a completed task where that line exists.
     // Where it does NOT, the exit code is the authority: cmd truncates its oversized tail
     // on exit, and treating that lost line as a failure would fail every large successful
-    // run. It still exits non-zero for the real failures (3 auth, 5 rate limit, 8 turn
-    // cap, 10 credits), so nothing is being waved through.
+    // run. Non-zero child failures are still preserved, so nothing is waved through.
     const cliOk = code === 0 && (state.result === null || state.result.subtype === "success");
     const succeeded = cliOk && !watchdogFired;
     const mapped = code ?? (constants.signals[signal] ? 128 + constants.signals[signal] : 1);

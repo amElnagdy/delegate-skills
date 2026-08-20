@@ -42,7 +42,7 @@ Options:
 | `--effort <level>` | Reasoning effort — `low` \| `medium` \| `high`, model-dependent. The relay accepts a bare token; Command Code and the model own the supported levels. |
 | `--read-only` | Withhold the write, edit, and shell tools: no `--yolo`, plus `--permission-mode plan`. For review and diagnosis. Verified afterwards via `readOnlyViolation`. |
 | `--tools-all` | Also pass `--tools-all`, so no tool stays withheld. Ignored under `--read-only` — it does not lift the write gate. |
-| `--max-turns <n>` | Cap conversation turns (default: Command Code's own, 100). A run that hits the cap exits 8 with `stopReason: max_turns`. |
+| `--max-turns <n>` | Cap conversation turns (default: Command Code's own, 100). Command Code may exit 0 at the cap; when its complete result reports `max_turns`, the relay reports failure and exits 1. |
 | `--session <id>` | Continue one specific session by id (the `sessionId` from a prior `result.json`); send only the delta brief. Mutually exclusive with `--continue-last`. |
 | `--continue-last` | Continue the most recent session. "Most recent" is global, not per-repo, so an unrelated run can steal it — prefer `--session`. |
 | `--clean-env` | Pass only runtime basics (`PATH`, home, locale, temp, and Windows equivalents) to Command Code and its version preflight. This changes inherited variables only; it does not protect files or other same-user secrets. |
@@ -83,7 +83,7 @@ brief immediately.
 
 - `schema` — the result-format version (currently `delegate-relay.result.v1`)
 - `status` — `completed` | `failed` | `timeout` | `aborted` | `commandcode_unavailable`
-- `exitCode` — mirrors Command Code's exit code; `128` plus the signal number if the child was killed;
+- `exitCode` — preserves Command Code's non-zero exit code; changes a zero exit with a complete non-success result to 1; uses `128` plus the signal number if the child was killed;
   `127` if the binary isn't on PATH; on a `timeout` the relay forces a non-zero code even when the child
   exited `0` after the watchdog's SIGTERM
 - `signal` — the signal that killed the child, otherwise `null`
@@ -174,7 +174,7 @@ process has exited and `result.json` is written — not when a status line says 
 - **`status: failed` at exit 3:** not authenticated. `cmd login`, then re-dispatch.
 - **`status: failed` at exit 5 or 10:** rate limited, or out of credits. Wait, lower the model tier, or
   top up — the relay's summary names which.
-- **`status: failed` with `stopReason: max_turns` (exit 8):** the run hit the turn cap mid-task and the
+- **`status: failed` with `stopReason: max_turns`:** the run hit the turn cap mid-task. If Command Code exited 0, the relay exits 1; otherwise it preserves the non-zero child exit. The
   tree may hold a half-applied change. Inspect it, then either raise `--max-turns` and re-dispatch, or
   split the brief.
 - **`status: failed` at exit 0→1 with an `error` about subtype:** Command Code ended the run cleanly

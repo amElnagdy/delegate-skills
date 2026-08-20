@@ -105,6 +105,7 @@ function expandCandidate(raw) {
 function resolveLaunch(impl) {
   if (impl.key === "commandcode" && process.env.COMMANDCODE_BIN) {
     const configured = process.env.COMMANDCODE_BIN;
+    if (process.platform === "win32" && !/[\\/]/.test(configured) && /^cmd(?:\.exe)?$/i.test(configured)) return null;
     const command = /[\\/]/.test(configured) ? resolve(configured) : resolveBinary(configured);
     if (!command || (process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command))) return null;
     try {

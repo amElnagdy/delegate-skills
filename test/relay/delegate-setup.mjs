@@ -61,6 +61,16 @@ export function runDelegateSetup(h) {
       commandCode.missing.some(({ key }) => key === "commandcode") &&
         !commandCode.discovered.some(({ key }) => key === "commandcode"),
     );
+    const withBareCmdOverride = spawnSync(process.execPath, [join(setupDir, "discover.mjs")], {
+      encoding: "utf8",
+      env: { ...h.baseEnv, COMMANDCODE_BIN: "cmd" },
+    });
+    const bareCmdOverride = JSON.parse(withBareCmdOverride.stdout);
+    h.check(
+      "discover rejects bare COMMANDCODE_BIN=cmd on Windows",
+      bareCmdOverride.missing.some(({ key }) => key === "commandcode") &&
+        !bareCmdOverride.discovered.some(({ key }) => key === "commandcode"),
+    );
     const withConfiguredCommandCode = spawnSync(process.execPath, [join(setupDir, "discover.mjs")], {
       encoding: "utf8",
       env: h.baseEnv,
