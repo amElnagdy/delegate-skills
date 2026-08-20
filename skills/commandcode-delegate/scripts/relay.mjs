@@ -32,7 +32,8 @@
  *
  * Windows: the Command Code binary is named `cmd`, which collides with the
  * system `cmd.exe`. Rather than risk driving a shell with your brief, the relay
- * refuses to guess there — set COMMANDCODE_BIN to the real binary's full path.
+ * refuses to guess there — set COMMANDCODE_BIN to the real binary's absolute path,
+ * never the system command interpreter.
  * That path must be a real executable: this relay never launches through a
  * shell, so a `.cmd`/`.bat` wrapper cannot start. Windows is untested here.
  * The same variable overrides the binary on any platform when several installs
@@ -114,6 +115,7 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
   openSync,
   readFileSync,
   readSync,
@@ -124,7 +126,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { constants, tmpdir } from "node:os";
 import { createHash } from "node:crypto";
@@ -142,11 +144,15 @@ const SAFE_ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 // Command Code model ids are vendor/name slugs. Keep in lockstep
 // with delegate-setup MODEL_TOKEN.shellSafe.
 const SAFE_MODEL = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
+const PRIVATE_FILE_MODE = 0o600;
 
 const IMPLEMENTER_KEY = "commandcode";
 // `cmd` is Command Code's binary name; COMMANDCODE_BIN overrides it (and is required
 // on Windows, where the name collides with cmd.exe).
-const BIN = process.env.COMMANDCODE_BIN || "cmd";
+const CONFIGURED_BIN = process.env.COMMANDCODE_BIN || null;
+const BIN = CONFIGURED_BIN && /[\\/]/.test(CONFIGURED_BIN)
+  ? resolve(CONFIGURED_BIN)
+  : CONFIGURED_BIN || "cmd";
 
 // Command Code's documented headless exit codes, for a summary hint that points at the
 // actual cause instead of a bare number.
@@ -195,6 +201,11 @@ function applyFleetLane(opts, flagged) {
 function fail(message, code = 2) {
   process.stderr.write(`relay: ${message}\n`);
   process.exit(code);
+}
+
+function executablePathKey(path) {
+  try { return realpathSync.native(path).toLowerCase(); }
+  catch { return resolve(path).toLowerCase(); }
 }
 
 function parseArgs(argv) {
@@ -280,10 +291,14 @@ function parseArgs(argv) {
   if (opts.session !== null && !SAFE_SESSION.test(opts.session)) {
     fail("--session must be a session id (letters, digits, . _ : -)");
   }
-  // `cmd` is cmd.exe on Windows. Guessing would hand the brief to a shell, so the
-  // relay stops instead and asks for the real path.
-  if (process.platform === "win32" && !process.env.COMMANDCODE_BIN) {
-    fail("on Windows the name `cmd` resolves to cmd.exe; set COMMANDCODE_BIN to the full path of the Command Code binary");
+  if (process.platform === "win32") {
+    if (!CONFIGURED_BIN || !isAbsolute(CONFIGURED_BIN)) {
+      fail("on Windows COMMANDCODE_BIN must be the absolute path of the Command Code executable");
+    }
+    const comspec = process.env.ComSpec || process.env.COMSPEC;
+    if (comspec && executablePathKey(BIN) === executablePathKey(comspec)) {
+      fail("COMMANDCODE_BIN points to the Windows command interpreter; set it to the Command Code executable");
+    }
   }
   return opts;
 }
@@ -662,11 +677,6 @@ function gitTouchedFiles(cwd) {
   }
 }
 
-function timestamp() {
-  // Local script (not a workflow): Date is available and fine here.
-  return new Date().toISOString().replace(/[:.]/g, "-");
-}
-
 function buildArgv(opts) {
   // -p with no query argument: Command Code auto-detects the piped brief on stdin.
   // Order matters — an unrecognized flag is read as the optional -p query and the CLI
@@ -780,8 +790,8 @@ function prepareRunDir(opts, brief) {
   const startedAt = new Date().toISOString();
   // Keep relay artifacts outside the target repository so touchedFiles reports
   // Command Code's Git-visible edits without the helper's own files.
-  const outDir = opts.outDir || join(tmpdir(), "delegate-relay", `${basename(opts.cd) || "repo"}-${timestamp()}`);
-  mkdirSync(outDir, { recursive: true });
+  const outDir = opts.outDir || mkdtempSync(join(tmpdir(), "delegate-relay-"));
+  if (opts.outDir) mkdirSync(outDir, { recursive: true });
   const run = {
     startedAt,
     eventsPath: join(outDir, "events.jsonl"),
@@ -800,8 +810,8 @@ function prepareRunDir(opts, brief) {
       if (lstatSync(path).isFile()) rmSync(path, { force: true });
     } catch { /* the writer will report an unusable artifact path */ }
   }
-  writeFileSync(run.briefPath, brief, "utf8");
-  writeFileSync(run.eventsPath, "", "utf8");
+  writeFileSync(run.briefPath, brief, { encoding: "utf8", mode: PRIVATE_FILE_MODE });
+  writeFileSync(run.eventsPath, "", { encoding: "utf8", mode: PRIVATE_FILE_MODE });
   return run;
 }
 
@@ -849,7 +859,7 @@ function makeResultWriter(opts, version, run, beforeTree, beforeFingerprints) {
     // Publish atomically so a polling orchestrator never reads a half-written file
     // (same idiom as claude-delegate's writeJsonAtomic and qoder-delegate).
     const temporary = `${run.resultPath}.${process.pid}.tmp`;
-    writeFileSync(temporary, `${JSON.stringify(result, null, 2)}\n`, "utf8");
+    writeFileSync(temporary, `${JSON.stringify(result, null, 2)}\n`, { encoding: "utf8", mode: PRIVATE_FILE_MODE });
     renameSync(temporary, run.resultPath);
     return result;
   };
@@ -947,7 +957,7 @@ function dispatchToCommandCode(opts, brief, run, writeResult, env) {
     const streamed = state.deltas.join("").trim();
     const text = state.result?.finalText || state.lastText || streamed || "";
     if (!text) return "";
-    writeFileSync(run.finalPath, `${text}\n`, "utf8");
+    writeFileSync(run.finalPath, `${text}\n`, { encoding: "utf8", mode: PRIVATE_FILE_MODE });
     return text.trim();
   };
 

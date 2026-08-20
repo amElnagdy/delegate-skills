@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
 
 // Every dispatch carries these, in this order: JSON output is what makes the run
 // machine-readable, and the other three keep an automated run from stalling on
@@ -41,6 +41,23 @@ if (h.WIN) {
     guarded.status === 2 &&
     /COMMANDCODE_BIN/.test(guarded.stderr) &&
     !existsSync(join(outDir, "result.json")));
+  const comspec = h.baseEnv.ComSpec || h.baseEnv.COMSPEC;
+  for (const [name, commandCodeBin] of [
+    ["bare cmd", "cmd"],
+    ...(comspec ? [["COMSPEC", comspec]] : []),
+  ]) {
+    const rejectedOutDir = join(h.scratch, `out-win-${name.toLowerCase().replaceAll(" ", "-")}-commandcode`);
+    const rejected = spawnSync(process.execPath, [
+      h.relayPath("commandcode"),
+      "--brief", h.briefPath,
+      "--cd", workDir,
+      "--out-dir", rejectedOutDir,
+    ], { env: { ...h.baseEnv, COMMANDCODE_BIN: commandCodeBin }, encoding: "utf8", timeout: 5_000 });
+    h.check(`commandcode windows guard: rejects ${name}`,
+      rejected.status === 2 &&
+      /COMMANDCODE_BIN/.test(rejected.stderr) &&
+      !existsSync(join(rejectedOutDir, "result.json")));
+  }
   console.log("  skip  commandcode dispatch scenarios: native Windows launch is unverified");
   return;
 }
@@ -64,6 +81,34 @@ if (h.WIN) {
   const exitCode = await new Promise((resolve) => child.on("close", resolve));
   h.check("commandcode reused out-dir: current run publishes its own terminal result",
     exitCode === 124 && h.result(outDir).status === "timeout");
+}
+{
+  const commandCodeBin = `./${relative(process.cwd(), h.baseEnv.COMMANDCODE_BIN)}`;
+  const { run, captured } = dispatch(h, "relative-commandcode-bin", [], { COMMANDCODE_BIN: commandCodeBin });
+  h.check("commandcode relative COMMANDCODE_BIN: preflight and dispatch use the same executable",
+    run.status === 0 && captured.brief.includes("smoke brief"));
+}
+{
+  const workDir = h.freshRepo("work-private-artifacts-commandcode");
+  const run = spawnSync(process.execPath, [
+    h.relayPath("commandcode"),
+    "--brief", h.briefPath,
+    "--cd", workDir,
+  ], { env: { ...h.baseEnv, SMOKE_MODE: "commandcode-success" }, encoding: "utf8" });
+  const resultPath = /^result: (.+)$/m.exec(run.stdout)?.[1];
+  const runResult = resultPath && existsSync(resultPath)
+    ? JSON.parse(readFileSync(resultPath, "utf8"))
+    : null;
+  const outDir = resultPath ? dirname(resultPath) : null;
+  const artifactPaths = runResult
+    ? [runResult.briefPath, runResult.eventsPath, runResult.finalPath, resultPath]
+    : [];
+  h.check("commandcode default artifacts: directory and files are private",
+    run.status === 0 &&
+    outDir !== null &&
+    (statSync(outDir).mode & 0o777) === 0o700 &&
+    artifactPaths.every((path) => path && (statSync(path).mode & 0o777) === 0o600));
+  if (outDir) rmSync(outDir, { recursive: true, force: true });
 }
 for (const scenario of [
   { name: "default", relayArgs: [], forwarded: [...CONSTANT, "--yolo"], readOnly: false, toolsAll: false },

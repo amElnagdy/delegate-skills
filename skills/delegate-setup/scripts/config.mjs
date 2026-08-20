@@ -231,7 +231,10 @@ function validateDialValue(implementer, field, value, laneName, label) {
     if (implementer === "omp" && !OMP_THINKING.includes(value)) {
       return `${label}: lane ${laneName}.effort must be one of: ${OMP_THINKING.join(", ")}`;
     }
-    if ((implementer === "codex" || implementer === "grok") && !/^[a-z][a-z0-9-]*$/i.test(value)) {
+    if (
+      (implementer === "codex" || implementer === "grok" || implementer === "commandcode") &&
+      !/^[a-z][a-z0-9-]*$/i.test(value)
+    ) {
       return `${label}: lane ${laneName}.effort must be a bare token`;
     }
     return null;
@@ -284,6 +287,7 @@ function validateModelOrProvider(implementer, field, value, laneName, label) {
     implementer === "pi" ||
     implementer === "omp" ||
     implementer === "opencode" ||
+    implementer === "commandcode" ||
     // codex (and any other win32 shell:true relay) must not accept cmd metacharacters in -m.
     implementer === "codex" ||
     IMPLEMENTER_BY_KEY[implementer]?.winShell

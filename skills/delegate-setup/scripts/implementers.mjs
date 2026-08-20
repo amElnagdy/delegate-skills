@@ -423,7 +423,7 @@ export const MODEL_TOKEN = Object.freeze({
   claude: /^[A-Za-z0-9][A-Za-z0-9._:@\/\[\]-]*$/,
   /** Keep in lockstep with cursor-delegate SAFE_MODEL. */
   cursor: /^[A-Za-z0-9][A-Za-z0-9._:@\/\[\]\,=-]*$/,
-  /** Keep in lockstep with grok/pi/codex shell-safe tokens (also used for opencode). */
+  /** Keep in lockstep with grok/pi/codex/commandcode shell-safe tokens (also used for opencode). */
   shellSafe: /^[A-Za-z0-9][A-Za-z0-9._:\/-]*$/,
 });
 

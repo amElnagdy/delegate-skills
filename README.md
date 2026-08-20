@@ -286,13 +286,14 @@ Per skill — platform, CLI version, and what the run exercised:
   comes from `run_start`, the first line of the stream, and the report from the last `message_end` or
   its streamed deltas — the event log is written in batches so the relay drains the pipe as fast as it
   can, `resultLine` reports `complete`/`truncated`/`absent` so a consumer knows which fields are
-  trustworthy, and exit 0 with a lost result line is treated as success rather than failure, since
-  `cmd` still exits non-zero for auth, rate-limit, turn-cap, and credit failures. A smoke case pins
-  that contract. On a long run the report itself can land in the discarded region, so the diff is the
-  deliverable and a thin report means missing information, not a failed run.
+  trustworthy. A complete non-success result converts a zero child exit to relay exit 1, while a lost
+  result line falls back to the process exit code. Smoke cases pin that contract. On a long run the
+  report itself can land in the discarded region. The diff is the deliverable, and a thin report
+  means missing information, not a failed run.
 
   Windows is untested and the relay refuses to guess there (the binary name `cmd` is `cmd.exe`); it
-  requires `COMMANDCODE_BIN` to name a real executable.
+  requires `COMMANDCODE_BIN` to be the real executable's absolute path, not the system command
+  interpreter.
 - `warp-delegate` — macOS, `oz` 0.2026.05.27.15.44.stable_01: **live edit run verified**. A relay
   dispatch against a throwaway git repository had Warp add a function plus four assertions across
   two files; both project gates were re-run independently by the orchestrator, the diff matched the

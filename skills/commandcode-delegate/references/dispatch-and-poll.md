@@ -16,8 +16,9 @@ cmd status            # must report authenticated (else `cmd login`)
 ```
 
 On native Windows, `cmd` resolves to `cmd.exe`. The relay refuses to run there rather than hand your
-brief to a shell: set `COMMANDCODE_BIN` to the Command Code binary's full path, and note that it must be
-a real executable — the relay never launches through a shell, so a `.cmd`/`.bat` wrapper will not start.
+brief to a shell: set `COMMANDCODE_BIN` to the Command Code binary's absolute path, not `COMSPEC`, and
+note that it must be a real executable — the relay never launches through a shell, so a `.cmd`/`.bat`
+wrapper will not start.
 Windows is untested for this skill. The same variable overrides the binary on any platform when several
 installs compete.
 
@@ -48,10 +49,11 @@ Options:
 | `--clean-env` | Pass only runtime basics (`PATH`, home, locale, temp, and Windows equivalents) to Command Code and its version preflight. This changes inherited variables only; it does not protect files or other same-user secrets. |
 | `--keep-env <name>` | Keep one additional variable under `--clean-env`; repeat for each required environment-backed credential, proxy, certificate, or MCP variable. The name must be set and use portable environment-variable syntax. |
 | `--timeout <dur>` | Relay-side watchdog (e.g. `30m`, `2h`); on expiry the child is killed and `result.json` gets `status: "timeout"`. Off by default. |
-| `--out-dir <dir>` | Where artifacts go (default: a fresh dir under the system temp dir). |
+| `--out-dir <dir>` | Where artifacts go (default: a fresh private dir under the system temp dir). |
 
 Artifacts default to the system temp dir so relay-created files stay out of the target repository.
-The touched-files report then shows Command Code's Git-visible edits without the helper's artifacts.
+On POSIX, that directory is mode `0700` and its files are created as `0600`. The touched-files report
+then shows Command Code's Git-visible edits without the helper's artifacts.
 
 `--clean-env` is not a security boundary: Command Code still reaches files and other same-user secrets
 through `HOME` (its own state lives in `~/.commandcode`) and OS facilities, and under `--yolo` there is
@@ -199,8 +201,9 @@ process has exited and `result.json` is written — not when a status line says 
   state is its own permission layer, not an OS sandbox, so treat the run as write-capable: review the
   diff before doing anything else, and report the violation — it is a CLI-behavior finding, not just a
   run outcome.
-- **Empty `finalMessage`:** the run exited before emitting its result line. Treat as failed; the event
-  log usually shows where it stopped.
+- **Empty `finalMessage`:** this is missing information, not a separate failure state. Read `status`
+  and `resultLine`; when the result line is truncated or absent, inspect the event log and diff before
+  landing.
 
 ## Recovering lost work
 

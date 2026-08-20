@@ -16,9 +16,9 @@
  */
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { accessSync, constants as fsConstants, readdirSync, readFileSync, statSync } from "node:fs";
+import { accessSync, constants as fsConstants, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, join, resolve, sep } from "node:path";
+import { delimiter, isAbsolute, join, resolve, sep } from "node:path";
 import { IMPLEMENTERS } from "./implementers.mjs";
 
 const PROBE_TIMEOUT_MS = 10_000;
@@ -105,10 +105,16 @@ function expandCandidate(raw) {
 function resolveLaunch(impl) {
   if (impl.key === "commandcode" && process.env.COMMANDCODE_BIN) {
     const configured = process.env.COMMANDCODE_BIN;
-    if (process.platform === "win32" && !/[\\/]/.test(configured) && /^cmd(?:\.exe)?$/i.test(configured)) return null;
+    if (process.platform === "win32" && !isAbsolute(configured)) return null;
     const command = /[\\/]/.test(configured) ? resolve(configured) : resolveBinary(configured);
     if (!command || (process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command))) return null;
     try {
+      const comspec = process.env.ComSpec || process.env.COMSPEC;
+      if (
+        process.platform === "win32" &&
+        comspec &&
+        realpathSync.native(command).toLowerCase() === realpathSync.native(comspec).toLowerCase()
+      ) return null;
       if (statSync(command).isFile()) return { path: command, command, prefixArgs: [] };
     } catch {
       // report it missing below

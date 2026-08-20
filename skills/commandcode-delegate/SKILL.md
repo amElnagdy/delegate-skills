@@ -8,7 +8,7 @@ description: >-
   Command Code while staying the reviewer. DO NOT USE for tasks small enough to do inline, or when the
   user wants the code written directly without delegating.
 license: MIT
-compatibility: Requires the Command Code CLI (`cmd`, from commandcode.ai) installed and authenticated via `cmd login`, Node 18+, and git. The orchestrating agent must be able to run shell commands and read files. Shell examples assume bash/zsh (macOS/Linux). On Windows the binary name collides with `cmd.exe`, so `COMMANDCODE_BIN` must point at the real binary.
+compatibility: Requires the Command Code CLI (`cmd`, from commandcode.ai) installed and authenticated via `cmd login`, Node 18+, and git. The orchestrating agent must be able to run shell commands and read files. Shell examples assume bash/zsh (macOS/Linux). On Windows the binary name collides with `cmd.exe`, so `COMMANDCODE_BIN` must be the real binary's absolute path, not the system command interpreter.
 metadata:
   version: 0.5.0
 ---
@@ -56,9 +56,9 @@ process. If writes outside the target tree are unacceptable, use an OS-enforced 
    run `cmd login`.
 2. **Confirm which `cmd` is on PATH.** The name is generic, so a shell builtin, an alias, or another
    tool can shadow it — `command -v cmd` shows the active one. On native Windows `cmd` *is* `cmd.exe`;
-   the relay refuses to guess there and requires `COMMANDCODE_BIN` to point at the real binary. The
-   relay records the version it actually ran into `result.json`, so a wrong binary is visible after
-   the fact.
+   the relay refuses to guess there and requires `COMMANDCODE_BIN` to be the real binary's absolute
+   path, not the system command interpreter. The relay records the version it actually ran into
+   `result.json`, so a wrong binary is visible after the fact.
 3. You are in (or will point `--cd` at) the target git repository, and its tree is clean before you
    dispatch — a full-trust run is much easier to review against a clean baseline.
 
