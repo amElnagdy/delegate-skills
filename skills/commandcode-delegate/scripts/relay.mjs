@@ -24,8 +24,8 @@
  * write gate (verified — both were refused). So this relay passes `--yolo` for
  * implementation runs and omits it (adding `--permission-mode plan`) for
  * `--read-only`. That read-only guarantee is the CLI's own permission layer, not
- * an OS sandbox: it held under test, but the relay still proves it after the fact
- * with `readOnlyViolation`.
+ * an OS sandbox. The relay also reports a Git-visible change tripwire through
+ * `readOnlyViolation`; ignored and outside-repository paths remain outside it.
  *
  * It deliberately does NOT commit. Committing belongs to the reviewer, after it
  * reads the diff and re-runs the project gates.
@@ -53,7 +53,7 @@
  *                           (default: Command Code's own configured effort).
  *   --read-only             Withhold write/edit/shell tools: no --yolo, plus --permission-mode plan.
  *                           For review and diagnosis. Enforced by the CLI's permission layer, and
- *                           checked afterwards via readOnlyViolation.
+ *                           followed by a Git-visible readOnlyViolation tripwire.
  *   --tools-all             Also pass --tools-all, so no tool stays withheld. Ignored under
  *                           --read-only (it does not lift the write gate anyway).
  *   --max-turns <n>         Cap conversation turns (default: Command Code's own, 100).
@@ -385,26 +385,47 @@ function commandCodeEnv(opts) {
   return Object.fromEntries(keep.filter((key) => process.env[key] !== undefined).map((key) => [key, process.env[key]]));
 }
 
-function commandCodeVersion(probeTimeoutMs, env) {
-  try {
-    // Never launched through a shell — on Windows that would route the name `cmd` straight
-    // to cmd.exe. parseArgs requires COMMANDCODE_BIN there, and it must name a real
-    // executable: a .cmd/.bat wrapper cannot be started without the shell this relay refuses.
-    const version = execFileSync(BIN, ["--version"], {
-      encoding: "utf8",
+async function commandCodeVersion(probeTimeoutMs, env, onChild) {
+  // Never launched through a shell — on Windows that would route the name `cmd` straight
+  // to cmd.exe. parseArgs requires COMMANDCODE_BIN there, and it must name a real
+  // executable: a .cmd/.bat wrapper cannot be started without the shell this relay refuses.
+  const probe = await new Promise((resolveProbe) => {
+    const child = spawn(BIN, ["--version"], {
+      stdio: ["ignore", "pipe", "pipe"],
       shell: false,
-      timeout: probeTimeoutMs,
-      killSignal: "SIGKILL",
+      detached: process.platform !== "win32",
       env,
-    }).trim();
-    return { version: version || "unknown", error: null };
-  } catch (error) {
-    if (error?.code === "ENOENT") return { version: null, error: null };
-    // Anything else — a hung probe we killed, or a real non-zero exit — means cmd is
-    // installed but not usable. Reporting that as "unavailable" would send the caller
-    // off to reinstall a binary that is already there.
-    return { version: null, error };
+    });
+    onChild(child);
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    let timedOut = false;
+    let timer = null;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolveProbe({ stdout, stderr, ...result });
+    };
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.on("error", (error) => finish({ code: null, error, timedOut: false }));
+    child.on("close", (code) => finish({ code, error: null, timedOut }));
+    timer = setTimeout(() => {
+      timedOut = true;
+      killChild(child, process.platform === "win32" ? "SIGTERM" : "SIGKILL");
+    }, probeTimeoutMs);
+  });
+  if (probe.timedOut) {
+    return { version: null, error: Object.assign(new Error(`${BIN} --version timed out`), { code: "ETIMEDOUT", stderr: probe.stderr }) };
   }
+  if (probe.error?.code === "ENOENT") return { version: null, error: null };
+  if (probe.error) return { version: null, error: probe.error };
+  if (probe.code !== 0) {
+    return { version: null, error: Object.assign(new Error(`${BIN} --version failed`), { status: probe.code, stderr: probe.stderr }) };
+  }
+  return { version: probe.stdout.trim() || "unknown", error: null };
 }
 
 // Command Code's read-only state is its own permission layer, not an OS sandbox, so the
@@ -906,6 +927,39 @@ function reportVersionFailure(opts, writeResult, run, error, probeTimeoutMs) {
   process.exit(result.exitCode);
 }
 
+function installPreflightSignalHandlers(opts, run, writeResult, getChild) {
+  let active = true;
+  const handlers = new Map();
+  for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) {
+    const handler = () => {
+      if (!active) return;
+      active = false;
+      const result = writeResult({
+        status: "aborted",
+        exitCode: 128 + (constants.signals[sig] || 15),
+        signal: sig,
+        sessionId: null,
+        resultSubtype: null,
+        stopReason: null,
+        usage: null,
+        finalMessage: "",
+        touchedFiles: gitTouchedFiles(opts.cd),
+        error: `the relay was killed by ${sig} during the cmd version preflight; Command Code was not dispatched`,
+      });
+      printSummary(result, run.resultPath);
+      const child = getChild();
+      if (child) killChild(child, process.platform === "win32" ? "SIGTERM" : "SIGKILL");
+      process.exit(result.exitCode);
+    };
+    handlers.set(sig, handler);
+    process.on(sig, handler);
+  }
+  return () => {
+    active = false;
+    for (const [sig, handler] of handlers) process.removeListener(sig, handler);
+  };
+}
+
 function dispatchToCommandCode(opts, brief, run, writeResult, env) {
   const argv = buildArgv(opts);
   // detached on POSIX: the child leads a new process group so killChild can fell the whole tree.
@@ -1106,7 +1160,7 @@ function dispatchToCommandCode(opts, brief, run, writeResult, env) {
   child.stdin.end();
 }
 
-function main() {
+async function main() {
   const opts = parseArgs(process.argv.slice(2));
   const brief = readBrief(opts);
   if (!brief.trim()) fail("empty brief (pass --brief <file> or pipe the brief on stdin)");
@@ -1120,18 +1174,24 @@ function main() {
   const beforeFingerprints = opts.readOnly ? fingerprintDirtyPaths(opts.cd, relayArtifacts(run)) : null;
   const probeTimeoutMs = versionProbeTimeout(opts);
   const env = commandCodeEnv(opts);
-  const probe = commandCodeVersion(probeTimeoutMs, env);
-  const writeResult = makeResultWriter(opts, probe.version, run, beforeTree, beforeFingerprints);
+  let writeResult = makeResultWriter(opts, null, run, beforeTree, beforeFingerprints);
+  let preflightChild = null;
+  const clearPreflightSignals = installPreflightSignalHandlers(opts, run, writeResult, () => preflightChild);
+  const probe = await commandCodeVersion(probeTimeoutMs, env, (child) => { preflightChild = child; });
+  writeResult = makeResultWriter(opts, probe.version, run, beforeTree, beforeFingerprints);
 
   if (!probe.version && !probe.error) {
+    clearPreflightSignals();
     reportUnavailable(writeResult, run.resultPath);
     return;
   }
   if (probe.error) {
+    clearPreflightSignals();
     reportVersionFailure(opts, writeResult, run, probe.error, probeTimeoutMs);
     return;
   }
 
+  clearPreflightSignals();
   dispatchToCommandCode(opts, brief, run, writeResult, env);
 }
 
@@ -1158,7 +1218,7 @@ function printSummary(result, resultPath) {
       ? "read-only check: not verifiable (git could not report) — inspect the working tree directly"
       : result.readOnlyViolation
         ? "read-only check: FAILED — the tree changed beyond this relay's artifacts; treat the run as write-capable and review the diff"
-        : "read-only check: clean — no tree changes beyond this relay's artifacts");
+        : "read-only check: no Git-visible change detected (ignored or outside-repository paths are not covered)");
   }
   const touched = result.touchedFiles;
   if (touched === null) {

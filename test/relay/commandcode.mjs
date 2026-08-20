@@ -235,6 +235,30 @@ for (const [mode, expectedStatus, expectedExit, timeout] of [
     value.error?.includes("version preflight") &&
     value.error?.includes("was not dispatched"));
 }
+if (!h.WIN) {
+  const workDir = h.freshRepo("work-abort-preflight-commandcode");
+  const outDir = join(h.scratch, "out-abort-preflight-commandcode");
+  const preflight = h.runRelay("commandcode", workDir, outDir, [], {
+    SMOKE_MODE: "commandcode-version-hang",
+  });
+  h.check("commandcode preflight abort: run artifacts are prepared",
+    await h.until(() => existsSync(join(outDir, "events.jsonl")), 2000));
+  preflight.kill("SIGTERM");
+  const exited = await new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), 5000);
+    preflight.on("close", () => {
+      clearTimeout(timer);
+      resolve(true);
+    });
+  });
+  const value = existsSync(join(outDir, "result.json")) ? h.result(outDir) : {};
+  h.check("commandcode preflight abort: result is aborted and dispatch never starts",
+    exited &&
+    value.status === "aborted" &&
+    value.signal === "SIGTERM" &&
+    value.error?.includes("version preflight") &&
+    value.error?.includes("was not dispatched"));
+}
 {
   const workDir = h.freshRepo("work-unavailable-commandcode");
   const outDir = join(h.scratch, "out-unavailable-commandcode");

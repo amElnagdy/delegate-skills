@@ -41,7 +41,7 @@ Options:
 | `--lane <name>` | Fleet lane from `delegate-setup` config. Applies that lane's dials; fails if the lane's `implementer` is not this relay. Explicit dial flags win. |
 | `--model <name>` | Model for this run, e.g. `vendor/model` (default: Command Code's own). `cmd --list-models` lists what your account can use. |
 | `--effort <level>` | Reasoning effort — `low` \| `medium` \| `high`, model-dependent. The relay accepts a bare token; Command Code and the model own the supported levels. |
-| `--read-only` | Withhold the write, edit, and shell tools: no `--yolo`, plus `--permission-mode plan`. For review and diagnosis. Verified afterwards via `readOnlyViolation`. |
+| `--read-only` | Withhold the write, edit, and shell tools: no `--yolo`, plus `--permission-mode plan`. For review and diagnosis, followed by a Git-visible `readOnlyViolation` tripwire. |
 | `--tools-all` | Also pass `--tools-all`, so no tool stays withheld. Ignored under `--read-only` — it does not lift the write gate. |
 | `--max-turns <n>` | Cap conversation turns (default: Command Code's own, 100). Command Code may exit 0 at the cap; when its complete result reports `max_turns`, the relay reports failure and exits 1. |
 | `--session <id>` | Continue one specific session by id (the `sessionId` from a prior `result.json`); send only the delta brief. Mutually exclusive with `--continue-last`. |
@@ -102,8 +102,9 @@ brief immediately.
 - `touchedFiles` — `git status --porcelain` lines in the working root: your review starting point.
   `null` (not `[]`) when git can't report — `git` missing, or a non-repo working root; `[]` means git
   ran and the tree is clean
-- `readOnlyViolation` — only meaningful under `--read-only`: `false` when nothing changed beyond the
-  relay's own artifacts, `true` when something did, `null` when git couldn't snapshot either side.
+- `readOnlyViolation` — only meaningful under `--read-only`: `false` when the Git-visible detector
+  saw no change beyond the relay's own artifacts; it does not cover ignored or outside-repository
+  paths. `true` when the detector saw a change, `null` when git couldn't snapshot either side.
   `null` on write-capable runs, where the question doesn't apply
 - `autonomy` — the state the run actually got, in Command Code's terms (`--yolo …` or `plan …`)
 - `briefPath` / `eventsPath` / `finalPath` — the exact brief relay sent, the raw NDJSON event stream,
@@ -197,10 +198,9 @@ process has exited and `result.json` is written — not when a status line says 
 - **`status: failed` with `signal: "SIGKILL"`:** the host ended the child — commonly the OOM killer or
   a supervisor timeout, not an implementer error. Free up host memory or split the task into smaller
   briefs, then re-dispatch.
-- **`readOnlyViolation: true`:** a `--read-only` run changed the tree anyway. Command Code's read-only
-  state is its own permission layer, not an OS sandbox, so treat the run as write-capable: review the
-  diff before doing anything else, and report the violation — it is a CLI-behavior finding, not just a
-  run outcome.
+- **`readOnlyViolation: true`:** the tripwire detected a Git-visible change during a `--read-only`
+  run. It cannot attribute a concurrent change to Command Code, but its read-only state is a permission
+  layer rather than an OS sandbox. Review the diff and report the warning before doing anything else.
 - **Empty `finalMessage`:** this is missing information, not a separate failure state. Read `status`
   and `resultLine`; when the result line is truncated or absent, inspect the event log and diff before
   landing.

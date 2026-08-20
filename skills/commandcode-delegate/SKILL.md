@@ -144,9 +144,9 @@ before landing anything. **The orchestrator commits.** Only after the gates pass
 The relay doubles as a clean way to get an adversarial second opinion: dispatch `--read-only` with a
 brief that lists the agreed points, then each contested point with both positions, and ask Command
 Code to defend or concede each — deliverable in its final message, touching no files. The read-only
-guarantee here is the CLI's own permission layer rather than an OS sandbox, so the relay also proves
-it after the fact: check `readOnlyViolation` in `result.json` (`false` = nothing changed, `true` =
-something did, `null` = git could not tell).
+guarantee here is the CLI's own permission layer rather than an OS sandbox, so the relay also checks
+it after the fact: `readOnlyViolation: false` means the Git-visible detector saw no change (ignored
+or outside-repository paths are not covered); `true` means it saw one; `null` means git could not tell.
 
 ## Authorization model
 
