@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 
 // Every dispatch carries these, in this order: JSON output is what makes the run
@@ -66,8 +66,10 @@ if (h.WIN) {
   const outDir = join(h.scratch, "out-reused-commandcode");
   const resultPath = join(outDir, "result.json");
   const finalPath = join(outDir, "final.txt");
+  const staleResultPath = join(outDir, "stale-result.json");
   mkdirSync(outDir);
-  writeFileSync(resultPath, "{\"status\":\"stale\"}\n");
+  writeFileSync(staleResultPath, "{\"status\":\"stale\"}\n");
+  symlinkSync(staleResultPath, resultPath);
   writeFileSync(finalPath, "stale report\n");
   const child = spawn(process.execPath, [
     h.relayPath("commandcode"),

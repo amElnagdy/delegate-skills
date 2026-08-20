@@ -821,14 +821,18 @@ function prepareRunDir(opts, brief) {
     resultPath: join(outDir, "result.json"),
   };
   // A poller treats result.json existence as completion, so a reused directory
-  // must stop advertising ordinary artifacts from the previous run. Leave
-  // aliases and symlinks alone: the read-only tripwire must observe those paths.
+  // must stop advertising ordinary artifacts from the previous run. A result.json
+  // symlink is also stale completion state, but leave final.txt symlinks alone:
+  // the read-only tripwire must observe those paths.
   for (const path of [run.finalPath, run.resultPath]) {
     let exactLeaf = false;
     try { exactLeaf = readdirSync(dirname(path)).includes(basename(path)); } catch { /* handled below */ }
     if (!exactLeaf) continue;
     try {
-      if (lstatSync(path).isFile()) rmSync(path, { force: true });
+      const artifact = lstatSync(path);
+      if (artifact.isFile() || (path === run.resultPath && artifact.isSymbolicLink())) {
+        rmSync(path, { force: true });
+      }
     } catch { /* the writer will report an unusable artifact path */ }
   }
   writeFileSync(run.briefPath, brief, { encoding: "utf8", mode: PRIVATE_FILE_MODE });
