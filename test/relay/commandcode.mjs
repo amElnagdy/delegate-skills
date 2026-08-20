@@ -264,19 +264,28 @@ if (!h.WIN) {
 {
   const workDir = h.freshRepo("work-unavailable-commandcode");
   const outDir = join(h.scratch, "out-unavailable-commandcode");
+  const victimPath = join(workDir, "victim.txt");
+  writeFileSync(victimPath, "tracked victim\n");
+  spawnSync("git", ["-C", workDir, "add", "victim.txt"]);
+  const victimCommitted = spawnSync("git", ["-C", workDir, "-c", "user.name=Smoke", "-c", "user.email=smoke@example.invalid", "commit", "-qm", "fixture"]).status === 0;
   mkdirSync(outDir);
   writeFileSync(join(outDir, "result.json"), "{\"status\":\"stale\"}\n");
+  symlinkSync(victimPath, join(outDir, "brief.txt"));
   const missing = spawnSync(process.execPath, [
     h.relayPath("commandcode"),
     "--brief", h.briefPath,
     "--cd", workDir,
     "--out-dir", outDir,
+    "--read-only",
   ], {
-    // No PATH and no COMMANDCODE_BIN: the binary genuinely cannot be found.
-    env: { ...process.env, PATH: "", COMMANDCODE_BIN: "" },
+    // Keep git available for the read-only verdict while naming a missing CLI directly.
+    env: { ...h.baseEnv, COMMANDCODE_BIN: join(h.scratch, "missing-commandcode") },
     encoding: "utf8",
   });
+  const value = h.result(outDir);
   h.check("commandcode unavailable: structured result replaces the stale one",
-    missing.status === 127 && h.result(outDir).status === "commandcode_unavailable");
+    missing.status === 127 && value.status === "commandcode_unavailable");
+  h.check("commandcode read-only brief symlink: tracked target is untouched and the clean verdict is truthful",
+    victimCommitted && readFileSync(victimPath, "utf8") === "tracked victim\n" && value.readOnlyViolation === false);
 }
 }

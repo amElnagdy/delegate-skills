@@ -820,23 +820,24 @@ function prepareRunDir(opts, brief) {
     briefPath: join(outDir, "brief.txt"),
     resultPath: join(outDir, "result.json"),
   };
-  // A poller treats result.json existence as completion, so a reused directory
-  // must stop advertising ordinary artifacts from the previous run. A result.json
-  // symlink is also stale completion state, but leave final.txt symlinks alone:
-  // the read-only tripwire must observe those paths.
-  for (const path of [run.finalPath, run.resultPath]) {
+  // Exact relay files may be reused. Leave final.txt symlinks alone so the
+  // read-only tripwire observes their targets; the other endpoints must never
+  // follow a stale symlink outside the output directory.
+  for (const path of [run.finalPath, run.resultPath, run.briefPath, run.eventsPath]) {
     let exactLeaf = false;
     try { exactLeaf = readdirSync(dirname(path)).includes(basename(path)); } catch { /* handled below */ }
     if (!exactLeaf) continue;
     try {
       const artifact = lstatSync(path);
-      if (artifact.isFile() || (path === run.resultPath && artifact.isSymbolicLink())) {
+      if (artifact.isFile() || (path !== run.finalPath && artifact.isSymbolicLink())) {
         rmSync(path, { force: true });
       }
     } catch { /* the writer will report an unusable artifact path */ }
   }
-  writeFileSync(run.briefPath, brief, { encoding: "utf8", mode: PRIVATE_FILE_MODE });
-  writeFileSync(run.eventsPath, "", { encoding: "utf8", mode: PRIVATE_FILE_MODE });
+  // Exclusive creation also closes the cleanup-to-write race and refuses a
+  // differently cased endpoint on case-insensitive filesystems.
+  writeFileSync(run.briefPath, brief, { encoding: "utf8", mode: PRIVATE_FILE_MODE, flag: "wx" });
+  writeFileSync(run.eventsPath, "", { encoding: "utf8", mode: PRIVATE_FILE_MODE, flag: "wx" });
   return run;
 }
 
