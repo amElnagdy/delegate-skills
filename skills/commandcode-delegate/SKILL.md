@@ -43,8 +43,8 @@ Command Code's headless mode has **exactly two states, with nothing in between**
   can reach. There is no filesystem sandbox and no path restriction. This is what an implementation
   run needs, so the relay passes it by default.
 
-`--permission-mode auto-accept` and `--tools-all` do **not** lift the headless write gate (verified
-against `cmd` 1.26.0 — write, edit, and shell were all refused with both). So an implementation run
+`--permission-mode auto-accept` and `--tools-all` do **not** lift the headless write gate. Direct CLI
+probes refused write, edit, and shell with both. So an implementation run
 through Command Code is a full-trust run: scope it with a tight brief and a clean working tree, not
 with a sandbox. The brief is guidance, and a git worktree isolates a checkout without containing the
 process. If writes outside the target tree are unacceptable, use an OS-enforced sandbox such as

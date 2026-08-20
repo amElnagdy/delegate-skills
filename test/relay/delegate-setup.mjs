@@ -34,6 +34,22 @@ export function runDelegateSetup(h) {
         [...h.SKILLS].sort().join(","),
   );
 
+  if (!h.WIN) {
+    const commandCodeOverride = join(h.scratch, "commandcode-override");
+    writeFileSync(commandCodeOverride, "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo override-commandcode; exit 0; fi\nexit 1\n");
+    chmodSync(commandCodeOverride, 0o755);
+    const overrideDiscover = spawnSync(process.execPath, [join(setupDir, "discover.mjs")], {
+      encoding: "utf8",
+      env: { ...process.env, PATH: "", COMMANDCODE_BIN: commandCodeOverride },
+    });
+    const overrideReport = JSON.parse(overrideDiscover.stdout);
+    h.check(
+      "discover honors COMMANDCODE_BIN outside Windows",
+      overrideReport.discovered.some(({ key, path, version }) =>
+        key === "commandcode" && path === commandCodeOverride && version === "override-commandcode"),
+    );
+  }
+
   if (h.WIN) {
     const withoutConfiguredCommandCode = spawnSync(process.execPath, [join(setupDir, "discover.mjs")], {
       encoding: "utf8",

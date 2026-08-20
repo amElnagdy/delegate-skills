@@ -6,8 +6,7 @@
  * the run, and write a structured result the orchestrating agent can review.
  * The orchestrator runs this one command and reads the result JSON — every
  * Command Code-specific mechanic lives in here, which keeps the skill
- * orchestrator-agnostic. Verified on Claude Code against cmd 1.26.0; other
- * shell-capable agents (OpenCode, Cursor, …) are designed-for but not verified.
+ * orchestrator-agnostic. Shell-capable agents use the same file contract.
  *
  * Trust posture: relay.mjs itself makes no network calls, reads or writes no
  * credentials, and sends no telemetry; it has no dependencies (Node built-ins
@@ -47,7 +46,7 @@
  *   --brief <file>          Path to the brief. If omitted, the brief is read from stdin.
  *   --cd <dir>              Working root for Command Code (default: current directory).
  *   --lane <name>           Fleet lane from delegate-setup config (dials apply; explicit flags win).
- *   --model <name>          Model for this run, e.g. zai-org/glm-5.3 (default: Command Code's own).
+ *   --model <name>          Model for this run, e.g. vendor/model (default: Command Code's own).
  *                           `cmd --list-models` shows what is available to your account.
  *   --effort <level>        Reasoning effort — low | medium | high, model-dependent
  *                           (default: Command Code's own configured effort).
@@ -86,7 +85,7 @@
  * A caveat that shapes the parsing: cmd's `run_end` event embeds the entire
  * conversation, so on a real run the tail of the stream exceeds a pipe buffer and
  * cmd exits without waiting for it to drain — the tail arrives cut mid-write and
- * the result line after it is simply lost (seen on cmd 1.26.0). `resultLine`
+ * the result line after it is simply lost in live runs. `resultLine`
  * reports which happened ("complete" | "truncated" | "absent"), and everything
  * load-bearing is read from the small early events instead: sessionId from
  * `run_start`, the report from the last `message_end`.
@@ -122,6 +121,7 @@ import {
   readlinkSync,
   realpathSync,
   renameSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
@@ -139,7 +139,7 @@ const VERSION_PROBE_TIMEOUT_MS = 10_000;
 const MAX_TIMER_MS = 2_147_483_647;
 const SAFE_SESSION = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 const SAFE_ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
-// Command Code model ids are vendor/name slugs (zai-org/glm-5.3). Keep in lockstep
+// Command Code model ids are vendor/name slugs. Keep in lockstep
 // with delegate-setup MODEL_TOKEN.shellSafe.
 const SAFE_MODEL = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
 
@@ -678,7 +678,7 @@ function buildArgv(opts) {
     argv.push("--permission-mode", "plan");
   } else {
     // The only headless setting that enables edits. --permission-mode auto-accept and
-    // --tools-all do not lift the gate; verified against cmd 1.26.0.
+    // --tools-all do not lift the gate; verified in direct CLI probes.
     argv.push("--yolo");
     if (opts.toolsAll) argv.push("--tools-all");
   }
@@ -699,7 +699,7 @@ function buildArgv(opts) {
  * entire conversation — every tool call, argument, and result — so on a real run
  * it is far larger than a pipe buffer, and cmd exits without waiting for the
  * write to drain: the tail arrives cut mid-string and the result line never
- * lands at all (observed on cmd 1.26.0, a successful run truncated at ~8 KB).
+ * lands at all, as observed in live runs.
  * So everything load-bearing is taken from the small early events instead —
  * `run_start` carries the sessionId as the very first line, and each
  * `message_end` carries that message's text blocks, the last of which is the
@@ -789,6 +789,17 @@ function prepareRunDir(opts, brief) {
     briefPath: join(outDir, "brief.txt"),
     resultPath: join(outDir, "result.json"),
   };
+  // A poller treats result.json existence as completion, so a reused directory
+  // must stop advertising ordinary artifacts from the previous run. Leave
+  // aliases and symlinks alone: the read-only tripwire must observe those paths.
+  for (const path of [run.finalPath, run.resultPath]) {
+    let exactLeaf = false;
+    try { exactLeaf = readdirSync(dirname(path)).includes(basename(path)); } catch { /* handled below */ }
+    if (!exactLeaf) continue;
+    try {
+      if (lstatSync(path).isFile()) rmSync(path, { force: true });
+    } catch { /* the writer will report an unusable artifact path */ }
+  }
   writeFileSync(run.briefPath, brief, "utf8");
   writeFileSync(run.eventsPath, "", "utf8");
   return run;

@@ -38,7 +38,7 @@ Options:
 | `--brief <file>` | The brief. Omit it to read the brief from stdin (`node relay.mjs … < brief.txt`). |
 | `--cd <dir>` | Working root for Command Code (default: current directory). It is the child's working directory — Command Code has no `--cd` of its own, and under `--yolo` it is a starting point, not a boundary. |
 | `--lane <name>` | Fleet lane from `delegate-setup` config. Applies that lane's dials; fails if the lane's `implementer` is not this relay. Explicit dial flags win. |
-| `--model <name>` | Model for this run, e.g. `zai-org/glm-5.3` (default: Command Code's own). `cmd --list-models` lists what your account can use. |
+| `--model <name>` | Model for this run, e.g. `vendor/model` (default: Command Code's own). `cmd --list-models` lists what your account can use. |
 | `--effort <level>` | Reasoning effort — `low` \| `medium` \| `high`, model-dependent. The relay accepts a bare token; Command Code and the model own the supported levels. |
 | `--read-only` | Withhold the write, edit, and shell tools: no `--yolo`, plus `--permission-mode plan`. For review and diagnosis. Verified afterwards via `readOnlyViolation`. |
 | `--tools-all` | Also pass `--tools-all`, so no tool stays withheld. Ignored under `--read-only` — it does not lift the write gate. |
@@ -122,9 +122,9 @@ script can branch on success/failure directly.
 `cmd` ends a run with a `run_end` event that embeds the **entire conversation** — every tool call,
 its arguments, and its result — and then exits with `process.exit`, which discards whatever is still
 queued in its stdout pipe. On any run big enough to matter, the tail therefore arrives cut mid-write
-and the `result` line after it never lands. Measured on `cmd` 1.26.0: two successful write runs lost
-their result line, one cut at ~8 KB into the `run_end` line, the other losing the last ~780 events
-outright. A synthetic writer that exits the same way loses the stream down to whatever fits the OS
+and the `result` line after it never lands. Successful live write runs have lost the result line,
+either truncating `run_end` or dropping the rest of the stream. A synthetic writer that exits the
+same way loses the stream down to whatever fits the OS
 pipe buffer, no matter how fast the reader is — so this is the CLI's flush behavior, not the relay's
 read speed (the relay batches its event-log writes precisely so it drains as fast as it can).
 
@@ -142,11 +142,11 @@ What the relay does about it, and what it means for you:
 - Read-only runs are small and usually keep a `complete` result line, so the second-opinion use is
   unaffected.
 
-**A zero exit is not a completed task.** Command Code exits `0` for a run that ended cleanly with the
-work unfinished — including the case where every write was refused because `--yolo` was absent. The
-relay therefore requires `exitCode 0` **and** `resultSubtype: "success"` before it reports
-`status: "completed"`; a clean exit with any other subtype, or with no result line at all, is reported
-`failed` with exit 1 and an `error` explaining which. Read `status`, not the exit code alone.
+When a complete result line arrives, `status: "completed"` requires exit 0 and
+`resultSubtype: "success"`; any other subtype is reported as failed with exit 1. When the result line
+is truncated or absent, the relay falls back to the process exit code: exit 0 is completed and a
+non-zero exit is failed. In that fallback case, read `resultLine` and review the diff because the
+missing subtype cannot prove the task finished.
 
 ## Waiting for completion
 

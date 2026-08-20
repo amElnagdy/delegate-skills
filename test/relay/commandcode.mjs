@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -43,6 +43,27 @@ if (h.WIN) {
     !existsSync(join(outDir, "result.json")));
   console.log("  skip  commandcode dispatch scenarios: native Windows launch is unverified");
   return;
+}
+{
+  const workDir = h.freshRepo("work-reused-out-dir-commandcode");
+  const outDir = join(h.scratch, "out-reused-commandcode");
+  const resultPath = join(outDir, "result.json");
+  const finalPath = join(outDir, "final.txt");
+  mkdirSync(outDir);
+  writeFileSync(resultPath, "{\"status\":\"stale\"}\n");
+  writeFileSync(finalPath, "stale report\n");
+  const child = spawn(process.execPath, [
+    h.relayPath("commandcode"),
+    "--brief", h.briefPath,
+    "--cd", workDir,
+    "--out-dir", outDir,
+    "--timeout", "5s",
+  ], { env: { ...h.baseEnv, SMOKE_MODE: "commandcode-version-hang" }, stdio: "ignore" });
+  h.check("commandcode reused out-dir: stale terminal artifacts disappear before completion",
+    await h.until(() => !existsSync(resultPath) && !existsSync(finalPath), 4_000));
+  const exitCode = await new Promise((resolve) => child.on("close", resolve));
+  h.check("commandcode reused out-dir: current run publishes its own terminal result",
+    exitCode === 124 && h.result(outDir).status === "timeout");
 }
 for (const scenario of [
   { name: "default", relayArgs: [], forwarded: [...CONSTANT, "--yolo"], readOnly: false, toolsAll: false },

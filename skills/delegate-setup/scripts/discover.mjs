@@ -103,10 +103,10 @@ function expandCandidate(raw) {
  * carries the bundle path when a launcher (node) runs it.
  */
 function resolveLaunch(impl) {
-  if (process.platform === "win32" && impl.key === "commandcode") {
-    if (!process.env.COMMANDCODE_BIN) return null;
-    const command = resolve(process.env.COMMANDCODE_BIN);
-    if (/\.(?:cmd|bat)$/i.test(command)) return null;
+  if (impl.key === "commandcode" && process.env.COMMANDCODE_BIN) {
+    const configured = process.env.COMMANDCODE_BIN;
+    const command = /[\\/]/.test(configured) ? resolve(configured) : resolveBinary(configured);
+    if (!command || (process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command))) return null;
     try {
       if (statSync(command).isFile()) return { path: command, command, prefixArgs: [] };
     } catch {
@@ -114,6 +114,7 @@ function resolveLaunch(impl) {
     }
     return null;
   }
+  if (process.platform === "win32" && impl.key === "commandcode") return null;
   const onPath = resolveBinary(impl.binary);
   if (onPath) return { path: onPath, command: onPath, prefixArgs: [] };
   const candidates = impl.locate?.candidates?.[process.platform] ?? [];
