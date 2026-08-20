@@ -380,6 +380,19 @@ export const IMPLEMENTERS = Object.freeze([
     winShell: false,
 
   },
+  {
+    key: "dsh",
+    skill: "dsh-delegate",
+    binary: "dsh",
+    versionArgs: ["--version"],
+    // No auth-status command; credentials resolve from env / $DSH_HOME files.
+    authProbe: null,
+    modelProbe: null,
+    // Sessions persist under $DSH_HOME but headless prints no id; unknown not guessed.
+    usageProbe: null,
+    supports: ["provider", "model", "timeout", "readOnly", "permissionMode"],
+    winShell: true,
+  },
 ]);
 
 /** Prototype-free map so names like "toString" cannot pass as implementers. */
