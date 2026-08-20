@@ -820,12 +820,25 @@ function prepareRunDir(opts, brief) {
     briefPath: join(outDir, "brief.txt"),
     resultPath: join(outDir, "result.json"),
   };
+  const paths = [run.finalPath, run.resultPath, run.briefPath, run.eventsPath];
+  if (basename(canonicalFilePath(run.resultPath)) !== basename(run.resultPath)) {
+    fail("--out-dir contains a case-aliased result.json artifact");
+  }
+  let entries = [];
+  try { entries = readdirSync(outDir); } catch { /* the writers report an unusable output directory */ }
+  const collides = paths.some((path) => entries.includes(basename(path)));
+  if (collides) {
+    let priorRun = false;
+    try {
+      priorRun = lstatSync(run.resultPath).isFile() &&
+        JSON.parse(readFileSync(run.resultPath, "utf8")).schema === "delegate-relay.result.v1";
+    } catch { /* an absent, malformed, or linked marker is not reusable */ }
+    if (!priorRun) fail("--out-dir contains relay artifacts without a prior delegate-relay.result.v1 result");
+  }
   // Exact relay files may be reused, but no stale artifact endpoint may survive:
   // final.txt is written after dispatch and would otherwise follow its symlink.
-  for (const path of [run.finalPath, run.resultPath, run.briefPath, run.eventsPath]) {
-    let exactLeaf = false;
-    try { exactLeaf = readdirSync(dirname(path)).includes(basename(path)); } catch { /* handled below */ }
-    if (!exactLeaf) continue;
+  for (const path of paths) {
+    if (!entries.includes(basename(path))) continue;
     try {
       const artifact = lstatSync(path);
       if (artifact.isFile() || artifact.isSymbolicLink()) {
@@ -884,7 +897,7 @@ function makeResultWriter(opts, version, run, beforeTree, beforeFingerprints) {
     // Publish atomically so a polling orchestrator never reads a half-written file
     // (same idiom as claude-delegate's writeJsonAtomic and qoder-delegate).
     const temporary = `${run.resultPath}.${process.pid}.tmp`;
-    writeFileSync(temporary, `${JSON.stringify(result, null, 2)}\n`, { encoding: "utf8", mode: PRIVATE_FILE_MODE });
+    writeFileSync(temporary, `${JSON.stringify(result, null, 2)}\n`, { encoding: "utf8", mode: PRIVATE_FILE_MODE, flag: "wx" });
     renameSync(temporary, run.resultPath);
     return result;
   };
@@ -1013,15 +1026,15 @@ function dispatchToCommandCode(opts, brief, run, writeResult, env) {
   const persistFinal = () => {
     // Last resort: the deltas of a message whose message_end never arrived.
     const streamed = state.deltas.join("").trim();
-    const text = state.result?.finalText || state.lastText || streamed || "";
+    const text = (state.result?.finalText || state.lastText || streamed || "").trim();
     if (!text) return { text: "", error: null };
     try {
       // final.txt is deliberately created only once. This refuses a symlink or
       // case-aliased endpoint introduced after prepareRunDir completed.
       writeFileSync(run.finalPath, `${text}\n`, { encoding: "utf8", mode: PRIVATE_FILE_MODE, flag: "wx" });
-      return { text: text.trim(), error: null };
+      return { text, error: null };
     } catch (error) {
-      return { text: text.trim(), error: `could not safely create final.txt: ${error.code || error.message}` };
+      return { text, error: `could not safely create final.txt: ${error.code || error.message}` };
     }
   };
 

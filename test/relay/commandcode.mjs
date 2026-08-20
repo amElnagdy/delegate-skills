@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { delimiter, dirname, join, relative } from "node:path";
 
 // Every dispatch carries these, in this order: JSON output is what makes the run
@@ -66,10 +66,8 @@ if (h.WIN) {
   const outDir = join(h.scratch, "out-reused-commandcode");
   const resultPath = join(outDir, "result.json");
   const finalPath = join(outDir, "final.txt");
-  const staleResultPath = join(outDir, "stale-result.json");
   mkdirSync(outDir);
-  writeFileSync(staleResultPath, "{\"status\":\"stale\"}\n");
-  symlinkSync(staleResultPath, resultPath);
+  writeFileSync(resultPath, "{\"schema\":\"delegate-relay.result.v1\"}\n");
   writeFileSync(finalPath, "stale report\n");
   const child = spawn(process.execPath, [
     h.relayPath("commandcode"),
@@ -83,6 +81,46 @@ if (h.WIN) {
   const exitCode = await new Promise((resolve) => child.on("close", resolve));
   h.check("commandcode reused out-dir: current run publishes its own terminal result",
     exitCode === 124 && h.result(outDir).status === "timeout");
+}
+{
+  const workDir = h.freshRepo("work-untrusted-out-dir-commandcode");
+  const outDir = join(h.scratch, "out-untrusted-commandcode");
+  mkdirSync(outDir);
+  const finalPath = join(outDir, "final.txt");
+  writeFileSync(finalPath, "user report\n");
+  const rejected = spawnSync(process.execPath, [
+    h.relayPath("commandcode"), "--brief", h.briefPath, "--cd", workDir, "--out-dir", outDir,
+  ], { env: h.baseEnv, encoding: "utf8" });
+  h.check("commandcode untrusted out-dir: existing artifacts are rejected untouched",
+    rejected.status === 2 && readFileSync(finalPath, "utf8") === "user report\n");
+}
+{
+  const workDir = h.freshRepo("work-result-symlink-commandcode");
+  const outDir = join(h.scratch, "out-result-symlink-commandcode");
+  const victimPath = join(h.scratch, "result-symlink-victim-commandcode");
+  mkdirSync(outDir);
+  writeFileSync(victimPath, "protected\n");
+  const resultPath = join(outDir, "result.json");
+  symlinkSync(victimPath, resultPath);
+  const rejected = spawnSync(process.execPath, [
+    h.relayPath("commandcode"), "--brief", h.briefPath, "--cd", workDir, "--out-dir", outDir,
+  ], { env: h.baseEnv, encoding: "utf8" });
+  h.check("commandcode result symlink: rejects without replacing the link or target",
+    rejected.status === 2 && lstatSync(resultPath).isSymbolicLink() && readFileSync(victimPath, "utf8") === "protected\n");
+}
+{
+  const workDir = h.freshRepo("work-result-case-alias-commandcode");
+  const outDir = join(h.scratch, "out-result-case-alias-commandcode");
+  mkdirSync(outDir);
+  const aliasPath = join(outDir, "RESULT.JSON");
+  writeFileSync(aliasPath, "user result\n");
+  if (existsSync(join(outDir, "result.json"))) {
+    const rejected = spawnSync(process.execPath, [
+      h.relayPath("commandcode"), "--brief", h.briefPath, "--cd", workDir, "--out-dir", outDir,
+    ], { env: h.baseEnv, encoding: "utf8" });
+    h.check("commandcode result case alias: rejects before replacing the alias",
+      rejected.status === 2 && readFileSync(aliasPath, "utf8") === "user result\n");
+  }
 }
 {
   const commandCodeBin = `./${relative(process.cwd(), h.baseEnv.COMMANDCODE_BIN)}`;
@@ -238,6 +276,20 @@ for (const [mode, expectedStatus, expectedExit, timeout] of [
     value.error?.includes("was not dispatched"));
 }
 if (!h.WIN) {
+  const workDir = h.freshRepo("work-result-temp-symlink-commandcode");
+  const outDir = join(h.scratch, "out-result-temp-symlink-commandcode");
+  const victimPath = join(h.scratch, "result-temp-victim-commandcode");
+  writeFileSync(victimPath, "protected\n");
+  const preflight = h.runRelay("commandcode", workDir, outDir, [], { SMOKE_MODE: "commandcode-version-hang" });
+  h.check("commandcode result temp symlink: run artifacts are prepared",
+    await h.until(() => existsSync(join(outDir, "events.jsonl")), 2_000));
+  symlinkSync(victimPath, `${join(outDir, "result.json")}.${preflight.pid}.tmp`);
+  preflight.kill("SIGTERM");
+  await new Promise((resolve) => preflight.on("close", resolve));
+  h.check("commandcode result temp symlink: target is not overwritten",
+    readFileSync(victimPath, "utf8") === "protected\n");
+}
+if (!h.WIN) {
   const workDir = h.freshRepo("work-snapshot-abort-commandcode");
   const outDir = join(h.scratch, "out-snapshot-abort-commandcode");
   const shimDir = join(h.scratch, "slow-git-commandcode");
@@ -302,7 +354,7 @@ if (!h.WIN) {
   spawnSync("git", ["-C", workDir, "add", "victim.txt"]);
   const victimCommitted = spawnSync("git", ["-C", workDir, "-c", "user.name=Smoke", "-c", "user.email=smoke@example.invalid", "commit", "-qm", "fixture"]).status === 0;
   mkdirSync(outDir);
-  writeFileSync(join(outDir, "result.json"), "{\"status\":\"stale\"}\n");
+  writeFileSync(join(outDir, "result.json"), "{\"schema\":\"delegate-relay.result.v1\"}\n");
   symlinkSync(victimPath, join(outDir, "brief.txt"));
   const missing = spawnSync(process.execPath, [
     h.relayPath("commandcode"),

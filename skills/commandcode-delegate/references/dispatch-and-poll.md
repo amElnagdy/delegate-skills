@@ -94,7 +94,7 @@ brief immediately.
   (global "most recent", which another run can steal)
 - `finalMessage` — Command Code's own final report (the `<structured_output_contract>` you asked for),
   lifted from `finalText` on a complete result line or recovered from the last `message_end` or
-  `text_delta`; recovered text may be partial or empty, and is also written to `finalPath`
+  `text_delta`; recovered text may be partial or empty, and is written to `finalPath` only when non-empty
 - `resultLine` — how much of the tail survived: `complete`, `truncated`, or `absent`. See the
   truncation section below; the four fields under it are null unless this says `complete`
 - `resultSubtype` / `stopReason` / `usage` / `durationMs` — straight from that result line: `success`,
@@ -108,7 +108,7 @@ brief immediately.
   `null` on write-capable runs, where the question doesn't apply
 - `autonomy` — the state the run actually got, in Command Code's terms (`--yolo …` or `plan …`)
 - `briefPath` / `eventsPath` / `finalPath` — the exact brief relay sent, the raw NDJSON event stream,
-  and the final-message file
+  and the final-message file; `finalPath` is `null` when `finalMessage` is empty
 - `workdir`, `readOnly`, `toolsAll`, `model`, `effort`, `maxTurns`, `session`, `continueLast`,
   `cleanEnv`, `keepEnv`, `startedAt`, `finishedAt` — `session` is the explicit session id, or `null`
   for fresh and `--continue-last` runs; `keepEnv` records names only, never values
