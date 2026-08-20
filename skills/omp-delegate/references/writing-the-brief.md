@@ -72,9 +72,11 @@ Add extra blocks only when the task needs them:
   unknown).
 - **Research or recommendations** - add `<research_mode>` (separate observed facts, inferences,
   and open questions), and dispatch with `--read-only` so omp cannot invoke write/edit/bash tools.
-  That restricts the tool surface; it is not a sandbox. Leave `--approve` off unless the user
-  trusts this repo's `.omp` extras (the relay already passes `--no-extensions --no-skills
-  --no-rules` unless `--approve` is set).
+  That restricts the tool surface; it is not a sandbox. `AGENTS.md` and `CLAUDE.md` are also
+  repository-controlled instructions and may load without `--approve`. Use read-only dispatches
+  for untrusted repositories. Leave `--approve` off unless the user trusts this repo's `.omp`
+  extras (the relay already passes `--no-extensions --no-skills --no-rules` unless `--approve`
+  is set).
 
 ## Always ask for the report explicitly
 
