@@ -129,7 +129,7 @@ import {
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { constants, tmpdir } from "node:os";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
 import { TextDecoder } from "node:util";
 
@@ -896,9 +896,25 @@ function makeResultWriter(opts, version, run, beforeTree, beforeFingerprints) {
     }
     // Publish atomically so a polling orchestrator never reads a half-written file
     // (same idiom as claude-delegate's writeJsonAtomic and qoder-delegate).
-    const temporary = `${run.resultPath}.${process.pid}.tmp`;
-    writeFileSync(temporary, `${JSON.stringify(result, null, 2)}\n`, { encoding: "utf8", mode: PRIVATE_FILE_MODE, flag: "wx" });
-    renameSync(temporary, run.resultPath);
+    const resultContents = `${JSON.stringify(result, null, 2)}\n`;
+    let resultTemporary = null;
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const resultCandidate = `${run.resultPath}.${process.pid}.${randomBytes(12).toString("hex")}.tmp`;
+      try {
+        writeFileSync(resultCandidate, resultContents, { encoding: "utf8", mode: PRIVATE_FILE_MODE, flag: "wx" });
+        resultTemporary = resultCandidate;
+        break;
+      } catch (error) {
+        if (error?.code !== "EEXIST") throw error;
+      }
+    }
+    if (resultTemporary === null) throw new Error("could not reserve a result.json temporary file");
+    try {
+      renameSync(resultTemporary, run.resultPath);
+    } catch (error) {
+      rmSync(resultTemporary, { force: true });
+      throw error;
+    }
     return result;
   };
 }
@@ -951,6 +967,8 @@ function installPreflightSignalHandlers(opts, run, writeResult, getChild) {
     const handler = () => {
       if (!active) return;
       active = false;
+      const child = getChild();
+      if (child) killChild(child, process.platform === "win32" ? "SIGTERM" : "SIGKILL");
       const result = writeResult({
         status: "aborted",
         exitCode: 128 + (constants.signals[sig] || 15),
@@ -964,8 +982,6 @@ function installPreflightSignalHandlers(opts, run, writeResult, getChild) {
         error: `the relay was killed by ${sig} during the cmd version preflight; Command Code was not dispatched`,
       });
       printSummary(result, run.resultPath);
-      const child = getChild();
-      if (child) killChild(child, process.platform === "win32" ? "SIGTERM" : "SIGKILL");
       process.exit(result.exitCode);
     };
     handlers.set(sig, handler);
@@ -1071,33 +1087,38 @@ function dispatchToCommandCode(opts, brief, run, writeResult, env) {
       if (settled) return;
       settled = true;
       clearWatchdog();
-      const touched = gitTouchedFiles(opts.cd);
-      flushEvents(run, state);
-      const final = persistFinal();
-      const abortedFields = {
-        status: "aborted",
-        exitCode: 128 + (constants.signals[sig] || 15),
-        signal: sig,
-        sessionId: state.sessionId,
-        resultSubtype: state.result?.subtype ?? null,
-        stopReason: state.result?.stopReason ?? null,
-        usage: state.result?.usage ?? null,
-        finalMessage: final.text,
-        touchedFiles: touched,
-        stderrTail: stderrTail.slice(-20),
-        error: final.error || `the relay was killed by ${sig}; cmd was terminated with it — inspect the working tree before re-dispatching`,
-      };
-      const result = writeResult(abortedFields);
-      printSummary(result, run.resultPath);
       killChild(child);
-      setTimeout(() => {
+      try {
+        const touched = gitTouchedFiles(opts.cd);
+        flushEvents(run, state);
+        const final = persistFinal();
+        const abortedFields = {
+          status: "aborted",
+          exitCode: 128 + (constants.signals[sig] || 15),
+          signal: sig,
+          sessionId: state.sessionId,
+          resultSubtype: state.result?.subtype ?? null,
+          stopReason: state.result?.stopReason ?? null,
+          usage: state.result?.usage ?? null,
+          finalMessage: final.text,
+          touchedFiles: touched,
+          stderrTail: stderrTail.slice(-20),
+          error: final.error || `the relay was killed by ${sig}; cmd was terminated with it — inspect the working tree before re-dispatching`,
+        };
+        const result = writeResult(abortedFields);
+        printSummary(result, run.resultPath);
+        setTimeout(() => {
+          killChild(child, "SIGKILL");
+          // the child may flush files during the grace window; refresh the snapshot so the
+          // artifact matches the tree the orchestrator will actually find
+          const late = gitTouchedFiles(opts.cd);
+          writeResult({ ...abortedFields, touchedFiles: late });
+          process.exit(result.exitCode);
+        }, 2000);
+      } catch (error) {
         killChild(child, "SIGKILL");
-        // the child may flush files during the grace window; refresh the snapshot so the
-        // artifact matches the tree the orchestrator will actually find
-        const late = gitTouchedFiles(opts.cd);
-        writeResult({ ...abortedFields, touchedFiles: late });
-        process.exit(result.exitCode);
-      }, 2000);
+        throw error;
+      }
     });
   }
 

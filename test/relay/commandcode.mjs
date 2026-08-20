@@ -279,15 +279,51 @@ if (!h.WIN) {
   const workDir = h.freshRepo("work-result-temp-symlink-commandcode");
   const outDir = join(h.scratch, "out-result-temp-symlink-commandcode");
   const victimPath = join(h.scratch, "result-temp-victim-commandcode");
+  const preflightPidPath = join(h.scratch, "result-temp-preflight-pid-commandcode");
   writeFileSync(victimPath, "protected\n");
-  const preflight = h.runRelay("commandcode", workDir, outDir, [], { SMOKE_MODE: "commandcode-version-hang" });
+  const preflight = h.runRelay("commandcode", workDir, outDir, [], {
+    SMOKE_MODE: "commandcode-version-hang",
+    SMOKE_PREFLIGHT_PID_FILE: preflightPidPath,
+  });
   h.check("commandcode result temp symlink: run artifacts are prepared",
-    await h.until(() => existsSync(join(outDir, "events.jsonl")), 2_000));
+    await h.until(() => existsSync(join(outDir, "events.jsonl")) && existsSync(preflightPidPath), 2_000));
   symlinkSync(victimPath, `${join(outDir, "result.json")}.${preflight.pid}.tmp`);
-  preflight.kill("SIGTERM");
-  await new Promise((resolve) => preflight.on("close", resolve));
+  chmodSync(outDir, 0o500);
+  try {
+    preflight.kill("SIGTERM");
+    await new Promise((resolve) => preflight.on("close", resolve));
+  } finally {
+    chmodSync(outDir, 0o700);
+  }
   h.check("commandcode result temp symlink: target is not overwritten",
     readFileSync(victimPath, "utf8") === "protected\n");
+  h.check("commandcode result write failure: preflight child is dead",
+    await h.until(() => !h.alive(Number(readFileSync(preflightPidPath, "utf8"))), 5_000));
+}
+if (!h.WIN) {
+  const workDir = h.freshRepo("work-dispatch-result-write-failure-commandcode");
+  const outDir = join(h.scratch, "out-dispatch-result-write-failure-commandcode");
+  const pidPath = join(h.scratch, "dispatch-pid-commandcode");
+  const grandPidPath = join(h.scratch, "dispatch-grandpid-commandcode");
+  const child = h.runRelay("commandcode", workDir, outDir, [], {
+    SMOKE_MODE: "abort",
+    SMOKE_PID_FILE: pidPath,
+    SMOKE_GRAND_PID_FILE: grandPidPath,
+    SMOKE_LATE_FILE: join(workDir, "late-dispatch-result-write-failure.txt"),
+  });
+  h.check("commandcode dispatch result write failure: implementer came up",
+    await h.until(() => existsSync(pidPath) && existsSync(grandPidPath), 5_000));
+  const implementerPid = Number(readFileSync(pidPath, "utf8"));
+  const grandPid = Number(readFileSync(grandPidPath, "utf8"));
+  chmodSync(outDir, 0o500);
+  try {
+    child.kill("SIGTERM");
+    await new Promise((resolve) => child.on("close", resolve));
+  } finally {
+    chmodSync(outDir, 0o700);
+  }
+  h.check("commandcode dispatch result write failure: implementer and subprocess are dead",
+    await h.until(() => !h.alive(implementerPid) && !h.alive(grandPid), 5_000));
 }
 if (!h.WIN) {
   const workDir = h.freshRepo("work-snapshot-abort-commandcode");

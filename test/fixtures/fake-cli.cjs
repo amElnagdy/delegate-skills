@@ -19,6 +19,9 @@ const versionProbe = args.includes("--version") || args[0] === "version" || args
 if (versionProbe && process.env.SMOKE_PREFLIGHT_ENV_FILE) {
   fs.writeFileSync(process.env.SMOKE_PREFLIGHT_ENV_FILE, JSON.stringify(capturedEnv()));
 }
+if (versionProbe && process.env.SMOKE_PREFLIGHT_PID_FILE) {
+  fs.writeFileSync(process.env.SMOKE_PREFLIGHT_PID_FILE, String(process.pid));
+}
 if (versionProbe && process.env.SMOKE_MODE === "grok-spawn-error" && process.platform !== "win32") {
   fs.renameSync(require("node:path").join(__dirname, "grok"), require("node:path").join(__dirname, "grok.removed"));
   console.log("fake-cli 0.0.0-smoke");
