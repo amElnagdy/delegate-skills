@@ -18,7 +18,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { accessSync, constants as fsConstants, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, join, resolve } from "node:path";
+import { delimiter, join, resolve, sep } from "node:path";
 import { IMPLEMENTERS } from "./implementers.mjs";
 
 const PROBE_TIMEOUT_MS = 10_000;
@@ -86,8 +86,44 @@ function resolveBinary(binary) {
   return null;
 }
 
-function needsWindowsShell(impl, binaryPath) {
-  return process.platform === "win32" && (impl.winShell || /\.(?:cmd|bat)$/i.test(binaryPath));
+/** Expand ~ and %VAR% in a registry `locate` candidate, then normalize separators. */
+function expandCandidate(raw) {
+  const expanded = raw
+    .replace(/^~(?=\/)/, homedir())
+    .replace(/%([A-Za-z_][A-Za-z0-9_]*)%/g, (_, name) => process.env[name] || "");
+  return expanded.split("/").join(sep);
+}
+
+/**
+ * Resolve one implementer to a launch descriptor: PATH first, exactly as every
+ * sibling behaves, then the registry's `locate` candidates. The fallback exists
+ * for CLIs that ship inside a desktop app instead of on PATH (ZCode), and is
+ * consulted only when the binary is genuinely absent, so no existing
+ * implementer's behaviour changes. `prefixArgs` is empty for a plain binary and
+ * carries the bundle path when a launcher (node) runs it.
+ */
+function resolveLaunch(impl) {
+  const onPath = resolveBinary(impl.binary);
+  if (onPath) return { path: onPath, command: onPath, prefixArgs: [] };
+  const candidates = impl.locate?.candidates?.[process.platform] ?? [];
+  for (const raw of candidates) {
+    const file = expandCandidate(raw);
+    try {
+      if (statSync(file).isFile()) {
+        return { path: file, command: process.execPath, prefixArgs: [file] };
+      }
+    } catch {
+      // keep looking
+    }
+  }
+  return null;
+}
+
+function needsWindowsShell(impl, launch) {
+  // A node-launched bundle is a real executable and never needs the shell, even
+  // for an implementer whose PATH binary would.
+  if (launch.prefixArgs.length > 0) return false;
+  return process.platform === "win32" && (impl.winShell || /\.(?:cmd|bat)$/i.test(launch.command));
 }
 
 /** Quote a path for cmd.exe when shell:true; reject metacharacters. */
@@ -98,9 +134,9 @@ function quoteForCmd(value) {
   return `"${value}"`;
 }
 
-function runProbe(binaryPath, args, useShell) {
-  const command = useShell ? quoteForCmd(binaryPath) : binaryPath;
-  return execFileSync(command, args, {
+function runProbe(launch, args, useShell) {
+  const command = useShell ? quoteForCmd(launch.command) : launch.command;
+  return execFileSync(command, [...launch.prefixArgs, ...args], {
     encoding: "utf8",
     timeout: PROBE_TIMEOUT_MS,
     stdio: ["pipe", "pipe", "pipe"],
@@ -114,10 +150,10 @@ function stripAnsi(text) {
 }
 
 /** spawnSync, not runProbe: success-path stderr matters (codex prints login status there). */
-function captureProbe(binaryPath, args, useShell) {
+function captureProbe(launch, args, useShell) {
   try {
-    const command = useShell ? quoteForCmd(binaryPath) : binaryPath;
-    const result = spawnSync(command, args, {
+    const command = useShell ? quoteForCmd(launch.command) : launch.command;
+    const result = spawnSync(command, [...launch.prefixArgs, ...args], {
       encoding: "utf8",
       timeout: PROBE_TIMEOUT_MS,
       stdio: ["pipe", "pipe", "pipe"],
@@ -134,11 +170,11 @@ function captureProbe(binaryPath, args, useShell) {
   }
 }
 
-function probeVersion(impl, binaryPath) {
-  const useShell = needsWindowsShell(impl, binaryPath);
+function probeVersion(impl, launch) {
+  const useShell = needsWindowsShell(impl, launch);
   const tryArgs = (versionArgs) => {
     try {
-      const raw = runProbe(binaryPath, versionArgs, useShell);
+      const raw = runProbe(launch, versionArgs, useShell);
       const firstLine = raw.trim().split(/\r?\n/, 1)[0].trim();
       if (!firstLine) return null;
       if (impl.versionFormat !== "colon-prefix") return firstLine;
@@ -163,14 +199,14 @@ function readAuthField(raw, jsonField) {
   }
 }
 
-function probeAuth(impl, binaryPath, captured = null) {
+function probeAuth(impl, launch, captured = null) {
   if (!impl.authProbe) return null;
   const { args, jsonField, successPattern, failPattern, missMeansFalse } = impl.authProbe;
-  const useShell = needsWindowsShell(impl, binaryPath);
+  const useShell = needsWindowsShell(impl, launch);
 
   if (jsonField) {
     try {
-      return readAuthField(runProbe(binaryPath, args, useShell), jsonField);
+      return readAuthField(runProbe(launch, args, useShell), jsonField);
     } catch (error) {
       const combined = `${error.stdout || ""}${error.stderr || ""}`;
       if (combined.trim()) {
@@ -181,7 +217,7 @@ function probeAuth(impl, binaryPath, captured = null) {
     }
   }
 
-  const { ok, output } = captured || captureProbe(binaryPath, args, useShell);
+  const { ok, output } = captured || captureProbe(launch, args, useShell);
   // failPattern first: "not logged in" also contains "logged in".
   if (failPattern && failPattern.test(output)) return false;
   if (successPattern) {
@@ -249,7 +285,7 @@ function modelFilePath(probe) {
   return join(base, probe.file);
 }
 
-function probeModels(impl, binaryPath, captured = null) {
+function probeModels(impl, launch, captured = null) {
   const probe = impl.modelProbe;
   if (!probe) {
     return { status: "unsupported", values: [], truncated: false };
@@ -269,7 +305,7 @@ function probeModels(impl, binaryPath, captured = null) {
     return captured.ok ? parseModelLines(captured.stdout, probe.format) : failedModels();
   }
   try {
-    const raw = runProbe(binaryPath, probe.args, needsWindowsShell(impl, binaryPath));
+    const raw = runProbe(launch, probe.args, needsWindowsShell(impl, launch));
     return parseModelLines(raw, probe.format);
   } catch {
     return failedModels();
@@ -356,12 +392,12 @@ function main(argv) {
   const missing = [];
 
   for (const impl of IMPLEMENTERS) {
-    const binaryPath = resolveBinary(impl.binary);
-    if (!binaryPath) {
+    const launch = resolveLaunch(impl);
+    if (!launch) {
       missing.push({ key: impl.key, binary: impl.binary, skill: impl.skill });
       continue;
     }
-    const version = probeVersion(impl, binaryPath);
+    const version = probeVersion(impl, launch);
     const authArgs = impl.authProbe && !impl.authProbe.jsonField ? impl.authProbe.args : null;
     const modelArgs = impl.modelProbe?.args;
     const sharedCapture =
@@ -369,17 +405,17 @@ function main(argv) {
       modelArgs &&
       authArgs.length === modelArgs.length &&
       authArgs.every((arg, index) => arg === modelArgs[index])
-        ? captureProbe(binaryPath, authArgs, needsWindowsShell(impl, binaryPath))
+        ? captureProbe(launch, authArgs, needsWindowsShell(impl, launch))
         : null;
     const entry = {
       key: impl.key,
       skill: impl.skill,
       binary: impl.binary,
       version,
-      path: binaryPath,
-      authenticated: probeAuth(impl, binaryPath, sharedCapture),
+      path: launch.path,
+      authenticated: probeAuth(impl, launch, sharedCapture),
       supports: [...impl.supports],
-      models: probeModels(impl, binaryPath, sharedCapture),
+      models: probeModels(impl, launch, sharedCapture),
     };
     if (withUsage) entry.usage = probeUsage(impl);
     discovered.push(entry);
