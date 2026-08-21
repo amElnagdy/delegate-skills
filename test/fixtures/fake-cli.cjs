@@ -89,6 +89,35 @@ if (process.env.SMOKE_MODE === "aider-exit-nonzero") {
   console.error("fake aider nonzero exit");
   process.exit(7);
 }
+// dsh prints exactly the final assistant message on stdout (with leading blank
+// lines, as the real CLI does), reads no stdin, and exits 0. The task rides argv
+// only, so the capture includes it for the pointer-task assertions.
+if (process.env.SMOKE_MODE === "dsh-success") {
+  if (process.env.SMOKE_ARGS_FILE) {
+    fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify({
+      args,
+      cwd: process.cwd(),
+      permissionMode: process.env.DSH_PERMISSION_MODE ?? null,
+    }));
+  }
+  console.log("");
+  console.log("fake dsh completed");
+  process.exit(0);
+}
+// The measured live failure shape: a one-line diagnostic on stderr, nothing on
+// stdout, exit 1.
+if (process.env.SMOKE_MODE === "dsh-error") {
+  console.error('dsh: MISSING_CREDENTIAL: llm-deepseek: no API key for provider route "deepseek-official"');
+  process.exit(1);
+}
+// One very long stderr line with no newline at all, so the relay's bounded held
+// fragment is exercised rather than its whole-line tail. Exit nonzero: the relay
+// reports stderrTail only for a run it did not call completed.
+if (process.env.SMOKE_MODE === "dsh-unterminated-stderr") {
+  for (let i = 0; i < 200; i += 1) process.stderr.write("x".repeat(10000));
+  process.stdout.write("fake dsh done\n");
+  process.exit(1);
+}
 if (process.env.SMOKE_MODE === "agy-permission-denied") {
   console.error('jetski: no output produced — a tool required the "write_file" permission that headless\nmode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow\nin settings.json (e.g. write_file(<target>)). Alternatively, re-run with\n--dangerously-skip-permissions to auto-approve all tools.');
   process.exit(0);
