@@ -112,6 +112,8 @@ const SCHEMA = "delegate-relay.result.v1";
 const DEFAULT_PROVIDER = "deepseek-official";
 const SAFE_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:\/-]*$/;
 const PERMISSION_MODES = new Set(["read-only", "workspace-write", "danger-full-access"]);
+const STDERR_REMAINDER_LIMIT = 64 * 1024;
+const STDERR_TRUNCATION_MARKER = "[truncated] ";
 
 const IMPLEMENTER_KEY = "dsh";
 
@@ -778,6 +780,9 @@ function dispatchToDsh(opts, run, writeResult, beforeTree, beforeFingerprints, r
   // A stderr line can span data chunks. Holding the trailing fragment until the
   // next chunk keeps the tail one entry per logical line, so a long unterminated
   // line cannot evict complete lines from the 20-line window.
+  // The tail bounds whole lines, not the fragment held between chunks, so a dsh
+  // process emitting one very long unterminated line would otherwise grow this
+  // string without limit. Keep a bounded suffix — the tail is a tail — and say so.
   let stderrRemainder = "";
 
   const stdoutDecoder = new StringDecoder("utf8");
@@ -794,7 +799,10 @@ function dispatchToDsh(opts, run, writeResult, beforeTree, beforeFingerprints, r
   const pushStderr = (text, flush = false) => {
     const lines = `${stderrRemainder}${text}`.split("\n");
     // On flush the decoder is done, so the trailing fragment is a complete line.
-    stderrRemainder = flush ? "" : lines.pop();
+    const remainder = flush ? "" : (lines.pop() ?? "");
+    stderrRemainder = remainder.length > STDERR_REMAINDER_LIMIT
+      ? `${STDERR_TRUNCATION_MARKER}${remainder.slice(-(STDERR_REMAINDER_LIMIT - STDERR_TRUNCATION_MARKER.length))}`
+      : remainder;
     for (const line of lines) {
       if (line.trim()) stderrTail.push(line.trimEnd());
     }

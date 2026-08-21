@@ -89,6 +89,15 @@ if (process.env.SMOKE_MODE === "aider-exit-nonzero") {
   console.error("fake aider nonzero exit");
   process.exit(7);
 }
+// One very long stderr line with no newline at all, delivered in many chunks, so the
+// relay's held fragment is exercised rather than its whole-line tail.
+if (process.env.SMOKE_MODE === "dsh-unterminated-stderr") {
+  for (let i = 0; i < 200; i += 1) process.stderr.write("x".repeat(10000));
+  process.stdout.write("fake dsh done\n");
+  // Exit nonzero: the relay reports stderrTail only for a run it did not call
+  // completed, and this case exists to inspect that tail.
+  process.exit(1);
+}
 if (process.env.SMOKE_MODE === "agy-permission-denied") {
   console.error('jetski: no output produced — a tool required the "write_file" permission that headless\nmode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow\nin settings.json (e.g. write_file(<target>)). Alternatively, re-run with\n--dangerously-skip-permissions to auto-approve all tools.');
   process.exit(0);

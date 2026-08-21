@@ -61,6 +61,27 @@ export function runDsh(h) {
     }
   }
 
+  // 2 MB of stderr with no newline: the held fragment must stay bounded and be
+  // reported as one marked line, not grow until the relay runs out of memory.
+  const floodOut = join(h.scratch, "out-stderr-flood-dsh");
+  const flood = spawnSync(process.execPath, [
+    h.relayPath("dsh"),
+    "--brief", h.briefPath,
+    "--cd", workDir,
+    "--out-dir", floodOut,
+    // The relay echoes the child's stderr to its own, so this spawnSync needs room for
+    // all 2 MB; the default 1 MB maxBuffer would kill the relay and mask the result.
+  ], { env: { ...h.baseEnv, SMOKE_MODE: "dsh-unterminated-stderr" }, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
+  h.check("dsh stderr flood: relay survives an unterminated 2 MB line", flood.status === 1);
+  if (existsSync(join(floodOut, "result.json"))) {
+    const value = h.result(floodOut);
+    const tail = value.stderrTail ?? [];
+    h.check("dsh stderr flood: the tail is actually reported", tail.length === 1);
+    h.check("dsh stderr flood: the fragment is one entry, not thousands", tail.length === 1);
+    h.check("dsh stderr flood: the retained fragment is bounded and marked",
+      tail.length === 1 && tail[0].length <= 65_536 && tail[0].startsWith("[truncated] "));
+  }
+
   // A path with none of those characters must still be accepted, so the guard
   // cannot be "fixed" by rejecting everything.
   const cleanOut = join(h.scratch, "out-clean-dsh");
