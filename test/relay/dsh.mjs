@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 /**
@@ -18,6 +18,10 @@ export function runDsh(h) {
   for (const character of METACHARACTERS) {
     const outDir = join(h.scratch, `out-patch-metachar-${METACHARACTERS.indexOf(character)}-dsh`);
     const patch = join(h.scratch, `overlay${character}.yml`);
+    // The relay also exits 2 for a --patch file that does not exist, so on POSIX the
+    // file has to be real or that check, not the guard, would decide the exit. These
+    // names are legal on POSIX and illegal on Windows, where the guard fires first.
+    if (!h.WIN) writeFileSync(patch, "- id: agent-default-model\n", "utf8");
     const run = spawnSync(process.execPath, [
       h.relayPath("dsh"),
       "--brief", h.briefPath,
@@ -32,10 +36,9 @@ export function runDsh(h) {
       h.check(`dsh win32 --patch ${JSON.stringify(character)}: writes no result file`,
         !existsSync(join(outDir, "result.json")));
     } else {
-      // POSIX spawns argv directly, so the guard must not fire; the run fails later
-      // on the missing patch file or the absent binary, never with a usage exit.
-      h.check(`dsh posix --patch ${JSON.stringify(character)}: guard does not apply`,
-        run.status !== 2 || !run.stderr.includes("cmd.exe"));
+      // POSIX spawns argv directly, so the guard must not fire at all: any usage exit
+      // here is a failure, whatever the diagnostic says.
+      h.check(`dsh posix --patch ${JSON.stringify(character)}: no usage exit`, run.status !== 2);
     }
   }
 
@@ -54,8 +57,7 @@ export function runDsh(h) {
       h.check(`dsh win32 --out-dir ${JSON.stringify(character)}: writes no result file`,
         !existsSync(join(outDir, "result.json")));
     } else {
-      h.check(`dsh posix --out-dir ${JSON.stringify(character)}: guard does not apply`,
-        run.status !== 2 || !run.stderr.includes("cmd.exe"));
+      h.check(`dsh posix --out-dir ${JSON.stringify(character)}: no usage exit`, run.status !== 2);
     }
   }
 
