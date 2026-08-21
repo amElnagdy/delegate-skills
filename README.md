@@ -81,6 +81,7 @@ Skip setup when you want one implementer or one-off dials. Pick the skill for a 
 | [`copilot-delegate`](skills/copilot-delegate/SKILL.md) | [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-cli) (`copilot`) | `--allow-all-tools` opt-in; headless auto-deny otherwise | `--read-only` (`--mode plan`) | `--resume-last`, `--session <id>` |
 | [`warp-delegate`](skills/warp-delegate/SKILL.md) | [Warp Agent CLI](https://docs.warp.dev/cli/) (`oz`) | full local tools — no sandbox, no permission modes [^none] | — [^none] | `--conversation <id>` |
 | [`zcode-delegate`](skills/zcode-delegate/SKILL.md) | [Z.AI ZCode](https://zcode.z.ai) (`zcode`) [^zcode] | `--mode yolo` | `--read-only` (`plan` mode) | `--resume-last`, `--session <id>` |
+| [`dsh-delegate`](skills/dsh-delegate/SKILL.md) | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) — developer preview | `workspace-write` (`read-only` / `danger-full-access` via `DSH_PERMISSION_MODE`) | `--read-only` (`read-only` mode, tripwire) | — (no resume; `sessionId: null`) |
 
 [^commandcode]: Command Code's headless mode has two states and nothing between them: a `-p` run
 withholds the write, edit, and shell tools, and `--yolo` (alias `--dangerously-skip-permissions`)
@@ -325,6 +326,25 @@ Per skill — platform, CLI version, and what the run exercised:
 - `codex-delegate`, `opencode-delegate`, `vibe-delegate` — contract-tested only: argument validation,
   bounded version preflight, missing binary, result parsing, and whole-process-tree timeout/abort
   cleanup. No end-to-end run is recorded here.
+- `dsh-delegate` — Windows 11, `dsh` 0.1.0-rc.7 (npm global install), driven from both Git
+  Bash and native PowerShell: live `dsh --profile headless` runs through the relay in both
+  postures, each posture run from each shell, which exercises the `shell:true` `.cmd` shim path.
+  A default-posture run applied the briefed one-line edit and left it uncommitted, with
+  `touchedFiles` reporting the modified file
+  and `dshVersion` captured from the bounded preflight; a `--read-only` run whose brief ordered an
+  immediate file write was refused by the harness itself — "the current sandbox is read-only, and
+  the required write-access approval is unavailable" — leaving `touchedFiles` empty and
+  `readOnlyViolation` false, which exercises both the sandbox and the fail-closed approval seam.
+  Both runs proved the pointer-file brief delivery, since the task positional carries only the path.
+  Direct CLI probes covered the launcher and app help, the no-task usage error, and a generated
+  `agent-default-model` overlay landing in `--dump-config`. That overlay is a request, not a
+  guarantee: a stored selection in `$DSH_HOME/settings.yaml` outranks the composition entry,
+  measured by a run whose overlay named a nonexistent model and completed on the stored selection
+  anyway — hence `modelOverlay` reports what was requested, never what ran. Contract-tested against
+  the shared smoke matrix besides: argument validation and usage errors exiting 2 with no result
+  file, a missing binary exiting 127 with one, `result.json` shape, and whole-process-tree
+  timeout/abort cleanup. Not run: macOS or Linux, `cmd.exe` as the launching shell, and timeout or
+  abort against a live `dsh` rather than the smoke matrix's compiled fake.
 - `cline-delegate` — macOS, `cline` 3.0.52: current-binary unauthenticated plan probe reached
   `run_start` with the fixed positional instruction plus the real brief on stdin, accepted a
   provider-local model id, parsed the failing `run_result`, and left the tree clean. Contract-tested:
