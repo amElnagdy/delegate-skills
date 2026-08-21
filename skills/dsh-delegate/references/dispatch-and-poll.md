@@ -164,9 +164,10 @@ no file" as a usage error, not a lost run.
 
 - **`failed` with `MISSING_CREDENTIAL`** — the provider route has no key: export the credential the
   diagnostic names (or the `apiKeyEnv` your provider config names) and re-dispatch.
-- **`failed` at boot with a config validation error** — an invalid `DSH_PERMISSION_MODE` or a
-  malformed `--patch` overlay fails the plugin tree load with the offending row named; fix the
-  overlay and re-dispatch.
+- **`failed` at boot with a config validation error** — a malformed `--patch` overlay fails the
+  plugin tree load with the offending row named; fix the overlay and re-dispatch. (An invalid
+  `DSH_PERMISSION_MODE` never gets that far: the relay rejects it pre-run with exit 2 and no
+  result file, whether it came from `--permission-mode` or from the environment.)
 - **`timeout` / `aborted`** — inspect the working tree before anything else: the run may have
   partial edits. Keep or revert them deliberately (see
   [review-and-land.md](review-and-land.md)), then re-dispatch a fresh, self-contained brief.

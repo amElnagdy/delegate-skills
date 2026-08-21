@@ -142,9 +142,13 @@ const STDERR_TRUNCATION_MARKER = "[truncated] ";
 // run, and decompressed bytes retained per record.
 const HARVEST_MAX_CANDIDATES = 512;
 const HARVEST_MAX_BYTES = 512 * 1024 * 1024;
-// Session directories created this many ms before the relay's own start
-// timestamp still count, absorbing coarse filesystem timestamps.
-const HARVEST_CLOCK_SLACK_MS = 2_000;
+// Filesystem-timestamp pruning slack: workspace and record mtimes older than
+// the relay's start minus this margin are skipped without decompression. This
+// slack applies ONLY to that mtime pruning (filesystem timestamps can be
+// coarse); the attribution itself compares the record's own createdAt — a
+// Date.now() from the same clock — strictly against the relay's start, so a
+// record born before this run can never be attributed to it.
+const HARVEST_MTIME_SLACK_MS = 2_000;
 
 const IMPLEMENTER_KEY = "dsh";
 
@@ -764,7 +768,7 @@ function harvestSessionRecord(cd, startedAtMs) {
     if (!root) return { ...empty, sessionHarvest: "no-dsh-home" };
     let cdReal;
     try { cdReal = realpathSync.native(cd); } catch { cdReal = resolve(cd); }
-    const cutoff = startedAtMs - HARVEST_CLOCK_SLACK_MS;
+    const cutoff = startedAtMs - HARVEST_MTIME_SLACK_MS;
     let best = null;
     let inspected = 0;
     for (const workspace of readdirSync(root)) {
@@ -784,7 +788,13 @@ function harvestSessionRecord(cd, startedAtMs) {
         let header;
         try { header = readSessionRecords(record, true)[0]; } catch { continue; }
         if (!header || header.type !== "session" || typeof header.id !== "string") continue;
-        if (typeof header.createdAt !== "number" || header.createdAt < cutoff) continue;
+        // Strict: createdAt is the child's own Date.now(), same clock as ours,
+        // so no slack — a record created before this run (a stale session on a
+        // reused $DSH_HOME) must never be attributed to this dispatch. A
+        // concurrent same-cwd session started during the run remains
+        // inherently ambiguous; the latest createdAt wins and the record path
+        // is reported so the reviewer can audit which record was read.
+        if (typeof header.createdAt !== "number" || header.createdAt < startedAtMs) continue;
         if (header.cwd !== cd && header.cwd !== cdReal) continue;
         if (!best || header.createdAt > best.createdAt) best = { record, id: header.id, createdAt: header.createdAt };
       }

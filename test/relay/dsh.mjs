@@ -28,7 +28,7 @@ export function runDsh(h) {
       "--cd", workDir,
       "--out-dir", outDir,
       ...extraArgs,
-    ], { env: { SMOKE_MODE: "dsh-success", ...h.baseEnv, SMOKE_ARGS_FILE: argsFile, ...extraEnv }, encoding: "utf8" });
+    ], { env: { ...h.baseEnv, SMOKE_MODE: "dsh-success", SMOKE_ARGS_FILE: argsFile, ...extraEnv }, encoding: "utf8" });
     const capture = existsSync(argsFile) ? JSON.parse(readFileSync(argsFile, "utf8")) : {};
     return { run, outDir, capture };
   };
@@ -114,32 +114,29 @@ export function runDsh(h) {
     const home = join(h.scratch, "dsh-home");
     const sessionId = "session-11111111-aaaa-4aaa-8aaa-111111111111";
     const sessionDir = join(home, "sessions", "workspace-a", sessionId);
-    mkdirSync(sessionDir, { recursive: true });
-    // Two frames on purpose: the header append and a later append are separate
-    // zstd frames in the real record, and a one-shot decompress sees only the
-    // first — the frame walk is the thing under test.
-    writeFileSync(join(sessionDir, "session.jsonl.zstd"), seedFrames([
-      [{ type: "session", version: 3, id: sessionId, createdAt: Date.now(), cwd: workDir, delegationDepth: 0 }],
-      [
-        { type: "permission/preset", seq: 1, time: 1, data: { preset: "workspace-write" } },
-        { type: "sandbox/mode", seq: 2, time: 1, data: { mode: "workspace-write" } },
-        { type: "approval/policy", seq: 3, time: 1, data: { policy: "ask" } },
-        { type: "request/header", seq: 4, time: 1, data: { header: { config: { provider: "fake-provider", model: "fake-model", maxTokens: 1024, reasoningEffort: "low" } } } },
-        { type: "assistant/message", seq: 5, time: 1, data: { turn: 1, step: 1, message: { role: "assistant", content: [{ type: "text", text: "working" }] }, usage: { inputTokens: 20, outputTokens: 5 } } },
-        { type: "assistant/message", seq: 6, time: 1, data: { turn: 1, step: 2, message: { role: "assistant", content: [{ type: "text", text: "done" }] }, usage: { inputTokens: 10, outputTokens: 2 } } },
-        { type: "turn/end", seq: 7, time: 1, data: { turn: 1, reason: { kind: "completed" } } },
-      ],
+    // The matching record is written by the fake DURING the dispatch (two zstd
+    // frames, like the real session-persistence-jsonl appends — a one-shot
+    // decompress sees only the first, so the frame walk is under test). It
+    // cannot be pre-seeded here: the harvest attributes only records whose own
+    // createdAt falls inside the run's window, and a pre-seeded one is stale.
+    // A stale record for the SAME workspace, created well before the relay
+    // starts, pins exactly that: it must not be attributed to this dispatch.
+    const staleId = "session-44444444-dddd-4ddd-8ddd-444444444444";
+    const staleDir = join(home, "sessions", "workspace-a", staleId);
+    mkdirSync(staleDir, { recursive: true });
+    writeFileSync(join(staleDir, "session.jsonl.zstd"), seedFrames([
+      [{ type: "session", version: 3, id: staleId, createdAt: Date.now() - 10_000, cwd: workDir, delegationDepth: 0 }],
     ]));
-    // A record for another workspace must not match — candidates are matched by
-    // the header's own cwd, never by predicting the directory-name escape.
+    // A record for another workspace must not match either — candidates are
+    // matched by the header's own cwd, never by predicting the name escape.
     const otherDir = join(home, "sessions", "workspace-b", "session-22222222-bbbb-4bbb-8bbb-222222222222");
     mkdirSync(otherDir, { recursive: true });
     writeFileSync(join(otherDir, "session.jsonl.zstd"), seedFrames([
       [{ type: "session", version: 3, id: "session-22222222-bbbb-4bbb-8bbb-222222222222", createdAt: Date.now(), cwd: join(h.scratch, "elsewhere"), delegationDepth: 0 }],
     ]));
-    const harvested = runRelay("harvest", [], { DSH_HOME: home });
+    const harvested = runRelay("harvest", [], { DSH_HOME: home, SMOKE_DSH_RECORD_DIR: sessionDir, SMOKE_DSH_SESSION_ID: sessionId });
     const value = existsSync(join(harvested.outDir, "result.json")) ? h.result(harvested.outDir) : {};
-    h.check("dsh harvest: the multi-frame session record is walked and matched by cwd",
+    h.check("dsh harvest: the multi-frame record written during the run is walked and matched by cwd",
       harvested.run.status === 0 &&
       value.sessionHarvest === "ok" &&
       value.sessionId === sessionId &&
@@ -157,6 +154,19 @@ export function runDsh(h) {
       value.recordedPermissionMode === "workspace-write" &&
       value.recordedSandboxMode === "workspace-write" &&
       value.recordedApprovalPolicy === "ask");
+    // Re-dispatch against the same reused DSH_HOME with no new record written:
+    // the previous run's record (and the stale seed) match on cwd but predate
+    // this run, so neither may be attributed — a reused home must never report
+    // a prior run's provider, model, usage, or posture.
+    const reused = runRelay("harvest-stale", [], { DSH_HOME: home });
+    const reusedValue = existsSync(join(reused.outDir, "result.json")) ? h.result(reused.outDir) : {};
+    h.check("dsh harvest: records predating the run are never attributed to it",
+      reused.run.status === 0 &&
+      reusedValue.sessionHarvest === "not-found" &&
+      reusedValue.sessionId === null &&
+      reusedValue.actualModel === null &&
+      reusedValue.usage === null &&
+      reusedValue.recordedPermissionMode === null);
     const unmatched = runRelay("harvest-miss", ["--cd", h.freshRepo("work-dsh-miss")], { DSH_HOME: home });
     const missValue = existsSync(join(unmatched.outDir, "result.json")) ? h.result(unmatched.outDir) : {};
     h.check("dsh harvest: no matching record reports not-found with null fields",

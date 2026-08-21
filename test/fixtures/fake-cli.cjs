@@ -100,6 +100,32 @@ if (process.env.SMOKE_MODE === "dsh-success") {
       permissionMode: process.env.DSH_PERMISSION_MODE ?? null,
     }));
   }
+  // When asked, persist a two-frame session record the way dsh's
+  // session-persistence-jsonl does (each append its own zstd frame) — created
+  // DURING the dispatch, because the relay's harvest attributes only records
+  // born in the run's own window; a fixture pre-seeded by the test would (and
+  // must) be rejected as stale. Skipped silently on a Node without zlib zstd;
+  // the test gates its harvest cases on the same feature.
+  if (process.env.SMOKE_DSH_RECORD_DIR) {
+    const zlib = require("node:zlib");
+    if (typeof zlib.zstdCompressSync === "function") {
+      const frame = (lines) => zlib.zstdCompressSync(Buffer.from(`${lines.map((l) => JSON.stringify(l)).join("\n")}\n`, "utf8"));
+      const id = process.env.SMOKE_DSH_SESSION_ID || "session-33333333-cccc-4ccc-8ccc-333333333333";
+      fs.mkdirSync(process.env.SMOKE_DSH_RECORD_DIR, { recursive: true });
+      fs.writeFileSync(require("node:path").join(process.env.SMOKE_DSH_RECORD_DIR, "session.jsonl.zstd"), Buffer.concat([
+        frame([{ type: "session", version: 3, id, createdAt: Date.now(), cwd: process.cwd(), delegationDepth: 0 }]),
+        frame([
+          { type: "permission/preset", seq: 1, time: 1, data: { preset: "workspace-write" } },
+          { type: "sandbox/mode", seq: 2, time: 1, data: { mode: "workspace-write" } },
+          { type: "approval/policy", seq: 3, time: 1, data: { policy: "ask" } },
+          { type: "request/header", seq: 4, time: 1, data: { header: { config: { provider: "fake-provider", model: "fake-model", maxTokens: 1024, reasoningEffort: "low" } } } },
+          { type: "assistant/message", seq: 5, time: 1, data: { turn: 1, step: 1, message: { role: "assistant", content: [{ type: "text", text: "working" }] }, usage: { inputTokens: 20, outputTokens: 5 } } },
+          { type: "assistant/message", seq: 6, time: 1, data: { turn: 1, step: 2, message: { role: "assistant", content: [{ type: "text", text: "done" }] }, usage: { inputTokens: 10, outputTokens: 2 } } },
+          { type: "turn/end", seq: 7, time: 1, data: { turn: 1, reason: { kind: "completed" } } },
+        ]),
+      ]));
+    }
+  }
   console.log("");
   console.log("fake dsh completed");
   process.exit(0);
