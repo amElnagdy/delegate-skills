@@ -99,7 +99,7 @@
  */
 
 import {spawn, execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync, renameSync, readFileSync, existsSync, appendFileSync, statSync, readlinkSync, lstatSync, openSync, readSync, closeSync, realpathSync, readdirSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync, renameSync, readFileSync, existsSync, appendFileSync, statSync, readlinkSync, lstatSync, openSync, readSync, closeSync, realpathSync, readdirSync } from "node:fs";
 import {join, resolve, basename, dirname, sep, isAbsolute, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { constants, tmpdir, homedir } from "node:os";
@@ -157,6 +157,21 @@ function fail(message, code = 2) {
   process.exit(code);
 }
 
+// Paths reach cmd.exe on win32, because a .cmd shim cannot be launched without a
+// shell and Node offers no shell-free path to one. Double quotes do NOT stop cmd
+// from expanding % or, under delayed expansion, !, and & | ^ < > still separate or
+// redirect. Quoting alone is therefore not a boundary: reject these outright rather
+// than pass a path cmd would rewrite. POSIX spawns argv directly and needs no check.
+const WIN32_SHELL_METACHARACTERS = /[%!&|^<>"]/;
+
+function assertShellSafePath(label, value) {
+  if (process.platform !== "win32") return;
+  const offending = WIN32_SHELL_METACHARACTERS.exec(value);
+  if (offending) {
+    fail(`${label} contains ${JSON.stringify(offending[0])}, which cmd.exe rewrites on win32: ${value}`);
+  }
+}
+
 function parseArgs(argv) {
   const flagged = new Set();
   const opts = {
@@ -193,9 +208,9 @@ function parseArgs(argv) {
       case "--provider": opts.provider = next(); flagged.add("provider"); break;
       case "--permission-mode": opts.permissionMode = next(); flagged.add("permissionMode"); break;
       case "--read-only": opts.readOnly = true; flagged.add("readOnly"); break;
-      case "--patch": opts.patches.push(next()); flagged.add("patch"); break;
+      case "--patch": { const patch = next(); assertShellSafePath("--patch", patch); opts.patches.push(patch); flagged.add("patch"); break; }
       case "--timeout": opts.timeout = next(); flagged.add("timeout"); break;
-      case "--out-dir": opts.outDir = resolve(next()); break;
+      case "--out-dir": opts.outDir = resolve(next()); assertShellSafePath("--out-dir", opts.outDir); break;
       default:
         fail(`unknown option: ${arg}`);
     }
@@ -625,6 +640,9 @@ function prepareRunDir(opts, brief) {
   // This temp root is writable and readable under the workspace-write sandbox,
   // which is why the pointer-file mechanic is safe: the implementer can read it.
   const outDir = opts.outDir || join(tmpdir(), "delegate-relay", `${basename(opts.cd) || "repo"}-${timestamp()}`);
+  // The default out-dir borrows basename(--cd), so a repo directory carrying a cmd
+  // metacharacter would reach cmd.exe through the generated brief and overlay paths.
+  assertShellSafePath("the run directory", outDir);
   mkdirSync(outDir, { recursive: true });
   const run = {
     startedAt,
@@ -635,6 +653,13 @@ function prepareRunDir(opts, brief) {
     resultPath: join(outDir, "result.json"),
     patchOverlayPath: null,
   };
+  // A reused --out-dir must not publish a previous run's artifacts as this one's.
+  // makeResultWriter derives finalPath/outputPath from existsSync, and a polling
+  // orchestrator reads resultPath, so a run that writes no stdout would otherwise
+  // republish the earlier report and outcome (same guard as aider-delegate).
+  for (const stale of [run.finalPath, run.outputPath, run.resultPath, join(outDir, "model-overlay.yml")]) {
+    try { rmSync(stale, { force: true }); } catch { /* an unclearable path fails loudly at write time */ }
+  }
   writeFileSync(run.briefPath, brief, "utf8");
   // If a model (and thus a provider) was requested, generate the patch overlay
   // that replaces the agent-default-model row's whole config. A patch replaces
@@ -749,7 +774,6 @@ function dispatchToDsh(opts, run, writeResult, beforeTree, beforeFingerprints, r
   });
 
   let stdoutBuf = "";
-  let stderrBuf = "";
   const stderrTail = [];
 
   const stdoutDecoder = new StringDecoder("utf8");
@@ -760,14 +784,19 @@ function dispatchToDsh(opts, run, writeResult, beforeTree, beforeFingerprints, r
     stdoutBuf += text;
   });
 
-  child.stderr.on("data", (chunk) => {
-    process.stderr.write(chunk);
-    const text = stderrDecoder.write(chunk);
-    stderrBuf += text;
+  // stderrTail is the only retained stderr: bounded to 20 lines and reported in
+  // result.json. The decoder flush goes through the same path, so a trailing
+  // partial line still reaches the report.
+  const pushStderr = (text) => {
     for (const line of text.split("\n")) {
       if (line.trim()) stderrTail.push(line.trimEnd());
     }
     while (stderrTail.length > 20) stderrTail.shift();
+  };
+
+  child.stderr.on("data", (chunk) => {
+    process.stderr.write(chunk);
+    pushStderr(stderrDecoder.write(chunk));
   });
 
   let settled = false;
@@ -805,7 +834,7 @@ function dispatchToDsh(opts, run, writeResult, beforeTree, beforeFingerprints, r
       clearWatchdog();
       // stdoutBuf + decoder flush may still hold the final report
       stdoutBuf += stdoutDecoder.end();
-      stderrBuf += stderrDecoder.end();
+      pushStderr(stderrDecoder.end());
       const finalMessage = stdoutBuf.trim();
       if (finalMessage) writeFileSync(run.finalPath, `${finalMessage}\n`, "utf8");
       if (stdoutBuf) writeFileSync(run.outputPath, stdoutBuf, "utf8");
@@ -837,7 +866,7 @@ function dispatchToDsh(opts, run, writeResult, beforeTree, beforeFingerprints, r
     settled = true;
     clearWatchdog();
     stdoutBuf += stdoutDecoder.end();
-    stderrBuf += stderrDecoder.end();
+    pushStderr(stderrDecoder.end());
     const finalMessage = stdoutBuf.trim();
     if (finalMessage) writeFileSync(run.finalPath, `${finalMessage}\n`, "utf8");
     if (stdoutBuf) writeFileSync(run.outputPath, stdoutBuf, "utf8");
@@ -854,7 +883,7 @@ function dispatchToDsh(opts, run, writeResult, beforeTree, beforeFingerprints, r
     // parent is down, sweep the group (no-op where taskkill already felled the tree)
     if (watchdogFired) killChild(child, "SIGKILL");
     stdoutBuf += stdoutDecoder.end();
-    stderrBuf += stderrDecoder.end();
+    pushStderr(stderrDecoder.end());
     if (stdoutBuf) writeFileSync(run.outputPath, stdoutBuf, "utf8");
     const finalMessage = stdoutBuf.trim();
     if (finalMessage) writeFileSync(run.finalPath, `${finalMessage}\n`, "utf8");

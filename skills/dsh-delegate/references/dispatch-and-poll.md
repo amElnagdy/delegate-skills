@@ -63,13 +63,20 @@ exits 1 with `error: a task is required, for example: dsh --profile headless "ru
 the relay writes the brief verbatim to `<out-dir>/brief.md` and passes a short, single-line,
 ASCII-only pointer as the positional:
 
-```
+```text
 Read the task brief at /tmp/delegate-relay/.../brief.md and execute it fully.
 ```
 
 It contains no quotes, newlines, or shell metacharacters beyond the path itself, and is quoted
 only where `shell: true` requires it. The brief file is readable because reads are not confined by
 the sandbox and the system temp dir is among the platform temporary roots the sandbox allows writing.
+
+Quoting is not a boundary on win32: `cmd.exe` expands `%` inside double quotes, expands `!`
+under delayed expansion, and still reads `&`, `|`, `^`, `<`, and `>`. A `.cmd` shim cannot be
+launched without a shell, so the relay rejects rather than escapes — `--patch`, `--out-dir`, and
+the resolved run directory (which borrows `basename(--cd)`) are checked for those characters on
+win32 and exit 2 with the offending character named. POSIX spawns argv directly and skips the
+check.
 
 ## The result
 

@@ -424,6 +424,12 @@ export const QODER_PERMISSION = Object.freeze([
  * the same reason, so a lane must not be able to select one either.
  */
 export const ZCODE_MODE = Object.freeze(["plan", "yolo"]);
+/**
+ * dsh's DSH_PERMISSION_MODE, carried as the `permissionMode` dial. These are the
+ * harness's own preset names; the relay rejects anything else with exit 2, so a
+ * lane must not be able to select one either.
+ */
+export const DSH_PERMISSION = Object.freeze(["read-only", "workspace-write", "danger-full-access"]);
 /** Positive h/m/s duration, same shape relays accept. */
 export const TIMEOUT_RE = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/;
 
