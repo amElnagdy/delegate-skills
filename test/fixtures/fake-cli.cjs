@@ -89,6 +89,61 @@ if (process.env.SMOKE_MODE === "aider-exit-nonzero") {
   console.error("fake aider nonzero exit");
   process.exit(7);
 }
+// dsh prints exactly the final assistant message on stdout (with leading blank
+// lines, as the real CLI does), reads no stdin, and exits 0. The task rides argv
+// only, so the capture includes it for the pointer-task assertions.
+if (process.env.SMOKE_MODE === "dsh-success") {
+  if (process.env.SMOKE_ARGS_FILE) {
+    fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify({
+      args,
+      cwd: process.cwd(),
+      permissionMode: process.env.DSH_PERMISSION_MODE ?? null,
+    }));
+  }
+  // When asked, persist a two-frame session record the way dsh's
+  // session-persistence-jsonl does (each append its own zstd frame) — created
+  // DURING the dispatch, because the relay's harvest attributes only records
+  // born in the run's own window; a fixture pre-seeded by the test would (and
+  // must) be rejected as stale. Skipped silently on a Node without zlib zstd;
+  // the test gates its harvest cases on the same feature.
+  if (process.env.SMOKE_DSH_RECORD_DIR) {
+    const zlib = require("node:zlib");
+    if (typeof zlib.zstdCompressSync === "function") {
+      const frame = (lines) => zlib.zstdCompressSync(Buffer.from(`${lines.map((l) => JSON.stringify(l)).join("\n")}\n`, "utf8"));
+      const id = process.env.SMOKE_DSH_SESSION_ID || "session-33333333-cccc-4ccc-8ccc-333333333333";
+      fs.mkdirSync(process.env.SMOKE_DSH_RECORD_DIR, { recursive: true });
+      fs.writeFileSync(require("node:path").join(process.env.SMOKE_DSH_RECORD_DIR, "session.jsonl.zstd"), Buffer.concat([
+        frame([{ type: "session", version: 3, id, createdAt: Date.now(), cwd: process.cwd(), delegationDepth: 0 }]),
+        frame([
+          { type: "permission/preset", seq: 1, time: 1, data: { preset: "workspace-write" } },
+          { type: "sandbox/mode", seq: 2, time: 1, data: { mode: "workspace-write" } },
+          { type: "approval/policy", seq: 3, time: 1, data: { policy: "ask" } },
+          { type: "request/header", seq: 4, time: 1, data: { header: { config: { provider: "fake-provider", model: "fake-model", maxTokens: 1024, reasoningEffort: "low" } } } },
+          { type: "assistant/message", seq: 5, time: 1, data: { turn: 1, step: 1, message: { role: "assistant", content: [{ type: "text", text: "working" }] }, usage: { inputTokens: 20, outputTokens: 5 } } },
+          { type: "assistant/message", seq: 6, time: 1, data: { turn: 1, step: 2, message: { role: "assistant", content: [{ type: "text", text: "done" }] }, usage: { inputTokens: 10, outputTokens: 2 } } },
+          { type: "turn/end", seq: 7, time: 1, data: { turn: 1, reason: { kind: "completed" } } },
+        ]),
+      ]));
+    }
+  }
+  console.log("");
+  console.log("fake dsh completed");
+  process.exit(0);
+}
+// The measured live failure shape: a one-line diagnostic on stderr, nothing on
+// stdout, exit 1.
+if (process.env.SMOKE_MODE === "dsh-error") {
+  console.error('dsh: MISSING_CREDENTIAL: llm-deepseek: no API key for provider route "deepseek-official"');
+  process.exit(1);
+}
+// One very long stderr line with no newline at all, so the relay's bounded held
+// fragment is exercised rather than its whole-line tail. Exit nonzero: the relay
+// reports stderrTail only for a run it did not call completed.
+if (process.env.SMOKE_MODE === "dsh-unterminated-stderr") {
+  for (let i = 0; i < 200; i += 1) process.stderr.write("x".repeat(10000));
+  process.stdout.write("fake dsh done\n");
+  process.exit(1);
+}
 if (process.env.SMOKE_MODE === "agy-permission-denied") {
   console.error('jetski: no output produced — a tool required the "write_file" permission that headless\nmode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow\nin settings.json (e.g. write_file(<target>)). Alternatively, re-run with\n--dangerously-skip-permissions to auto-approve all tools.');
   process.exit(0);
