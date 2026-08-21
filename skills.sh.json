@@ -20,7 +20,8 @@
         "aider-delegate",
         "copilot-delegate",
         "warp-delegate",
-        "zcode-delegate"
+        "zcode-delegate",
+        "commandcode-delegate"
       ]
     },
     {

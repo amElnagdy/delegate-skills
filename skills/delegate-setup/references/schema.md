@@ -49,6 +49,7 @@ later-edited project config fails closed until it is reviewed and written again 
 | `claude` | claude-delegate | `claude` | model, effort, timeout, readOnly |
 | `cline` | cline-delegate | `cline` | provider, model, timeout |
 | `codex` | codex-delegate | `codex` | model, effort, sandbox, timeout, readOnly |
+| `commandcode` | commandcode-delegate | `cmd` | model, effort, timeout, readOnly |
 | `opencode` | opencode-delegate | `opencode` | model, **variant**, timeout, readOnly |
 | `agy` | agy-delegate | `agy` | model, effort, timeout, readOnly |
 | `grok` | grok-delegate | `grok` | model, effort, sandbox, timeout, readOnly |

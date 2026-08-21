@@ -34,6 +34,73 @@ export function runDelegateSetup(h) {
         [...h.SKILLS].sort().join(","),
   );
 
+  if (!h.WIN) {
+    const commandCodeOverride = join(h.scratch, "commandcode-override");
+    writeFileSync(commandCodeOverride, "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo override-commandcode; exit 0; fi\nexit 1\n");
+    chmodSync(commandCodeOverride, 0o755);
+    const overrideDiscover = spawnSync(process.execPath, [join(setupDir, "discover.mjs")], {
+      encoding: "utf8",
+      env: { ...process.env, PATH: "", COMMANDCODE_BIN: commandCodeOverride },
+    });
+    const overrideReport = JSON.parse(overrideDiscover.stdout);
+    h.check(
+      "discover honors COMMANDCODE_BIN outside Windows",
+      overrideReport.discovered.some(({ key, path, version }) =>
+        key === "commandcode" && path === commandCodeOverride && version === "override-commandcode"),
+    );
+  }
+
+  if (h.WIN) {
+    const withoutConfiguredCommandCode = spawnSync(process.execPath, [join(setupDir, "discover.mjs")], {
+      encoding: "utf8",
+      env: { ...h.baseEnv, COMMANDCODE_BIN: "" },
+    });
+    const commandCode = JSON.parse(withoutConfiguredCommandCode.stdout);
+    h.check(
+      "discover does not mistake Windows cmd.exe for Command Code",
+      commandCode.missing.some(({ key }) => key === "commandcode") &&
+        !commandCode.discovered.some(({ key }) => key === "commandcode"),
+    );
+    const comspec = h.baseEnv.ComSpec || h.baseEnv.COMSPEC;
+    for (const [name, commandCodeBin] of [
+      ["bare COMMANDCODE_BIN=cmd", "cmd"],
+      ...(comspec ? [["COMMANDCODE_BIN=COMSPEC", comspec]] : []),
+    ]) {
+      const rejectedOverride = spawnSync(process.execPath, [join(setupDir, "discover.mjs")], {
+        encoding: "utf8",
+        env: { ...h.baseEnv, COMMANDCODE_BIN: commandCodeBin },
+      });
+      const rejectedReport = JSON.parse(rejectedOverride.stdout);
+      h.check(
+        `discover rejects ${name} on Windows`,
+        rejectedReport.missing.some(({ key }) => key === "commandcode") &&
+          !rejectedReport.discovered.some(({ key }) => key === "commandcode"),
+      );
+    }
+    const withConfiguredCommandCode = spawnSync(process.execPath, [join(setupDir, "discover.mjs")], {
+      encoding: "utf8",
+      env: h.baseEnv,
+    });
+    const configuredCommandCode = JSON.parse(withConfiguredCommandCode.stdout);
+    h.check(
+      "discover probes the configured Command Code executable on Windows",
+      configuredCommandCode.discovered.some(({ key, path }) =>
+        key === "commandcode" && path === h.baseEnv.COMMANDCODE_BIN),
+    );
+    const commandCodeShim = join(h.scratch, "commandcode.cmd");
+    writeFileSync(commandCodeShim, "@exit /b 0\r\n");
+    const withCommandCodeShim = spawnSync(process.execPath, [join(setupDir, "discover.mjs")], {
+      encoding: "utf8",
+      env: { ...h.baseEnv, COMMANDCODE_BIN: commandCodeShim },
+    });
+    const shimmedCommandCode = JSON.parse(withCommandCodeShim.stdout);
+    h.check(
+      "discover rejects a Command Code .cmd shim that the relay cannot launch",
+      shimmedCommandCode.missing.some(({ key }) => key === "commandcode") &&
+        !shimmedCommandCode.discovered.some(({ key }) => key === "commandcode"),
+    );
+  }
+
   const agyProbeDir = join(h.scratch, "discover-agy");
   mkdirSync(agyProbeDir);
   const agyProbePath = join(agyProbeDir, h.WIN ? "agy.cmd" : "agy");
@@ -269,6 +336,21 @@ if (observation === "models") {
       "config validate rejects shell-unsafe codex model",
       rejectCodexModel.status === 2 && /unsupported characters/.test(rejectCodexModel.stderr),
     );
+    for (const [field, value] of [["model", "a b;c"], ["effort", "very fast"]]) {
+      const badCommandCodeDial = {
+        version: "delegate-fleet.v1",
+        lanes: { feature: { implementer: "commandcode", [field]: value } },
+      };
+      const badCommandCodeDialFile = join(cfgRepo, `bad-commandcode-${field}.json`);
+      writeFileSync(badCommandCodeDialFile, `${JSON.stringify(badCommandCodeDial)}\n`);
+      const rejected = spawnSync(
+        process.execPath,
+        [join(setupDir, "config.mjs"), "validate", badCommandCodeDialFile],
+        { encoding: "utf8", env: process.env },
+      );
+      h.check(`config validate rejects Command Code ${field} tokens the relay would reject`,
+        rejected.status === 2);
+    }
     const unsafeCodexFlag = spawnSync(
       process.execPath,
       [h.relayPath("codex"), "--brief", h.briefPath, "--model", "x & whoami"],

@@ -19,6 +19,9 @@ const versionProbe = args.includes("--version") || args[0] === "version" || args
 if (versionProbe && process.env.SMOKE_PREFLIGHT_ENV_FILE) {
   fs.writeFileSync(process.env.SMOKE_PREFLIGHT_ENV_FILE, JSON.stringify(capturedEnv()));
 }
+if (versionProbe && process.env.SMOKE_PREFLIGHT_PID_FILE) {
+  fs.writeFileSync(process.env.SMOKE_PREFLIGHT_PID_FILE, String(process.pid));
+}
 if (versionProbe && process.env.SMOKE_MODE === "grok-spawn-error" && process.platform !== "win32") {
   fs.renameSync(require("node:path").join(__dirname, "grok"), require("node:path").join(__dirname, "grok.removed"));
   console.log("fake-cli 0.0.0-smoke");
@@ -247,6 +250,64 @@ if (["omp-success", "omp-error"].includes(process.env.SMOKE_MODE)) {
       durationMs: 42,
     }));
     process.exit(failed ? 1 : 0);
+  });
+} else if ([
+  "commandcode-success",
+  "commandcode-unfinished",
+  "commandcode-read-only-clean",
+  "commandcode-read-only-append",
+  "commandcode-truncated-tail",
+].includes(process.env.SMOKE_MODE)) {
+  let brief = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (chunk) => { brief += chunk; });
+  process.stdin.on("end", () => {
+    const unfinished = process.env.SMOKE_MODE === "commandcode-unfinished";
+    if (process.env.SMOKE_MODE === "commandcode-read-only-append") {
+      fs.appendFileSync(process.env.SMOKE_APPEND_FILE ?? "already-dirty.txt", "appended by fake commandcode\n");
+    }
+    if (process.env.SMOKE_ARGS_FILE) fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify({ args, brief, cwd: process.cwd() }));
+    // Blocking writes in the truncated case, so the cut tail is the only thing under test:
+    // an async write followed by process.exit would drop these earlier lines too, which is
+    // the CLI bug itself rather than the parsing contract this case exists to pin.
+    const emit = process.env.SMOKE_MODE === "commandcode-truncated-tail"
+      ? (value) => fs.writeSync(1, `${JSON.stringify(value)}\n`)
+      : (value) => console.log(JSON.stringify(value));
+    // The session id arrives on the FIRST line, and the report in a message_end, both well
+    // before the oversized tail — which is why the relay reads them from here.
+    emit({ type: "event", event: { type: "run_start", sessionId: "commandcode-session-1" } });
+    emit({
+      type: "event",
+      event: {
+        type: "message_end",
+        content: [{ type: "text", text: unfinished ? "ran out of turns partway" : "fake commandcode completed" }],
+      },
+    });
+    emit({ type: "event", event: { type: "turn_end", turnNumber: 1, hadToolCalls: true } });
+    if (process.env.SMOKE_MODE === "commandcode-truncated-tail") {
+      // What cmd does on a real run: an oversized run_end cut mid-write, and no result
+      // line after it. writeSync so the cut is the only thing under test — an async write
+      // followed by process.exit would drop the earlier lines too, which is the CLI bug
+      // itself rather than the parsing contract this case is here to pin.
+      fs.writeSync(1, `{"type":"event","event":{"type":"run_end","result":{"nextState":{"blob":"${"y".repeat(4096)}`);
+      process.exit(0);
+    }
+    // run_end carries the session id nested, as the real CLI does; the result line repeats it.
+    emit({
+      type: "event",
+      event: { type: "run_end", result: { nextState: { sessionId: "commandcode-session-1" } } },
+    });
+    emit({
+      type: "result",
+      subtype: unfinished ? "max_turns" : "success",
+      sessionId: "commandcode-session-1",
+      stopReason: unfinished ? "max_turns" : "end_turn",
+      usage: { inputTokens: 7, outputTokens: 2, cacheReadTokens: 1, cacheWriteTokens: 0 },
+      durationMs: 42,
+      finalText: unfinished ? "ran out of turns partway" : "fake commandcode completed",
+    });
+    // The real CLI exits 0 for a clean run even when the task did not finish.
+    process.exit(0);
   });
 } else if (process.env.SMOKE_MODE === "copilot-success") {
   fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify(args));

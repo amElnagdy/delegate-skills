@@ -28,7 +28,15 @@ for (const skill of h.SKILLS) {
     "--out-dir", join(h.scratch, `out-max-timeout-${skill}`),
     "--timeout", "596h31m23s",
     ...h.EXTRA_ARGS[skill],
-  ], { env: { ...process.env, PATH: "" }, encoding: "utf8", timeout: 10_000 });
+  ], {
+    env: {
+      ...process.env,
+      PATH: "",
+      ...(skill === "commandcode" ? { COMMANDCODE_BIN: join(h.scratch, "missing-commandcode") } : {}),
+    },
+    encoding: "utf8",
+    timeout: 10_000,
+  });
   h.check(`${skill} timeout: the largest schedulable duration is accepted`, accepted.status !== 2);
 }
 // agy's own --print-timeout carries a 60s grace into the same watchdog, so its ceiling sits

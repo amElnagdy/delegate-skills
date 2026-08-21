@@ -16,9 +16,9 @@
  */
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { accessSync, constants as fsConstants, readdirSync, readFileSync, statSync } from "node:fs";
+import { accessSync, constants as fsConstants, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, join, resolve, sep } from "node:path";
+import { delimiter, isAbsolute, join, resolve, sep } from "node:path";
 import { IMPLEMENTERS } from "./implementers.mjs";
 
 const PROBE_TIMEOUT_MS = 10_000;
@@ -103,6 +103,25 @@ function expandCandidate(raw) {
  * carries the bundle path when a launcher (node) runs it.
  */
 function resolveLaunch(impl) {
+  if (impl.key === "commandcode" && process.env.COMMANDCODE_BIN) {
+    const configured = process.env.COMMANDCODE_BIN;
+    if (process.platform === "win32" && !isAbsolute(configured)) return null;
+    const command = /[\\/]/.test(configured) ? resolve(configured) : resolveBinary(configured);
+    if (!command || (process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command))) return null;
+    try {
+      const comspec = process.env.ComSpec || process.env.COMSPEC;
+      if (
+        process.platform === "win32" &&
+        comspec &&
+        realpathSync.native(command).toLowerCase() === realpathSync.native(comspec).toLowerCase()
+      ) return null;
+      if (statSync(command).isFile()) return { path: command, command, prefixArgs: [] };
+    } catch {
+      // report it missing below
+    }
+    return null;
+  }
+  if (process.platform === "win32" && impl.key === "commandcode") return null;
   const onPath = resolveBinary(impl.binary);
   if (onPath) return { path: onPath, command: onPath, prefixArgs: [] };
   const candidates = impl.locate?.candidates?.[process.platform] ?? [];
@@ -253,6 +272,12 @@ function parseModelLines(raw, format) {
     identifiers = lines
       .filter((line) => line.startsWith("* "))
       .map((line) => line.slice(2).replace(/\s*\(default\)$/, "").trim());
+  } else if (format === "commandcode") {
+    // "vendor/name  description" rows, grouped under plain-text section headers and a
+    // count line. A slash in the first column is what separates a model row from those.
+    identifiers = lines
+      .map((line) => line.split(/\s+/, 1)[0])
+      .filter((first) => first.includes("/"));
   } else if (format === "table") {
     identifiers = lines
       .slice(1)

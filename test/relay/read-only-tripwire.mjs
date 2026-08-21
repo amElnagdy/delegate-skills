@@ -92,7 +92,9 @@ async function runScenario(h, skill, scenario) {
   const child = h.runRelay(skill, workDir, outDir, ["--read-only"], {
     SMOKE_MODE: skill === "grok"
       ? "grok-read-only"
-      : appendFile ? "claude-read-only-append" : "claude-read-only-clean",
+      : skill === "commandcode"
+        ? (appendFile ? "commandcode-read-only-append" : "commandcode-read-only-clean")
+        : appendFile ? "claude-read-only-append" : "claude-read-only-clean",
     ...(appendFile ? { SMOKE_APPEND_FILE: appendFile } : {}),
     ...(scenario.untrackedDirectory ? { SMOKE_WRITE_FILE: join("loose", "new.txt") } : {}),
     ...(scenario.invalidUtf8 ? { SMOKE_APPEND_INVALID_UTF8: "696e76616c69642dff" } : {}),
@@ -107,13 +109,27 @@ async function runScenario(h, skill, scenario) {
     } : {}),
   });
   const outcome = await waitFor(child);
+  const expectedExit = skill === "commandcode" && scenario.commandcodeExit !== undefined
+    ? scenario.commandcodeExit
+    : 0;
+  const expectedResult = skill === "commandcode" && scenario.commandcodeResult !== undefined
+    ? scenario.commandcodeResult
+    : true;
   h.check(`${skill} ${scenario.name}: relay close wait did not time out`, outcome.exited);
-  h.check(`${skill} ${scenario.name}: relay exits zero`, outcome.exitCode === 0);
-  h.check(`${skill} ${scenario.name}: result.json exists`, existsSync(join(outDir, "result.json")));
+  h.check(`${skill} ${scenario.name}: relay exits ${expectedExit}`, outcome.exitCode === expectedExit);
+  h.check(`${skill} ${scenario.name}: result.json ${expectedResult ? "exists" : "is not created"}`,
+    existsSync(join(outDir, "result.json")) === expectedResult);
   if (existsSync(join(outDir, "result.json"))) {
     const verdict = h.result(outDir).readOnlyViolation;
-    h.check(`${skill} ${scenario.name}: verdict is ${String(scenario.expected)} (got ${String(verdict)})`,
-      verdict === scenario.expected);
+    const expected = skill === "commandcode" && scenario.commandcodeExpected !== undefined
+      ? scenario.commandcodeExpected
+      : scenario.expected;
+    h.check(`${skill} ${scenario.name}: verdict is ${String(expected)} (got ${String(verdict)})`,
+      verdict === expected);
+  }
+  if (skill === "commandcode" && scenario.artifactSymlink) {
+    h.check("commandcode artifact-symlink-target-write: final report does not overwrite the symlink target",
+      readFileSync(join(workDir, "already-dirty.txt"), "utf8") === "pre-existing\n");
   }
   if (outcome.exitCode !== 0) console.error(`${skill} ${scenario.name} relay stderr:\n${outcome.stderr}`);
 }
@@ -146,21 +162,23 @@ export async function runReadOnlyTripwire(h) {
     ...(invalidUtf8Filenames ? [{ name: "invalid-utf8-filename", invalidUtf8: true, expected: null }] : []),
     { name: "new-file-in-untracked-directory", untrackedDirectory: true, expected: true },
     { name: "relay-artifacts", artifactsInside: true, expected: false },
-    { name: "case-aliased-relay-artifact", artifactsInside: true, caseAliasedArtifact: true, expected: false },
-    { name: "case-renamed-relay-artifact", artifactsInside: true, caseRenamedArtifact: true, expected: false },
+    { name: "case-aliased-relay-artifact", artifactsInside: true, caseAliasedArtifact: true, expected: false, ...(!caseSensitiveFilenames ? { commandcodeExit: 1 } : {}) },
+    { name: "case-renamed-relay-artifact", artifactsInside: true, caseRenamedArtifact: true, expected: false, ...(!caseSensitiveFilenames ? { commandcodeExit: 1 } : {}) },
     ...(caseSensitiveFilenames ? [{
       name: "case-distinct-user-write",
       artifactsInside: true,
       caseDistinctUserWrite: true,
       expected: true,
     }] : []),
-    { name: "preexisting-artifact-rename", artifactsInside: true, preexistingArtifactRename: true, expected: false },
-    { name: "artifact-endpoint-rename", artifactsInside: true, artifactEndpointRename: true, expected: true },
+    { name: "preexisting-artifact-rename", artifactsInside: true, preexistingArtifactRename: true, expected: false, commandcodeExit: 2, commandcodeResult: false },
+    { name: "artifact-endpoint-rename", artifactsInside: true, artifactEndpointRename: true, expected: true, commandcodeExit: 1 },
     { name: "relay-artifacts-plus-write", artifactsInside: true, dirty: true, expected: true },
     ...(!h.WIN ? [{ name: "raw-symlink-target-write", rawSymlinkTarget: true, expected: true }] : []),
-    ...(!h.WIN ? [{ name: "artifact-symlink-target-write", artifactsInside: true, artifactSymlink: true, expected: true }] : []),
+    ...(!h.WIN ? [{ name: "artifact-symlink-target-write", artifactsInside: true, artifactSymlink: true, expected: true, commandcodeExit: 2, commandcodeResult: false }] : []),
   ];
-  for (const skill of ["claude", "grok"]) {
+  const tripwireSkills = ["claude", "grok", ...(!h.WIN ? ["commandcode"] : [])];
+  if (h.WIN) console.log("  skip  commandcode tripwire scenarios: native Windows launch is unverified");
+  for (const skill of tripwireSkills) {
     for (const scenario of scenarios) await runScenario(h, skill, scenario);
   }
 

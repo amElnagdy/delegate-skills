@@ -2,12 +2,12 @@
 
 This repo is a [Skills CLI](https://github.com/vercel-labs/skills) package of **delegation skills** —
 skills that let an orchestrating agent drive a separate CLI coding agent as an implementer, then review
-and land the result. Sixteen implementer skills ship today: `claude-delegate` (Claude Code),
+and land the result. Seventeen implementer skills ship today: `claude-delegate` (Claude Code),
 `cline-delegate` (Cline CLI), `codex-delegate` (OpenAI Codex), `opencode-delegate` (OpenCode),
 `agy-delegate` (Google Antigravity), `grok-delegate` (Grok Build), `kimi-delegate` (Kimi Code),
 `qoder-delegate` (Qoder CLI), `vibe-delegate` (Mistral Vibe), `cursor-delegate` (Cursor Agent CLI),
 `pi-delegate` (Pi CLI), `omp-delegate` (Oh My Pi), `aider-delegate` (Aider), `copilot-delegate` (GitHub Copilot CLI),
-`warp-delegate` (Warp Agent CLI), and `zcode-delegate` (Z.AI ZCode); siblings like
+`warp-delegate` (Warp Agent CLI), `zcode-delegate` (Z.AI ZCode), and `commandcode-delegate` (Command Code); siblings like
 `gemini-delegate` can be added
 later without renaming the repo. One **utility** skill
 ships alongside them: `delegate-setup` (configure fleet lanes — setup only, never dispatches).
@@ -21,7 +21,7 @@ jargon. Use these terms; don't invent synonyms.
 | --- | --- | --- |
 | **delegate** / **delegation** | the activity, and this skill family | "relay" (as the activity), "hand-off", "offload" |
 | **orchestrator** | the driving agent (Claude Code, …) | "controller", "driver" |
-| **implementer** | the separate agent (Claude, Cline, Codex, OpenCode, Antigravity, Grok, Kimi, Qoder, Vibe, Cursor, Pi, Oh My Pi, Aider, Copilot, Warp, ZCode) | "worker", "sub-agent", "executor" |
+| **implementer** | the separate agent (Claude, Cline, Codex, OpenCode, Antigravity, Grok, Kimi, Qoder, Vibe, Cursor, Pi, Oh My Pi, Aider, Copilot, Warp, ZCode, Command Code) | "worker", "sub-agent", "executor" |
 | **brief** | the self-contained task spec sent to the implementer | "task file", "the prompt", "the spec" |
 | **gates** | the project's test/lint/build commands | "checks", "CI" |
 | **dispatch** | sending the brief to the implementer | "fire off", "kick off" |
@@ -31,6 +31,7 @@ jargon. Use these terms; don't invent synonyms.
 | **fleet** | the user's set of lanes (which CLI handles which kind of work) | — |
 | **setup skill** / `delegate-setup` | utility that discovers CLIs and writes the lane map after approval | a `*-delegate` skill |
 | `exec`, `sandbox`, `resume`, `session` | Codex's own terms — use verbatim | don't paraphrase them |
+| `-p` / `--print`, `--yolo` (`--dangerously-skip-permissions`), `--permission-mode` (`standard`/`plan`/`auto-accept`), `--tools-all`, `--resume`, `--continue`, `--effort`, `--max-turns` | Command Code's own terms — use verbatim when discussing `cmd` | never say Command Code has a sandbox, or a write-capable mode between withheld-tools and `--yolo`: `--permission-mode auto-accept` and `--tools-all` do not enable edits headlessly. Never call the binary "the cmd shell" |
 | `run`, `agent` (`build`/`plan`), `session` | OpenCode's own terms — use verbatim | "sandbox" (OpenCode has no sandbox enum; autonomy is the agent) |
 | `project`, `conversation`, `model`, `permissions`, `sandbox`, `TUI`, `tasks`, `subagents` | Antigravity's own terms — use verbatim when discussing `agy` | don't use `subagents` as a generic synonym for implementer |
 | `session`, `sandbox` (`workspace`/`read-only`/`off`), `permission-mode`, `effort`, `streaming-json` | Grok Build's own terms — use verbatim when discussing `grok` | don't paraphrase them |
@@ -54,7 +55,7 @@ version a run was made against is what makes the claim checkable; and claims tha
 ("verified" without a run → hedge or cut). Every
 CLI flag, field, and command in the docs must match the installed implementer CLI (`claude` /
 `cline` / `codex` / `opencode` / `agy` / `grok` / `kimi` / `qodercli` / `vibe` / `cursor-agent` / `pi` /
-`aider` / `copilot` / `oz` / `omp` / `zcode`) and the skill's `relay.mjs`.
+`aider` / `copilot` / `oz` / `omp` / `zcode` / `cmd`) and the skill's `relay.mjs`.
 
 ## Conventions
 

@@ -69,6 +69,7 @@ Skip setup when you want one implementer or one-off dials. Pick the skill for a 
 | [`claude-delegate`](skills/claude-delegate/SKILL.md) | [Claude Code](https://code.claude.com/docs/en/overview) (`claude`) | `acceptEdits` + explicit tool surface | `--read-only` (`plan` mode) | `--resume-last`, `--session <id>` |
 | [`cline-delegate`](skills/cline-delegate/SKILL.md) | [Cline](https://github.com/cline/cline) (`cline`) | `--auto-approve true` in act mode; upstream sandbox not configured by the relay | `--plan` + `--auto-approve false` (relay-enforced pair) | — (headless JSON resume unsupported) |
 | [`codex-delegate`](skills/codex-delegate/SKILL.md) | [OpenAI Codex](https://github.com/openai/codex) (`codex`) | `--sandbox workspace-write` | `--read-only` | `--resume-last`, `--session <id>` |
+| [`commandcode-delegate`](skills/commandcode-delegate/SKILL.md) | [Command Code](https://commandcode.ai/docs/headless) (`cmd`) | `--yolo` — the only headless write state; no sandbox [^commandcode] | `--read-only` (withheld tools + `plan`) | `--continue-last`, `--session <id>` |
 | [`cursor-delegate`](skills/cursor-delegate/SKILL.md) | [Cursor Agent](https://cursor.com/cli) (`cursor-agent`) | `--force`; `--no-force` withholds command approval | `--read-only` (plan mode) | `--resume-last`, `--session <id>` |
 | [`grok-delegate`](skills/grok-delegate/SKILL.md) | Grok Build (`grok`) | workspace-scoped; `--full-access` opt-in | `--read-only` — best-effort [^grok] | `--resume-last`, `--session <id>` |
 | [`kimi-delegate`](skills/kimi-delegate/SKILL.md) | [Kimi Code](https://moonshotai.github.io/kimi-code/en/) (`kimi`) | `auto permission mode`, always | — [^none] | `--resume-last`, `--session <id>` |
@@ -80,6 +81,15 @@ Skip setup when you want one implementer or one-off dials. Pick the skill for a 
 | [`copilot-delegate`](skills/copilot-delegate/SKILL.md) | [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-cli) (`copilot`) | `--allow-all-tools` opt-in; headless auto-deny otherwise | `--read-only` (`--mode plan`) | `--resume-last`, `--session <id>` |
 | [`warp-delegate`](skills/warp-delegate/SKILL.md) | [Warp Agent CLI](https://docs.warp.dev/cli/) (`oz`) | full local tools — no sandbox, no permission modes [^none] | — [^none] | `--conversation <id>` |
 | [`zcode-delegate`](skills/zcode-delegate/SKILL.md) | [Z.AI ZCode](https://zcode.z.ai) (`zcode`) [^zcode] | `--mode yolo` | `--read-only` (`plan` mode) | `--resume-last`, `--session <id>` |
+
+[^commandcode]: Command Code's headless mode has two states and nothing between them: a `-p` run
+withholds the write, edit, and shell tools, and `--yolo` (alias `--dangerously-skip-permissions`)
+allows every tool anywhere the process can reach. `--permission-mode auto-accept` and `--tools-all`
+do **not** lift the write gate. So an implementation run is full-trust with no path restriction —
+the brief's path list is guidance, not containment. A worktree isolates the checkout, while a
+container or another OS-enforced sandbox is required when writes outside the target tree are
+unacceptable. `touchedFiles` is a review aid based on `git status`; it cannot show ignored files or
+writes outside the repository.
 
 [^none]: No CLI-enforced read-only mode. `touchedFiles` and the diff are what you review against, not
 a guarantee: they are post-run `git status` in the workspace, so they cannot show ignored files,
@@ -258,6 +268,32 @@ Per skill — platform, CLI version, and what the run exercised:
   contract-tested via the smoke matrix's compiled fake, not against a live Oh My Pi install.
 - `qoder-delegate` — macOS, `qodercli` 1.0.47, by the contributor: Lite edit run, `accept_edits`,
   explicit model and 32768-token context window, no commit.
+- `commandcode-delegate` — macOS, `cmd` 1.26.0: **live edit run verified**. A relay dispatch against a
+  throwaway git repository had Command Code fix a remainder-dropping bug in a money-splitting function
+  and add three tests; the project gate was re-run independently by the orchestrator (2 tests before,
+  5 passing after), the diff matched the brief with no writes outside the two named files, and `HEAD`
+  was untouched — the relay does not commit, and the run did not either. A second dispatch with
+  `--session <id>` verified resume through the relay: a one-line delta brief amended exactly the comment
+  it named, with the session id from the first run. A `--read-only` dispatch verified the other
+  direction, returning `readOnlyViolation: false` on a clean tree. Also verified negatively: separate
+  live runs confirmed `--tools-all` and `--permission-mode auto-accept` leave the headless write gate
+  closed and only `--yolo` opens it.
+
+  Live running surfaced a CLI limitation the relay now handles. `cmd` ends a run with a `run_end` event
+  embedding the whole conversation, then exits with `process.exit`, discarding whatever is still queued
+  in its stdout pipe: both write runs lost their `result` line entirely (one cut ~8 KB into `run_end`,
+  the other losing its last ~780 events). So nothing load-bearing is read from that tail — `sessionId`
+  comes from `run_start`, the first line of the stream, and the report from the last `message_end` or
+  its streamed deltas — the event log is written in batches so the relay drains the pipe as fast as it
+  can, `resultLine` reports `complete`/`truncated`/`absent` so a consumer knows which fields are
+  trustworthy. A complete non-success result converts a zero child exit to relay exit 1, while a lost
+  result line falls back to the process exit code. Smoke cases pin that contract. On a long run the
+  report itself can land in the discarded region. The diff is the deliverable, and a thin report
+  means missing information, not a failed run.
+
+  Windows is untested and the relay refuses to guess there (the binary name `cmd` is `cmd.exe`); it
+  requires `COMMANDCODE_BIN` to be the real executable's absolute path, not the system command
+  interpreter.
 - `warp-delegate` — macOS, `oz` 0.2026.05.27.15.44.stable_01: **live edit run verified**. A relay
   dispatch against a throwaway git repository had Warp add a function plus four assertions across
   two files; both project gates were re-run independently by the orchestrator, the diff matched the

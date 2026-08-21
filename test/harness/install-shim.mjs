@@ -22,7 +22,7 @@ export function installShim(h) {
       join(windir, "Microsoft.NET", "Framework64", "v4.0.30319", "csc.exe"),
       join(windir, "Microsoft.NET", "Framework", "v4.0.30319", "csc.exe"),
     ].find((p) => existsSync(p));
-    h.check("windows: the in-box C# compiler exists (builds the native fake for agy/kimi/qoder/vibe/aider/oz/omp)", Boolean(csc));
+    h.check("windows: the in-box C# compiler exists (builds the native fake for agy/kimi/qoder/vibe/aider/oz/omp/commandcode)", Boolean(csc));
     if (csc) {
       const csFile = join(shimDir, "fake-cli.cs");
       copyFileSync(join(fixturesDir, "fake-cli.cs"), csFile);
@@ -37,6 +37,9 @@ export function installShim(h) {
         copyFileSync(join(shimDir, "kimi.exe"), join(shimDir, "aider.exe"));
         copyFileSync(join(shimDir, "kimi.exe"), join(shimDir, "oz.exe"));
         copyFileSync(join(shimDir, "kimi.exe"), join(shimDir, "omp.exe"));
+        // commandcode's relay never uses a shell, so on Windows its binary must be a real
+        // executable — a .cmd stand-in could not be launched the way the real one is.
+        copyFileSync(join(shimDir, "kimi.exe"), join(shimDir, "commandcode.exe"));
       } else {
         console.error(`${compiled.stdout ?? ""}${compiled.stderr ?? ""}`);
       }
@@ -51,7 +54,15 @@ export function installShim(h) {
 
   h.briefPath = join(h.scratch, "brief.txt");
   writeFileSync(h.briefPath, "smoke brief: run until killed.");
-  h.baseEnv = { ...process.env, PATH: shimDir + delimiter + process.env.PATH, SMOKE_NODE: process.execPath };
+  // COMMANDCODE_BIN pins the commandcode relay to the fake rather than to whatever `cmd`
+  // PATH would resolve to — mandatory on Windows (cmd.exe), and the honest choice on POSIX
+  // too, where an unrelated `cmd` may exist on the host.
+  h.baseEnv = {
+    ...process.env,
+    PATH: shimDir + delimiter + process.env.PATH,
+    SMOKE_NODE: process.execPath,
+    COMMANDCODE_BIN: join(shimDir, WIN ? "commandcode.exe" : "cmd"),
+  };
 
   const slowWriteHook = join(h.scratch, "slow-result-write.cjs");
   copyFileSync(join(fixturesDir, "slow-result-write.cjs"), slowWriteHook);
