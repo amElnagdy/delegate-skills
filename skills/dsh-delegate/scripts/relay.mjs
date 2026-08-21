@@ -775,6 +775,10 @@ function dispatchToDsh(opts, run, writeResult, beforeTree, beforeFingerprints, r
 
   let stdoutBuf = "";
   const stderrTail = [];
+  // A stderr line can span data chunks. Holding the trailing fragment until the
+  // next chunk keeps the tail one entry per logical line, so a long unterminated
+  // line cannot evict complete lines from the 20-line window.
+  let stderrRemainder = "";
 
   const stdoutDecoder = new StringDecoder("utf8");
   const stderrDecoder = new StringDecoder("utf8");
@@ -787,8 +791,11 @@ function dispatchToDsh(opts, run, writeResult, beforeTree, beforeFingerprints, r
   // stderrTail is the only retained stderr: bounded to 20 lines and reported in
   // result.json. The decoder flush goes through the same path, so a trailing
   // partial line still reaches the report.
-  const pushStderr = (text) => {
-    for (const line of text.split("\n")) {
+  const pushStderr = (text, flush = false) => {
+    const lines = `${stderrRemainder}${text}`.split("\n");
+    // On flush the decoder is done, so the trailing fragment is a complete line.
+    stderrRemainder = flush ? "" : lines.pop();
+    for (const line of lines) {
       if (line.trim()) stderrTail.push(line.trimEnd());
     }
     while (stderrTail.length > 20) stderrTail.shift();
@@ -834,7 +841,7 @@ function dispatchToDsh(opts, run, writeResult, beforeTree, beforeFingerprints, r
       clearWatchdog();
       // stdoutBuf + decoder flush may still hold the final report
       stdoutBuf += stdoutDecoder.end();
-      pushStderr(stderrDecoder.end());
+      pushStderr(stderrDecoder.end(), true);
       const finalMessage = stdoutBuf.trim();
       if (finalMessage) writeFileSync(run.finalPath, `${finalMessage}\n`, "utf8");
       if (stdoutBuf) writeFileSync(run.outputPath, stdoutBuf, "utf8");
@@ -866,7 +873,7 @@ function dispatchToDsh(opts, run, writeResult, beforeTree, beforeFingerprints, r
     settled = true;
     clearWatchdog();
     stdoutBuf += stdoutDecoder.end();
-    pushStderr(stderrDecoder.end());
+    pushStderr(stderrDecoder.end(), true);
     const finalMessage = stdoutBuf.trim();
     if (finalMessage) writeFileSync(run.finalPath, `${finalMessage}\n`, "utf8");
     if (stdoutBuf) writeFileSync(run.outputPath, stdoutBuf, "utf8");
@@ -883,7 +890,7 @@ function dispatchToDsh(opts, run, writeResult, beforeTree, beforeFingerprints, r
     // parent is down, sweep the group (no-op where taskkill already felled the tree)
     if (watchdogFired) killChild(child, "SIGKILL");
     stdoutBuf += stdoutDecoder.end();
-    pushStderr(stderrDecoder.end());
+    pushStderr(stderrDecoder.end(), true);
     if (stdoutBuf) writeFileSync(run.outputPath, stdoutBuf, "utf8");
     const finalMessage = stdoutBuf.trim();
     if (finalMessage) writeFileSync(run.finalPath, `${finalMessage}\n`, "utf8");
