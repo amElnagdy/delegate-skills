@@ -53,6 +53,10 @@ function resolveBinary(binary) {
   const pathEntries = pathValue
     .split(delimiter)
     .map((entry) => entry.replace(/^"(.*)"$/, "$1"))
+    // An empty component means the current directory in POSIX lookup, which is
+    // where a relay's own spawn would find the binary. Dropping it made
+    // discovery report a CLI as missing that dispatch can actually run.
+    .map((entry) => (entry.length === 0 && process.platform !== "win32" ? "." : entry))
     .filter((entry) => entry.length > 0);
 
   if (process.platform === "win32") {
