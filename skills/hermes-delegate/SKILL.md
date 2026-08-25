@@ -11,7 +11,7 @@ compatibility: >-
   Requires the `hermes` CLI (Node-based installer) authenticated — Nous Portal OAuth
   via `hermes portal`, or an API-key credential via `hermes auth`.
 metadata:
-  version: 0.1.0
+  version: 0.5.0
 ---
 
 # Hermes Delegate
