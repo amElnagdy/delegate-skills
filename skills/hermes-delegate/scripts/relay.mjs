@@ -20,7 +20,7 @@
  * size cap.
  *
  * Autonomy, in Hermes's own terms: Hermes has no sandbox and no permission modes -
- * none may be invented. Headless `chat -q -Q` ran an unattended file-write ask on
+ * none may be invented. Headless `chat --query-file <brief> -Q` ran an unattended file-write ask on
  * the platform the README's Verification entry describes, and `-z/--oneshot`'s own
  * help states approvals are auto-bypassed there. Write runs pass `--yolo`
  * explicitly so the bypass never depends on user config; `--read-only` restricts

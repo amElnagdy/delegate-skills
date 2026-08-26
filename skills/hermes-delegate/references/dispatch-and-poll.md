@@ -1,8 +1,8 @@
 # Dispatch and poll
 
 `scripts/relay.mjs` is the dispatch layer. It wraps `hermes chat` in quiet single-query mode
-(`chat -q -Q`, headless), passes `--yolo` on write runs, captures everything, and writes a
-structured `result.json`. Your job collapses to: run one command, then read one file. Everything
+(`chat --query-file <brief> -Q`, headless), passes `--yolo` on write runs, captures everything,
+and writes a structured `result.json`. Your job collapses to: run one command, then read one file. Everything
 Hermes-specific lives in the helper, which is what keeps the loop portable across orchestrators.
 
 ## Before the first run: check the binary
