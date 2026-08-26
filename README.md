@@ -71,6 +71,7 @@ Skip setup when you want one implementer or one-off dials. Pick the skill for a 
 | [`codex-delegate`](skills/codex-delegate/SKILL.md) | [OpenAI Codex](https://github.com/openai/codex) (`codex`) | `--sandbox workspace-write` | `--read-only` | `--resume-last`, `--session <id>` |
 | [`commandcode-delegate`](skills/commandcode-delegate/SKILL.md) | [Command Code](https://commandcode.ai/docs/headless) (`cmd`) | `--yolo` — the only headless write state; no sandbox [^commandcode] | `--read-only` (withheld tools + `plan`) | `--continue-last`, `--session <id>` |
 | [`cursor-delegate`](skills/cursor-delegate/SKILL.md) | [Cursor Agent](https://cursor.com/cli) (`cursor-agent`) | `--force`; `--no-force` withholds command approval | `--read-only` (plan mode) | `--resume-last`, `--session <id>` |
+| [`dsh-delegate`](skills/dsh-delegate/SKILL.md) | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) — developer preview; serves hosted or local OpenAI-compatible models | `workspace-write` (`read-only` / `danger-full-access` via `DSH_PERMISSION_MODE`) | `--read-only` (sandbox-enforced, plus tripwire) | — (no headless resume; the session record is harvested for audit) [^dsh] |
 | [`grok-delegate`](skills/grok-delegate/SKILL.md) | Grok Build (`grok`) | workspace-scoped; `--full-access` opt-in | `--read-only` — best-effort [^grok] | `--resume-last`, `--session <id>` |
 | [`kimi-delegate`](skills/kimi-delegate/SKILL.md) | [Kimi Code](https://moonshotai.github.io/kimi-code/en/) (`kimi`) | `auto permission mode`, always | — [^none] | `--resume-last`, `--session <id>` |
 | [`opencode-delegate`](skills/opencode-delegate/SKILL.md) | [OpenCode](https://opencode.ai) (`opencode`) | agent `build` (`--model` required) | `--read-only` (agent `plan`) | `--resume-last`, `--session <id>` |
@@ -102,6 +103,13 @@ is configurable through it.
 
 [^grok]: `grok` cannot be prevented from writing headlessly. The relay reports a tri-state
 `readOnlyViolation` tripwire for detected Git-visible changes; it does not enforce or attribute them.
+
+[^dsh]: The `dsh` headless surface prints no session id and offers no resume flag, so rework is a
+fresh self-contained brief. The relay instead harvests the session record dsh persists under
+`$DSH_HOME/sessions` — reporting the session id, the provider/model/reasoning effort that actually
+served the run (a `--model` request is a patch overlay that a stored `settings.yaml` selection
+outranks), summed token usage, and the recorded permission preset. The harvest needs Node 22.15+
+(zlib zstd); on an older Node the dispatch still works and `sessionHarvest` says so.
 
 [^zcode]: ZCode ships its CLI **inside the desktop app** — there is no `zcode` on PATH, no npm
 package, and the public docs cover only the GUI. The relay resolves it from
@@ -294,6 +302,35 @@ Per skill — platform, CLI version, and what the run exercised:
   Windows is untested and the relay refuses to guess there (the binary name `cmd` is `cmd.exe`); it
   requires `COMMANDCODE_BIN` to be the real executable's absolute path, not the system command
   interpreter.
+- `dsh-delegate` — Linux (x86_64), `dsh` 0.1.1-rc.1 (npm install), driven from bash by Claude Code,
+  against a **live local inference server**: vLLM on loopback serving an FP8 27B Qwen model through
+  an OpenAI-compatible endpoint (not a stub). Seven live relay dispatches: a default-posture write
+  run that created exactly the briefed file, left it uncommitted, and harvested the session record —
+  `sessionId`, `actualProvider`/`actualModel`, reasoning effort, summed token usage, and the
+  recorded `workspace-write` posture; a `--read-only` run whose brief ordered an immediate write —
+  the sandbox refused it, the final message stated the approval escalation failed closed,
+  `touchedFiles` came back empty, `readOnlyViolation` false, and the record's own
+  `permission/preset` read `read-only`; a `--model nonexistent-model-xyz` run that completed on the
+  stored `settings.yaml` selection — measuring the overlay precedence on this rc — with
+  `modelOverlay` reporting the request and `actualModel` the served model, so the precedence is
+  observable per run instead of assumed; a `--timeout 25s` watchdog firing against live `dsh`,
+  which caught the SIGTERM, drained, and exited 0 (`signal: null`) — reported as
+  `status: "timeout"`, exit 1, with no orphaned processes and the interrupted session still
+  harvested; a relay-level SIGTERM abort mid-run reporting `aborted`/exit 143 with `result.json`
+  written; a fresh-`$DSH_HOME` run with no credentials failing live with `MISSING_CREDENTIAL` in
+  `stderrTail` (`failed`, exit 1); and a fresh-`$DSH_HOME` run whose single `--patch` overlay
+  defined a local OpenAI-compatible provider end-to-end and completed on it, confirmed by the
+  harvest's `actualProvider`. Direct CLI probes measured the surface the docs claim: no stdin task
+  ("a task is required", exit 1), `--resume` rejected as an unknown option, workspace `AGENTS.md`
+  auto-loaded by a headless run, and an invalid `DSH_PERMISSION_MODE` failing the plugin tree load
+  with the valid enum named. Contract-tested besides, against the shared smoke matrix: argument
+  validation and usage errors exiting 2 with no result file, an already-exported
+  `DSH_PERMISSION_MODE` honored (and an explicit flag overriding it), the multi-frame zstd
+  session-record harvest matched by the header's own `cwd`, a missing binary exiting 127 **with** a
+  result file, bounded `--version` preflight, the unterminated-stderr fragment staying bounded, the
+  win32 cmd-metacharacter rejection, and whole-process-tree timeout/abort cleanup. Not run: native
+  Windows or macOS (the win32 `.cmd`-shim launch and guards are contract-tested via the smoke
+  matrix only), and upstream had already tagged `0.1.1-rc.2` — these runs are against `0.1.1-rc.1`.
 - `warp-delegate` — macOS, `oz` 0.2026.05.27.15.44.stable_01: **live edit run verified**. A relay
   dispatch against a throwaway git repository had Warp add a function plus four assertions across
   two files; both project gates were re-run independently by the orchestrator, the diff matched the
