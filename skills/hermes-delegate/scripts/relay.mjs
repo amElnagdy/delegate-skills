@@ -138,7 +138,12 @@ const SAFE_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
 // exist chiefly to mutate the machine or act beyond the repo. There is NO
 // read-only toolset - `file` performs writes by design - so this expresses intent;
 // it does not enforce anything (see SKILL.md).
-const READ_ONLY_TOOLSETS = "docs,memory,search";
+// Valid names for hermes 0.20.x: memory and search resolve; `docs` was removed
+// from the registry (58 named toolsets, no `docs`) and made every read-only
+// dispatch print "Warning: Unknown toolsets: docs". Measured live on macOS,
+// 2026-08-26: this set exposes zero file/terminal tools - the write probe was
+// refused for lack of any file tool.
+const READ_ONLY_TOOLSETS = "memory,search";
 
 function applyFleetLane(opts, flagged) {
   if (!opts.lane) return;
