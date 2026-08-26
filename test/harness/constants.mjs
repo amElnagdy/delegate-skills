@@ -25,14 +25,11 @@ export const EXTRA_ARGS = {
 
 export const WIN = process.platform === "win32";
 
-// commandcode's binary is `cmd`, which IS cmd.exe on Windows — the relay refuses to
-// guess there and requires COMMANDCODE_BIN, so the shim is planted under its own name
-// and pointed at by that variable instead of by PATH (see install-shim).
 export const binaryName = (skill) =>
   skill === "qoder" ? "qodercli"
     : skill === "cursor" ? "cursor-agent"
       : skill === "warp" ? "oz"
-        : skill === "commandcode" ? "cmd"
+        : skill === "commandcode" ? (WIN ? "cmdc" : "cmd")
           : skill;
 
 export const relayPath = (testDir, skill) =>

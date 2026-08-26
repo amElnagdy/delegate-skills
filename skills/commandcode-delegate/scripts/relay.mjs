@@ -30,14 +30,10 @@
  * It deliberately does NOT commit. Committing belongs to the reviewer, after it
  * reads the diff and re-runs the project gates.
  *
- * Windows: the Command Code binary is named `cmd`, which collides with the
- * system `cmd.exe`. Rather than risk driving a shell with your brief, the relay
- * refuses to guess there — set COMMANDCODE_BIN to the real binary's absolute path,
- * never the system command interpreter.
- * That path must be a real executable: this relay never launches through a
- * shell, so a `.cmd`/`.bat` wrapper cannot start. Windows is untested here.
- * The same variable overrides the binary on any platform when several installs
- * compete.
+ * Windows: Command Code installs as `cmdc` because `cmd` is the system shell.
+ * The relay launches that npm shim through cmd.exe, with the brief on stdin and
+ * every variable argv value token-validated. COMMANDCODE_BIN can still select
+ * an absolute executable or shim when several installs compete.
  *
  * Usage:
  *   node relay.mjs --brief <file> [options]
@@ -147,17 +143,18 @@ const SAFE_MODEL = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
 const PRIVATE_FILE_MODE = 0o600;
 
 const IMPLEMENTER_KEY = "commandcode";
-// `cmd` is Command Code's binary name; COMMANDCODE_BIN overrides it (and is required
-// on Windows, where the name collides with cmd.exe).
 const CONFIGURED_BIN = process.env.COMMANDCODE_BIN || null;
+const DEFAULT_BIN = process.platform === "win32" ? "cmdc" : "cmd";
 const BIN = CONFIGURED_BIN && /[\\/]/.test(CONFIGURED_BIN)
   ? resolve(CONFIGURED_BIN)
-  : CONFIGURED_BIN || "cmd";
+  : CONFIGURED_BIN || DEFAULT_BIN;
+const WIN_SHELL = process.platform === "win32" && (!CONFIGURED_BIN || /\.(?:cmd|bat)$/i.test(BIN));
+const LAUNCH_BIN = WIN_SHELL && /[\\/]/.test(BIN) ? `"${BIN}"` : BIN;
 
 // Command Code's documented headless exit codes, for a summary hint that points at the
 // actual cause instead of a bare number.
 const EXIT_HINTS = new Map([
-  [3, "not authenticated — run `cmd login`, then re-dispatch"],
+  [3, `not authenticated — run \`${DEFAULT_BIN} login\`, then re-dispatch`],
   [4, "permission denied — an implementation run needs write access; this relay passes --yolo unless --read-only was set"],
   [5, "rate limit exceeded — wait and re-dispatch, or lower the model tier"],
   [6, "network failure — check connectivity and re-dispatch"],
@@ -291,9 +288,9 @@ function parseArgs(argv) {
   if (opts.session !== null && !SAFE_SESSION.test(opts.session)) {
     fail("--session must be a session id (letters, digits, . _ : -)");
   }
-  if (process.platform === "win32") {
-    if (!CONFIGURED_BIN || !isAbsolute(CONFIGURED_BIN)) {
-      fail("on Windows COMMANDCODE_BIN must be the absolute path of the Command Code executable");
+  if (process.platform === "win32" && CONFIGURED_BIN) {
+    if (!isAbsolute(CONFIGURED_BIN)) {
+      fail("on Windows COMMANDCODE_BIN must be an absolute path");
     }
     const comspec = process.env.ComSpec || process.env.COMSPEC;
     if (comspec && executablePathKey(BIN) === executablePathKey(comspec)) {
@@ -386,13 +383,10 @@ function commandCodeEnv(opts) {
 }
 
 async function commandCodeVersion(probeTimeoutMs, env, onChild) {
-  // Never launched through a shell — on Windows that would route the name `cmd` straight
-  // to cmd.exe. parseArgs requires COMMANDCODE_BIN there, and it must name a real
-  // executable: a .cmd/.bat wrapper cannot be started without the shell this relay refuses.
   const probe = await new Promise((resolveProbe) => {
-    const child = spawn(BIN, ["--version"], {
+    const child = spawn(LAUNCH_BIN, ["--version"], {
       stdio: ["ignore", "pipe", "pipe"],
-      shell: false,
+      shell: WIN_SHELL,
       detached: process.platform !== "win32",
       env,
     });
@@ -422,6 +416,9 @@ async function commandCodeVersion(probeTimeoutMs, env, onChild) {
   }
   if (probe.error?.code === "ENOENT") return { version: null, error: null };
   if (probe.error) return { version: null, error: probe.error };
+  if (WIN_SHELL && /not recognized as an internal or external command/i.test(probe.stderr)) {
+    return { version: null, error: null };
+  }
   if (probe.code !== 0) {
     return { version: null, error: Object.assign(new Error(`${BIN} --version failed`), { status: probe.code, stderr: probe.stderr }) };
   }
@@ -932,7 +929,7 @@ function reportUnavailable(writeResult, resultPath) {
     touchedFiles: null,
   });
   printSummary(result, resultPath);
-  process.stderr.write(`relay: \`${BIN}\` not found on PATH. Install Command Code, run \`cmd login\`, or point COMMANDCODE_BIN at the binary.\n`);
+  process.stderr.write(`relay: \`${BIN}\` not found on PATH. Install Command Code, run \`${DEFAULT_BIN} login\`, or point COMMANDCODE_BIN at the binary.\n`);
   process.exit(127);
 }
 
@@ -996,7 +993,7 @@ function installPreflightSignalHandlers(opts, run, writeResult, getChild) {
 function dispatchToCommandCode(opts, brief, run, writeResult, env) {
   const argv = buildArgv(opts);
   // detached on POSIX: the child leads a new process group so killChild can fell the whole tree.
-  const child = spawn(BIN, argv, { cwd: opts.cd, stdio: ["pipe", "pipe", "pipe"], shell: false, detached: process.platform !== "win32", env });
+  const child = spawn(LAUNCH_BIN, argv, { cwd: opts.cd, stdio: ["pipe", "pipe", "pipe"], shell: WIN_SHELL, detached: process.platform !== "win32", env });
 
   const state = { sessionId: null, result: null, lastText: null, truncatedTail: false, deltas: [], pending: [], pendingChars: 0 };
   let stdoutBuf = "";

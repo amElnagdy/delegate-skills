@@ -10,7 +10,7 @@
  *                 result.json reports status "timeout". Driven for the timeout
  *                 matrix on both platforms. On Windows, claude and cursor
  *                 launch a .cmd shim through a serialized cmd.exe invocation,
- *                 while codex/opencode/grok/pi/cline/zcode use shell:true. These are exactly the
+ *                 while codex/opencode/grok/pi/cline/zcode/commandcode use shell:true. These are exactly the
  *                 cases a plain child.kill would miss; agy, aider, kimi, qoder, vibe, oz, and omp spawn a
  *                 native binary directly — a .cmd stand-in cannot represent them,
  *                 so the smoke compiles a real fake .exe with the C# compiler

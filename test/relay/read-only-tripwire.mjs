@@ -177,7 +177,7 @@ export async function runReadOnlyTripwire(h) {
     ...(!h.WIN ? [{ name: "artifact-symlink-target-write", artifactsInside: true, artifactSymlink: true, expected: true, commandcodeExit: 2, commandcodeResult: false }] : []),
   ];
   const tripwireSkills = ["claude", "grok", ...(!h.WIN ? ["commandcode"] : [])];
-  if (h.WIN) console.log("  skip  commandcode tripwire scenarios: native Windows launch is unverified");
+  if (h.WIN) console.log("  skip  commandcode tripwire scenarios: Git-visible tripwire coverage is POSIX-only");
   for (const skill of tripwireSkills) {
     for (const scenario of scenarios) await runScenario(h, skill, scenario);
   }

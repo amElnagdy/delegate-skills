@@ -80,7 +80,7 @@ Boolean dials: `readOnly`, `force`. All other dials are non-empty strings. Durat
 `timeout` use `h`/`m`/`s` (e.g. `30m`) and must fit the relay watchdog ceiling (~24.8 days).
 Do not combine `readOnly: true` with a write-capable `sandbox` / `permissionMode` / `force`.
 `model` / `provider` / OpenCode `variant` must match the bound relay’s token rules (e.g. Claude
-rejects spaces; Grok/Pi/Oh My Pi/OpenCode/Codex use a shell-safe token set — Windows `shell:true`
+rejects spaces; Grok/Pi/Oh My Pi/OpenCode/Codex/Command Code use a shell-safe token set — Windows `shell:true`
 launches, and Oh My Pi's flag-injection defense even without a shell).
 
 ## Helpers

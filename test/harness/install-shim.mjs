@@ -14,7 +14,7 @@ export function installShim(h) {
   copyFileSync(join(fixturesDir, "fake-cli.cjs"), join(shimDir, "fake-cli.cjs"));
 
   if (WIN) {
-    for (const skill of ["claude", "cline", "codex", "opencode", "grok", "cursor", "pi", "copilot", "zcode", "dsh"]) {
+    for (const skill of ["claude", "cline", "codex", "opencode", "grok", "cursor", "pi", "copilot", "zcode", "commandcode", "dsh"]) {
       writeFileSync(join(shimDir, `${binaryName(skill)}.cmd`), `@node "%~dp0fake-cli.cjs" %*\r\n`);
     }
     const windir = process.env.WINDIR || "C:\\Windows";
@@ -22,7 +22,7 @@ export function installShim(h) {
       join(windir, "Microsoft.NET", "Framework64", "v4.0.30319", "csc.exe"),
       join(windir, "Microsoft.NET", "Framework", "v4.0.30319", "csc.exe"),
     ].find((p) => existsSync(p));
-    h.check("windows: the in-box C# compiler exists (builds the native fake for agy/kimi/qoder/vibe/aider/oz/omp/commandcode)", Boolean(csc));
+    h.check("windows: the in-box C# compiler exists (builds the native fake for agy/kimi/qoder/vibe/aider/oz/omp)", Boolean(csc));
     if (csc) {
       const csFile = join(shimDir, "fake-cli.cs");
       copyFileSync(join(fixturesDir, "fake-cli.cs"), csFile);
@@ -37,9 +37,6 @@ export function installShim(h) {
         copyFileSync(join(shimDir, "kimi.exe"), join(shimDir, "aider.exe"));
         copyFileSync(join(shimDir, "kimi.exe"), join(shimDir, "oz.exe"));
         copyFileSync(join(shimDir, "kimi.exe"), join(shimDir, "omp.exe"));
-        // commandcode's relay never uses a shell, so on Windows its binary must be a real
-        // executable — a .cmd stand-in could not be launched the way the real one is.
-        copyFileSync(join(shimDir, "kimi.exe"), join(shimDir, "commandcode.exe"));
       } else {
         console.error(`${compiled.stdout ?? ""}${compiled.stderr ?? ""}`);
       }
@@ -54,14 +51,13 @@ export function installShim(h) {
 
   h.briefPath = join(h.scratch, "brief.txt");
   writeFileSync(h.briefPath, "smoke brief: run until killed.");
-  // COMMANDCODE_BIN pins the commandcode relay to the fake rather than to whatever `cmd`
-  // PATH would resolve to — mandatory on Windows (cmd.exe), and the honest choice on POSIX
-  // too, where an unrelated `cmd` may exist on the host.
+  // Pin POSIX to the fake because an unrelated `cmd` may exist on the host. Windows
+  // intentionally uses the `cmdc.cmd` shim on PATH, matching the npm install.
   h.baseEnv = {
     ...process.env,
     PATH: shimDir + delimiter + process.env.PATH,
     SMOKE_NODE: process.execPath,
-    COMMANDCODE_BIN: join(shimDir, WIN ? "commandcode.exe" : "cmd"),
+    COMMANDCODE_BIN: WIN ? "" : join(shimDir, "cmd"),
   };
 
   const slowWriteHook = join(h.scratch, "slow-result-write.cjs");

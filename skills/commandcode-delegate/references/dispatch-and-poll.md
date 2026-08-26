@@ -15,12 +15,11 @@ cmd --version         # the relay records this in result.json; confirm it is Com
 cmd status            # must report authenticated (else `cmd login`)
 ```
 
-On native Windows, `cmd` resolves to `cmd.exe`. The relay refuses to run there rather than hand your
-brief to a shell: set `COMMANDCODE_BIN` to the Command Code binary's absolute path, not `COMSPEC`, and
-note that it must be a real executable — the relay never launches through a shell, so a `.cmd`/`.bat`
-wrapper will not start.
-Windows is untested for this skill. The same variable overrides the binary on any platform when several
-installs compete.
+On native Windows, use `cmdc`; `cmd` is the system shell. The relay launches the installed `cmdc.cmd`
+shim through `cmd.exe`, while the brief stays on stdin and variable argument values stay restricted to
+shell-safe tokens. Native Windows launch is contract-tested, but a live Command Code run is still
+unverified. `COMMANDCODE_BIN` remains an absolute-path override, including for `.cmd`/`.bat` shims,
+and must never point to `COMSPEC`.
 
 ## Dispatching
 
@@ -169,7 +168,7 @@ process has exited and `result.json` is written — not when a status line says 
 ## When a run misbehaves
 
 - **`status: commandcode_unavailable` (exit 127):** the binary isn't on PATH. Install Command Code, run
-  `cmd login`, or set `COMMANDCODE_BIN`, then re-dispatch.
+  `cmd login` (`cmdc login` on Windows), or set `COMMANDCODE_BIN`, then re-dispatch.
 - **an `error` mentioning `version preflight` (`failed`, or `timeout` at exit 124):** the bounded
   `cmd --version` probe exited non-zero or hung past its cap (10s, or `--timeout` when shorter), so
   Command Code was never dispatched; only the relay's own artifacts may already exist under
