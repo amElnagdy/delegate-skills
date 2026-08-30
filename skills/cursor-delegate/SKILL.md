@@ -47,7 +47,15 @@ forwarded as-is. The model that actually served the run is recorded as `resolved
 
 ## The loop
 
-Run these five steps per task. Steps 1, 4, and 5 require judgment; 2 and 3 are mechanical.
+Write the brief, dispatch, then **read `result.json` and inspect `status`**. Relay exit 0 and the
+existence of `result.json` mean the run finished, not that implementation completed.
+
+- **`completed`** — continue to independent gates, diff review, and land or rework.
+- **`needs_input`** — implementation paused. Do not review as completed and do not land. Obtain an
+  orchestrator or human decision, then resume the exact `sessionId`.
+- **`failed` / `timeout` / `aborted` / `cursor_agent_unavailable`** — handle the failure; do not land.
+
+Steps 1, 4, and 5 require judgment; 2 and 3 are mechanical except when `status` is `needs_input`.
 
 ### 1. Write the brief
 
@@ -80,20 +88,21 @@ The child process's cwd pins the workspace. On Cursor `2026.07.23` or newer, use
 temp dir by default and never commits. See
 [references/dispatch-and-poll.md](references/dispatch-and-poll.md).
 
-### 3. Wait for completion
+### 3. Wait for the run, then inspect status
 
 The helper blocks until Cursor finishes. Run it with the orchestrator's background-command facility,
 or background it in the shell and poll for `result.json`. A pre-run usage error exits 2 and writes no
-result; a missing `cursor-agent` exits 127 and writes `status: "cursor_agent_unavailable"`.
+result; a missing `cursor-agent` exits 127 and writes `status: "cursor_agent_unavailable"`. Exit 0
+means a valid successful outcome — `completed` or `needs_input` — so always read `status`.
 
 Trust process state and the working tree over a progress display. A run is finished when the process
 exited and `result.json` exists; implementation is complete only when its status is `completed`.
 Cursor's full report is the `finalMessage` field in `result.json` (also printed in full on stdout
 between the report markers).
 
-With `--clarifications`, a valid blocking request instead produces `status: "needs_input"`, a
-structured `clarification`, and exit 0. Answer it and resume the exact `sessionId`; do not review or
-land partial work as if the task completed. See the
+With `--clarifications`, a valid blocking request produces `status: "needs_input"`, a structured
+`clarification`, and exit 0. That is a pause: do not review or land. Answer it and resume the exact
+`sessionId`. See the
 [clarification protocol](references/dispatch-and-poll.md#clarification-protocol).
 
 **Windows + hooks caveat:** if the user has Cursor hooks configured (`~/.cursor/hooks.json`, or
@@ -102,9 +111,10 @@ console makes cursor-agent feed PowerShell-syntax hook wrappers to bash, so ever
 tries to run is blocked — edits still land, gates do not run. Dispatch from a PowerShell or cmd
 console instead. Details: [references/dispatch-and-poll.md](references/dispatch-and-poll.md).
 
-### 4. Review — do not trust the self-report
+### 4. Review — only after `status: "completed"`
 
-Treat Cursor's final message and gate claims as claims:
+Skip this step when `status` is `needs_input` or a failure. Treat Cursor's final message and gate
+claims as claims:
 
 - Re-run the project's gates yourself.
 - Read the diff against the brief, starting with `touchedFiles`.
@@ -113,11 +123,11 @@ Treat Cursor's final message and gate claims as claims:
 
 See [references/review-and-land.md](references/review-and-land.md).
 
-### 5. Land it
+### 5. Land it — only after review of a `completed` run
 
-The implementer edits the working tree; **the orchestrator commits.** Commit only after the gates
-pass and the diff holds. If rework is needed, send a delta brief with `--resume-last` or
-`--session <id>`, then review again.
+The implementer edits the working tree; **the orchestrator commits.** Commit only after `status` is
+`completed`, the gates pass, and the diff holds. If rework is needed, send a delta brief with
+`--resume-last` or `--session <id>`, then review again. Do not land a `needs_input` tree.
 
 If implementation may cross a genuine decision boundary, opt into `--clarifications` and include
 the policy block from [references/writing-the-brief.md](references/writing-the-brief.md). This is an

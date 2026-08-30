@@ -5,8 +5,10 @@ refactor sweep. Sequencing and bookkeeping make it trustworthy.
 
 ## Run sequentially, one commit per task
 
-Run tasks **one at a time, in dependency order**, landing each after review and gates before
-dispatching the next:
+Run tasks **one at a time, in dependency order**, landing each after a `completed` review and gates
+before dispatching the next. Inspect `status` after every dispatch: `needs_input` is not a finished
+task — do not land it and do not start the next queue item until you decide, resume the exact
+session, and get `completed`.
 
 ```bash
 node "<skill-dir>/scripts/relay.mjs" --brief task-01.txt --cd /path/to/repo
@@ -34,7 +36,8 @@ it gets a fresh session.
 
 For more than two or three tasks, maintain one progress file beside the work:
 
-- **Status table** — queued / at-implementer / reviewed+committed, with the commit hash.
+- **Status table** — queued / at-implementer / needs_input / reviewed+committed, with the commit
+  hash. `needs_input` is a pause on the same task, not a green light to land or continue the queue.
 - **Per-task review notes** — what landed, what you verified, and gate outcomes.
 - **Needs your eyes** — design decisions, non-blocking nitpicks, and questions for the human.
 - **End-of-run checklist** — the final cross-task verification.

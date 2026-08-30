@@ -19,7 +19,8 @@
  * the host process list and has no OS argument-size cap.
  *
  * It deliberately does NOT commit. Committing is always the orchestrator's job
- * — after it reviews the diff and re-runs the project gates.
+ * — after a `completed` run, it reviews the diff and re-runs the project gates.
+ * `needs_input` is a successful pause: do not review or land.
  *
  * Autonomy: a fresh run defaults to write-capable with `--force` (Cursor runs
  * commands without approval unless your Cursor config denies them). Pass
@@ -67,9 +68,13 @@
  *
  * Exit codes: a pre-run usage error (bad/missing args, empty brief) exits 2
  * before any run and writes no result file; a missing `cursor-agent` binary
- * exits 127 and writes status `cursor_agent_unavailable`; otherwise the exit
- * code mirrors cursor-agent's own (0 success, non-zero failure). If the child
- * dies on a signal, the exit code is 128 plus the signal number and
+ * exits 127 and writes status `cursor_agent_unavailable`. Exit 0 means the
+ * relay produced a valid successful outcome — `completed` or `needs_input` —
+ * so orchestrators must inspect `result.status`. A recognized but malformed
+ * clarification request is a protocol failure: status `failed`, `error`
+ * beginning `invalid clarification protocol:`, and a non-zero exit even if
+ * cursor-agent exited 0. Other child failures keep a non-zero exit. If the
+ * child dies on a signal, the exit code is 128 plus the signal number and
  * `result.json` records the signal. Once the brief validates, `result.json` is
  * written on every outcome — completed, needs_input (a valid clarification
  * request), failed, timeout (the --timeout
@@ -899,7 +904,10 @@ function printSummary(result, resultPath) {
   if (result.readOnly) lines.push("mode: read-only (plan)");
   if (result.resolvedModel) lines.push(`model: ${result.resolvedModel}${result.permissionMode ? `  ·  permission mode: ${result.permissionMode}` : ""}`);
   if (result.sessionId) lines.push(`session id (resume with: --session ${result.sessionId}): ${result.sessionId}`);
-  if (result.status === "needs_input") lines.push(`clarification: ${result.clarification.id} (${result.clarification.category}) — answer, then resume this exact session`);
+  if (result.status === "needs_input") {
+    lines.push("Implementation paused for clarification. Do not review or land yet.");
+    lines.push(`clarification: ${result.clarification.id} (${result.clarification.category}) — answer, then resume this exact session`);
+  }
   const touched = result.touchedFiles;
   if (touched === null) {
     lines.push("touched files: git unavailable — inspect the working tree directly");
@@ -918,7 +926,9 @@ function printSummary(result, resultPath) {
   lines.push("--- end report ---");
   lines.push("");
   lines.push(`result: ${resultPath}`);
-  lines.push("relay does not commit. Review the diff, re-run the project gates yourself, then commit from the orchestrator.");
+  if (result.status !== "needs_input") {
+    lines.push("relay does not commit. Review the diff, re-run the project gates yourself, then commit from the orchestrator.");
+  }
   process.stdout.write(`${lines.join("\n")}\n`);
 }
 

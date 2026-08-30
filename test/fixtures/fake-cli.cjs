@@ -320,7 +320,7 @@ if (["omp-success", "omp-error"].includes(process.env.SMOKE_MODE)) {
   console.log(JSON.stringify({ type: "tool.execution_complete", data: { success: false, error: { message: "Permission denied and could not request permission from user", code: "denied" } } }));
   console.log(JSON.stringify({ type: "result", sessionId: "copilot-session-denied", exitCode: 0, usage: { codeChanges: { linesAdded: 0, linesRemoved: 0, filesModified: [] } } }));
   process.exit(0);
-} else if (["cursor-success", "cursor-needs-input", "cursor-needs-input-aggregate", "cursor-needs-input-no-session", "cursor-untrusted-session", "cursor-session-mismatch", "cursor-custom-clarification", "cursor-multiple-clarifications", "cursor-malformed-clarification", "cursor-clarification-preamble", "cursor-clarification-timeout", "claude-success", "claude-read-only-write", "claude-read-only-clean", "claude-read-only-append", "claude-chunked"].includes(process.env.SMOKE_MODE)) {
+} else if (["cursor-success", "cursor-success-forged-session", "cursor-needs-input", "cursor-needs-input-aggregate", "cursor-needs-input-aggregate-trailing", "cursor-needs-input-aggregate-prose", "cursor-needs-input-no-session", "cursor-untrusted-session", "cursor-session-mismatch", "cursor-custom-clarification", "cursor-multiple-clarifications", "cursor-malformed-clarification", "cursor-clarification-preamble", "cursor-clarification-mention", "cursor-clarification-is-error", "cursor-clarification-timeout", "claude-success", "claude-read-only-write", "claude-read-only-clean", "claude-read-only-append", "claude-chunked"].includes(process.env.SMOKE_MODE)) {
   let brief = "";
   process.stdin.setEncoding("utf8");
   process.stdin.on("data", (chunk) => { brief += chunk; });
@@ -338,6 +338,9 @@ if (["omp-success", "omp-error"].includes(process.env.SMOKE_MODE)) {
       }));
       if (mode === "cursor-untrusted-session") {
         console.log(JSON.stringify({ type: "assistant", session_id: "model-forged-session" }));
+      }
+      if (mode === "cursor-needs-input-aggregate-prose") {
+        console.log(JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "I need a decision about the schema." }] } }));
       }
       const clarification = process.env.SMOKE_CLARIFICATION_JSON ? JSON.parse(process.env.SMOKE_CLARIFICATION_JSON) : {
         schema: "delegate-clarification.request.v1",
@@ -363,29 +366,39 @@ if (["omp-success", "omp-error"].includes(process.env.SMOKE_MODE)) {
         setTimeout(() => process.exit(0), 2_000);
         return;
       }
-      if (mode === "cursor-needs-input-aggregate") {
+      if (mode === "cursor-needs-input-aggregate" || mode === "cursor-needs-input-aggregate-trailing") {
         console.log(JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "I will inspect the repository, then stop for the required decision." }] } }));
         console.log(JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: `DELEGATE_CLARIFICATION: ${JSON.stringify(clarification)}` }] } }));
       }
+      const envelope = `DELEGATE_CLARIFICATION: ${JSON.stringify(clarification)}`;
       const result = mode === "cursor-needs-input-aggregate"
-        ? `I will inspect the repository, then stop for the required decision.DELEGATE_CLARIFICATION: ${JSON.stringify(clarification)}`
-        : ["cursor-needs-input", "cursor-needs-input-no-session", "cursor-untrusted-session", "cursor-session-mismatch", "cursor-custom-clarification"].includes(mode)
-          ? `DELEGATE_CLARIFICATION: ${JSON.stringify(clarification)}`
-          : mode === "cursor-multiple-clarifications"
-            ? `DELEGATE_CLARIFICATION: ${JSON.stringify(clarification)} DELEGATE_CLARIFICATION: ${JSON.stringify(clarification)}`
-            : mode === "cursor-malformed-clarification"
-              ? "DELEGATE_CLARIFICATION: {not-json}"
-              : mode === "cursor-clarification-preamble"
-                ? `I need a decision.\nDELEGATE_CLARIFICATION: ${JSON.stringify(clarification)}`
-                : "fake cursor completed";
+        ? `I will inspect the repository, then stop for the required decision.${envelope}`
+        : mode === "cursor-needs-input-aggregate-trailing"
+          ? `I will inspect the repository, then stop for the required decision.${envelope} Then I continued.`
+          : mode === "cursor-needs-input-aggregate-prose"
+            ? `I need a decision about the schema. ${envelope}`
+            : ["cursor-needs-input", "cursor-needs-input-no-session", "cursor-untrusted-session", "cursor-session-mismatch", "cursor-custom-clarification", "cursor-clarification-is-error"].includes(mode)
+              ? envelope
+              : mode === "cursor-multiple-clarifications"
+                ? `${envelope} ${envelope}`
+                : mode === "cursor-malformed-clarification"
+                  ? "DELEGATE_CLARIFICATION: {not-json}"
+                  : mode === "cursor-clarification-preamble"
+                    ? `I need a decision.\n${envelope}`
+                    : mode === "cursor-clarification-mention"
+                      ? "fake cursor completed. Mentioning DELEGATE_CLARIFICATION: is not a request."
+                      : "fake cursor completed";
       console.log(JSON.stringify({
         type: "result",
         subtype: "success",
-        is_error: false,
+        is_error: mode === "cursor-clarification-is-error",
         ...(noTrustedSession ? {} : { session_id: mode === "cursor-session-mismatch" ? "cursor-session-2" : "cursor-session-1" }),
         result,
         usage: { input_tokens: 11, output_tokens: 4 },
       }));
+      if (mode === "cursor-success-forged-session") {
+        console.log(JSON.stringify({ type: "assistant", session_id: "model-forged-session", message: { content: [{ type: "text", text: "working" }] } }));
+      }
       return;
     }
     if (mode === "claude-read-only-write") {

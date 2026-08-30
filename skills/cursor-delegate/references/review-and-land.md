@@ -3,6 +3,11 @@
 Cursor did the typing; you own the judgment. Verify against reality, never the self-report, and read
 the diff as generated code because a green gate cannot catch every failure mode.
 
+Start this checklist only when `result.json` says `status: "completed"`. Relay exit 0 is not enough:
+`needs_input` is a pause (see [Clarification](#clarification-decide-before-resuming)), and
+`failed` / `timeout` / `aborted` / `cursor_agent_unavailable` are failure paths — do not review those
+as a finished implementation and do not land them.
+
 ## Check tests before trusting gates
 
 If the diff touches existing tests, review those edits first:
@@ -82,10 +87,11 @@ default, write-capable without automatic command approval under `--no-force`, or
 
 ## Clarification: decide before resuming
 
-When an opted-in run returns `needs_input`, it has paused rather than completed. Inspect the
-structured `clarification`, its cited files, and any partial diff. Decide only when the brief,
-repository, and architecture evidence support it; otherwise obtain the human's decision. Do not let
-the implementer choose merely because resuming is convenient.
+When an opted-in run returns `needs_input`, it has paused rather than completed. Do not treat it as
+a review-and-land candidate. Inspect the structured `clarification`, its cited files, and any
+partial diff. Decide only when the brief, repository, and architecture evidence support it;
+otherwise obtain the human's decision. Do not let the implementer choose merely because resuming is
+convenient.
 
 Preserve the working tree and the first run's artifacts. Put the
 `DELEGATE_CLARIFICATION_ANSWER` envelope and any new constraints in a delta brief, then resume the

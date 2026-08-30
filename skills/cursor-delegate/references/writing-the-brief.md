@@ -55,7 +55,9 @@ Add extra blocks only when the task needs them:
 - **Research or recommendations** — add `<research_mode>` (separate observed facts, inferences, and
   open questions).
 - **Unresolved judgment may stop the task** — dispatch with `--clarifications` and add the following
-  block. Clarification is an escape hatch, not a replacement for a good brief.
+  block **verbatim**. It is the entire protocol the implementer will see: do not replace it with a
+  pointer to skill docs (those files are not in the target workspace). Clarification is an escape
+  hatch, not a replacement for a good brief.
 
 ```xml
 <clarification_protocol>
@@ -69,14 +71,43 @@ behavior, material scope expansion, or a choice that establishes significant arc
 precedent. Ask the earliest blocking decision when several may exist. Do not continue past it and do
 not treat clarification as permission to expand scope.
 
-When blocked, make your entire final response exactly one line using the request envelope documented
-in references/dispatch-and-poll.md, beginning with DELEGATE_CLARIFICATION:. Otherwise return the
-normal structured report.
+There are two mutually exclusive endings:
+
+A. Task completed — return the normal structured report from <structured_output_contract>. Do not
+   emit a clarification envelope.
+
+B. Task blocked — do not return that structured report. Your entire final response must be exactly
+   one line and nothing else: the clarification envelope below. That line REPLACES the normal
+   completion report.
+
+The line must begin with the marker DELEGATE_CLARIFICATION: followed by one space and a single JSON
+object whose schema is exactly delegate-clarification.request.v1.
+
+Required fields:
+- schema — exactly delegate-clarification.request.v1
+- id — 1-64 characters; first character alphanumeric, then letters, digits, ., _, :, or -
+- category — one of: business_rule, architecture, migration, security, scope, other
+- question — non-empty, at most 4096 characters
+
+Optional fields:
+- context.files — at most 32 repository-relative paths, each at most 1024 characters, with no empty,
+  ., or .. segments and no absolute or drive-letter paths
+- options — when present, 2-16 objects with unique id values (same id rules) and non-empty labels of
+  at most 512 characters
+- recommended — must match one supplied option id; requires options
+- reason, impact — when present, non-empty and at most 4096 characters each
+
+The JSON object is at most 32768 characters. Unknown fields are ignored. Do not put session ids,
+status, or commands in the object.
+
+Example of a valid blocked final response (one line, no preamble, no report afterward):
+DELEGATE_CLARIFICATION: {"schema":"delegate-clarification.request.v1","id":"q-001","category":"architecture","question":"Preserve the current relationship or migrate it?","context":{"files":["prisma/schema.prisma"]},"options":[{"id":"A","label":"Preserve it"},{"id":"B","label":"Migrate it"}],"recommended":"B","reason":"The requirement permits multiple relationships.","impact":"Requires a schema migration."}
 </clarification_protocol>
 ```
 
-The request and answer envelopes are documented in
-[dispatch-and-poll.md](dispatch-and-poll.md#clarification-protocol).
+The orchestrator-side request and answer envelopes are also in
+[dispatch-and-poll.md](dispatch-and-poll.md#clarification-protocol). Do not send the implementer to
+that file.
 
 ## Always ask for the report explicitly
 
@@ -103,7 +134,9 @@ dispatches.
 
 ## Premises freeze at dispatch
 
-The implementer starts from the brief's facts and there is no steering channel mid-run. Audit the
+The implementer starts from the brief's facts. `cursor-agent --print` has no live bidirectional
+steering channel: you cannot type into a running process. Clarification, when opted in, is a
+pause/exit/resume lifecycle between runs — not stdin interactivity during the current one. Audit the
 fact block before sending — ownership, target branch, constraints, anything a judgment call rests
 on. If a premise turns out wrong while the run is live, stop the run and re-dispatch a corrected
 brief rather than discounting the output afterward; for a write-capable run, inspect the working

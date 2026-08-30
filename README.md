@@ -151,9 +151,12 @@ review-first loop:
 
 1. **Write a brief** — self-contained task context; the implementer has no orchestrator chat history.
 2. **Dispatch** it with the bundled `relay.mjs`.
-3. **Wait** for completion — the relay writes a structured `result.json`.
-4. **Review** the diff — re-run the project's gates yourself; pair with [guard skills](https://github.com/amElnagdy/guard-skills).
-5. **Land** it — *you* commit, because committing belongs to the reviewer.
+3. **Wait** for the relay to finish — it writes a structured `result.json`. Inspect `status`; exit 0
+   and the file's existence mean the run finished, not that implementation completed.
+4. **Review** the diff only when `status` is `completed` — re-run the project's gates yourself; pair
+   with [guard skills](https://github.com/amElnagdy/guard-skills).
+5. **Land** it — *you* commit, because committing belongs to the reviewer. Do not land `needs_input`
+   or a failure status.
 
 ```text
 Use $claude-delegate to have a separate Claude Code session implement the parser fix, then review and commit it.
@@ -168,9 +171,9 @@ freely.
 
 `cursor-delegate` also has opt-in support for the generic
 [clarification protocol](docs/clarification-protocol.md): an implementer can end a run with a
-structured blocking question, producing `status: "needs_input"`, and the orchestrator can answer and
-resume the exact session. Clarification is exceptional unresolved judgment, not routine steering or
-a substitute for a complete brief.
+structured blocking question, producing `status: "needs_input"` and exit 0. That is a pause — do not
+review or land. Answer it and resume the exact session. Clarification is exceptional unresolved
+judgment, not routine steering or a substitute for a complete brief.
 
 You feel it when a bounded task — a migration, a mechanical refactor, a removal sweep — comes back as
 a clean diff with a structured report, and you land it after re-running the gates yourself instead of

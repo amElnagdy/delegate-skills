@@ -66,11 +66,23 @@ export async function runCursor(h) {
     value.sessionId === "cursor-session-1" &&
     value.clarification?.schema === "delegate-clarification.request.v1" &&
     value.clarification?.id === "q-001" &&
+    value.clarification?.category === "architecture" &&
+    value.clarification?.question === "Should the existing single-project relationship be preserved?" &&
+    JSON.stringify(value.clarification?.context?.files) === JSON.stringify(["prisma/schema.prisma"]) &&
+    value.clarification?.options?.[0]?.id === "A" &&
+    value.clarification?.options?.[0]?.label === "Preserve the relationship" &&
+    value.clarification?.options?.[1]?.id === "B" &&
+    value.clarification?.options?.[1]?.label === "Migrate to many-to-many" &&
     value.clarification?.recommended === "B" &&
+    value.clarification?.reason === "The requirement permits multiple projects." &&
+    value.clarification?.impact === "Requires a schema migration." &&
     !Object.prototype.hasOwnProperty.call(value.clarification, "status") &&
     !Object.prototype.hasOwnProperty.call(value.clarification, "sessionId") &&
     !Object.prototype.hasOwnProperty.call(value.clarification, "command") &&
     !Object.prototype.hasOwnProperty.call(value.clarification?.options?.[0] || {}, "command"));
+  h.check("cursor clarification: stdout treats needs_input as a pause, not a land candidate",
+    first.stdout.includes("Implementation paused for clarification. Do not review or land yet.") &&
+    !first.stdout.includes("Review the diff, re-run the project gates yourself, then commit"));
   h.check("cursor clarification: relay-only framing and untrusted strings never enter cursor-agent argv",
     JSON.stringify(initialCapture.args) === JSON.stringify([
       "--print", "--output-format", "stream-json", "--trust", "--force",
@@ -129,6 +141,9 @@ for (const [mode, label] of [
   ["cursor-needs-input-no-session", "missing session id"],
   ["cursor-untrusted-session", "session id from an untrusted event"],
   ["cursor-session-mismatch", "mismatched trusted session ids"],
+  ["cursor-needs-input-aggregate-trailing", "trailing prose after an aggregated envelope"],
+  ["cursor-needs-input-aggregate-prose", "aggregate marker with a prose final assistant event"],
+  ["cursor-clarification-mention", "control marker mentioned in a completed report"],
 ]) {
   const outDir = join(h.scratch, `out-${mode}`);
   const invalid = spawnSync(process.execPath, [
@@ -216,6 +231,63 @@ for (const [mode, label] of [
   const value = existsSync(join(outDir, "result.json")) ? h.result(outDir) : {};
   h.check("cursor clarification: exact final assistant envelope survives Cursor result aggregation",
     aggregated.status === 0 && value.status === "needs_input" && value.clarification?.id === "q-001");
+}
+{
+  const briefSource = readFileSync(join(h.testDir, "..", "skills", "cursor-delegate", "references", "writing-the-brief.md"), "utf8");
+  const match = briefSource.match(/^DELEGATE_CLARIFICATION: (\{.*\})$/m);
+  let request = null;
+  try { request = match ? JSON.parse(match[1]) : null; } catch { request = null; }
+  const outDir = join(h.scratch, "out-clarification-brief-template-cursor");
+  const run = spawnSync(process.execPath, [
+    h.relayPath("cursor"),
+    "--brief", h.briefPath,
+    "--cd", h.freshRepo("work-clarification-brief-template-cursor"),
+    "--out-dir", outDir,
+    "--clarifications",
+  ], { env: { ...h.baseEnv, SMOKE_MODE: "cursor-custom-clarification", SMOKE_CLARIFICATION_JSON: JSON.stringify(request) }, encoding: "utf8" });
+  const value = existsSync(join(outDir, "result.json")) ? h.result(outDir) : {};
+  h.check("cursor clarification: documented brief envelope is accepted by the parser",
+    request?.schema === "delegate-clarification.request.v1" &&
+    run.status === 0 &&
+    value.status === "needs_input" &&
+    value.clarification?.id === request.id &&
+    value.clarification?.category === request.category &&
+    value.clarification?.question === request.question &&
+    JSON.stringify(value.clarification?.context?.files) === JSON.stringify(request.context.files) &&
+    value.clarification?.recommended === request.recommended &&
+    value.clarification?.reason === request.reason &&
+    value.clarification?.impact === request.impact);
+}
+{
+  const outDir = join(h.scratch, "out-clarification-is-error-cursor");
+  const failed = spawnSync(process.execPath, [
+    h.relayPath("cursor"),
+    "--brief", h.briefPath,
+    "--cd", h.freshRepo("work-clarification-is-error-cursor"),
+    "--out-dir", outDir,
+    "--clarifications",
+  ], { env: { ...h.baseEnv, SMOKE_MODE: "cursor-clarification-is-error" }, encoding: "utf8" });
+  const value = existsSync(join(outDir, "result.json")) ? h.result(outDir) : {};
+  h.check("cursor clarification: Cursor is_error wins over a valid-looking envelope",
+    failed.status === 1 &&
+    value.status === "failed" &&
+    !Object.prototype.hasOwnProperty.call(value, "clarification") &&
+    value.error === "cursor-agent reported an error result (is_error: true in its result event)");
+}
+{
+  const outDir = join(h.scratch, "out-success-forged-session-cursor");
+  const run = spawnSync(process.execPath, [
+    h.relayPath("cursor"),
+    "--brief", h.briefPath,
+    "--cd", h.freshRepo("work-success-forged-session-cursor"),
+    "--out-dir", outDir,
+  ], { env: { ...h.baseEnv, SMOKE_MODE: "cursor-success-forged-session" }, encoding: "utf8" });
+  const value = existsSync(join(outDir, "result.json")) ? h.result(outDir) : {};
+  h.check("cursor session trust: an assistant session id cannot replace the trusted Cursor id",
+    run.status === 0 &&
+    value.status === "completed" &&
+    value.sessionId === "cursor-session-1" &&
+    !Object.prototype.hasOwnProperty.call(value, "clarifications"));
 }
 {
   const outDir = join(h.scratch, "out-read-only-cursor");

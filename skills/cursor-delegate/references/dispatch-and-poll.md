@@ -40,8 +40,21 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 | `--out-dir <dir>` | Artifact directory (default: a fresh directory under the system temp dir). |
 | `-h`, `--help` | Print the relay's header help. |
 
-`--session` and `--resume-last` are mutually exclusive. The child cwd pins the primary workspace;
-`--add-dir` adds extra workspace roots only.
+`--session` and `--resume-last` are mutually exclusive. `--session` must be 1–256 characters
+(letters, digits, `.`, `_`, `:`, `-`). The child cwd pins the primary workspace; `--add-dir` adds
+extra workspace roots only.
+
+## Session identity
+
+The relay captures `sessionId` only from trusted Cursor `system/init` and `result` events, and only
+when the value matches the same 1–256 character rule as `--session`. Assistant output, tool events,
+and fields inside a clarification envelope are untrusted and cannot select a resume target on any
+run. When both init and result report a session id, they must agree before a clarification can
+become `needs_input`; a mismatch is a protocol failure.
+
+This rule applies to **every** cursor-delegate run, not only `--clarifications`. A second, weaker
+capture path for ordinary completions would let assistant-forged ids become the resume target. One
+trust rule keeps `--session` and published `sessionId` on the same boundary.
 
 ## Clarification protocol
 
@@ -128,22 +141,35 @@ inside the worktree can make the artifacts appear there:
   supplied one.
 - `stderrTail` — the last 20 non-empty stderr lines on any run that did not complete (`failed`,
   `timeout`, `aborted`), except a launch failure, which reports `failed` with no `stderrTail`.
+  `needs_input` is a successful pause and omits `stderrTail`.
 - `error` — present for launch failures, when the relay watchdog fires (`timeout`), on an `aborted`
-  run, and when Cursor's own result event carries `is_error: true`.
+  run, when Cursor's own result event carries `is_error: true`, and when a recognized clarification
+  request fails validation (`invalid clarification protocol: …`).
 
-## Waiting for completion
+## Waiting for the run, then inspecting status
 
 The helper blocks. Use the orchestrator's background-command facility, or background it in a shell
 and poll for `result.json`. The run is done only when the process exits and the file contains a
-`status`.
+`status`. Then branch on that field — do not treat relay exit 0 or the file's existence as
+completion:
+
+- **`completed`** — independent gates, diff review, then land or rework.
+- **`needs_input`** — do not review as completed and do not land. Obtain a decision, then resume the
+  exact `sessionId` with the structured answer and delta described in
+  [the clarification protocol](#clarification-protocol).
+- **`failed` / `timeout` / `aborted` / `cursor_agent_unavailable`** — handle the failure; do not land.
 
 A pre-run usage error exits 2 and writes no result. A missing `cursor-agent` exits 127 and writes
 `status: "cursor_agent_unavailable"`.
 
-`needs_input` exits 0 because Cursor stopped successfully and the orchestrator has an actionable
-question. It is not completion. Preserve the working tree, decide or obtain a human decision, then
-resume the exact `sessionId` with the structured answer and delta described in
-[the clarification protocol](#clarification-protocol).
+Exit 0 means the relay produced a valid successful outcome: `completed` or `needs_input`.
+Orchestrators must inspect `result.status`. `needs_input` is exit 0 because Cursor stopped
+successfully and the question is actionable; it is not completion.
+
+The relay exit code does not always mirror cursor-agent. A recognized but malformed clarification
+request is a protocol failure: `status: "failed"`, `error` beginning `invalid clarification
+protocol:`, and a non-zero relay exit even when Cursor itself exited 0. Other child failures keep a
+non-zero exit (or 128 plus the signal number when the child dies on a signal).
 
 ## When a run misbehaves
 
@@ -216,5 +242,6 @@ values are quoted.
 
 ## The commit boundary
 
-The relay never commits. Cursor edits the working tree; the orchestrator reviews, re-runs the gates,
-and commits. See [review-and-land.md](review-and-land.md).
+The relay never commits. After a `completed` run, the orchestrator reviews, re-runs the gates, and
+commits. A `needs_input` tree is evidence to preserve, not a land candidate. See
+[review-and-land.md](review-and-land.md).

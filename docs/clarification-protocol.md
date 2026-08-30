@@ -26,8 +26,12 @@ RUNNING
 ```
 
 `needs_input` is a clean pause: the implementer process has exited, `result.json` exists, and the
-relay exits 0. It is not completion and does not authorize review or landing. Partial working-tree
-changes remain evidence; inspect and preserve them before resuming.
+relay exits 0. Exit 0 means a valid successful outcome (`completed` or `needs_input`); orchestrators
+must inspect `status`. It is not completion and does not authorize review or landing. Partial
+working-tree changes remain evidence; inspect and preserve them before resuming.
+
+A recognized but malformed request is a protocol failure (`status: "failed"`, non-zero relay exit,
+`error` beginning `invalid clarification protocol:`), even if the implementer CLI exited 0.
 
 ## When to ask
 
@@ -79,7 +83,9 @@ never silently converts malformed input into completion or partially publishes a
 
 A valid request also requires one safe session id captured from Cursor's init or result events, and
 all such trusted events must agree. Session-like fields in assistant output or clarification JSON
-are untrusted data and cannot select a resume target.
+are untrusted data and cannot select a resume target. `cursor-delegate` applies that capture rule to
+every run — not only `--clarifications` — so ordinary completions cannot publish an assistant-forged
+resume target either. Explicit `--session` values use the same 1–256 character identifier rule.
 
 Cursor may aggregate earlier progress text into its closing result field. `cursor-delegate` accepts
 that runtime shape only when the final assistant event is itself the exact envelope, the aggregate
@@ -129,6 +135,10 @@ aggregate these artifacts, but relays should not silently overwrite or manage ta
 Timeout and cancellation keep their existing precedence. If either happens before a successful
 terminal report, the relay returns `timeout` or `aborted`, even if partial assistant text resembles a
 request. Inspect the working tree and event log before retrying.
+
+There is no live bidirectional steering channel during a `--print` run. Clarification is a
+pause/exit/resume lifecycle between runs: the process exits, the orchestrator decides, then a later
+dispatch resumes the exact session. Stdin is not interactive while the implementer is running.
 
 Completion still enters the normal independent verification, diff review, orchestrator verdict, and
 land cycle. Clarification does not let the implementer approve its own work or expand scope.
