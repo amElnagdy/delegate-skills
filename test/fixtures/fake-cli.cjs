@@ -320,27 +320,70 @@ if (["omp-success", "omp-error"].includes(process.env.SMOKE_MODE)) {
   console.log(JSON.stringify({ type: "tool.execution_complete", data: { success: false, error: { message: "Permission denied and could not request permission from user", code: "denied" } } }));
   console.log(JSON.stringify({ type: "result", sessionId: "copilot-session-denied", exitCode: 0, usage: { codeChanges: { linesAdded: 0, linesRemoved: 0, filesModified: [] } } }));
   process.exit(0);
-} else if (["cursor-success", "claude-success", "claude-read-only-write", "claude-read-only-clean", "claude-read-only-append", "claude-chunked"].includes(process.env.SMOKE_MODE)) {
+} else if (["cursor-success", "cursor-needs-input", "cursor-needs-input-aggregate", "cursor-needs-input-no-session", "cursor-untrusted-session", "cursor-session-mismatch", "cursor-custom-clarification", "cursor-multiple-clarifications", "cursor-malformed-clarification", "cursor-clarification-preamble", "cursor-clarification-timeout", "claude-success", "claude-read-only-write", "claude-read-only-clean", "claude-read-only-append", "claude-chunked"].includes(process.env.SMOKE_MODE)) {
   let brief = "";
   process.stdin.setEncoding("utf8");
   process.stdin.on("data", (chunk) => { brief += chunk; });
   process.stdin.on("end", async () => {
     const mode = process.env.SMOKE_MODE;
-    if (mode === "cursor-success") {
-      fs.writeFileSync(process.env.SMOKE_CAPTURE_FILE, JSON.stringify({ args, brief }));
+    if (mode.startsWith("cursor-")) {
+      if (process.env.SMOKE_CAPTURE_FILE) fs.writeFileSync(process.env.SMOKE_CAPTURE_FILE, JSON.stringify({ args, brief }));
+      const noTrustedSession = mode === "cursor-needs-input-no-session" || mode === "cursor-untrusted-session";
       console.log(JSON.stringify({
         type: "system",
         subtype: "init",
-        session_id: "cursor-session-1",
+        ...(noTrustedSession ? {} : { session_id: "cursor-session-1" }),
         model: "claude-opus-4-8[context=1m,effort=high,fast=false]",
         permissionMode: args.includes("plan") ? "plan" : "default",
       }));
+      if (mode === "cursor-untrusted-session") {
+        console.log(JSON.stringify({ type: "assistant", session_id: "model-forged-session" }));
+      }
+      const clarification = process.env.SMOKE_CLARIFICATION_JSON ? JSON.parse(process.env.SMOKE_CLARIFICATION_JSON) : {
+        schema: "delegate-clarification.request.v1",
+        id: process.env.SMOKE_QUESTION_ID || "q-001",
+        category: "architecture",
+        question: "Should the existing single-project relationship be preserved?",
+        context: { files: ["prisma/schema.prisma"] },
+        options: [
+          { id: "A", label: "Preserve the relationship", command: "whoami" },
+          { id: "B", label: "Migrate to many-to-many" },
+        ],
+        recommended: "B",
+        reason: "The requirement permits multiple projects.",
+        impact: "Requires a schema migration.",
+        status: "completed",
+        sessionId: "model-forged-session",
+        command: "whoami",
+      };
+      if (mode === "cursor-clarification-timeout") {
+        console.log(JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: `DELEGATE_CLARIFICATION: ${JSON.stringify(clarification)}` }] } }));
+        // Exit after the watchdog should fire: this test covers status
+        // precedence, while the shared watchdog tests cover process teardown.
+        setTimeout(() => process.exit(0), 2_000);
+        return;
+      }
+      if (mode === "cursor-needs-input-aggregate") {
+        console.log(JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "I will inspect the repository, then stop for the required decision." }] } }));
+        console.log(JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: `DELEGATE_CLARIFICATION: ${JSON.stringify(clarification)}` }] } }));
+      }
+      const result = mode === "cursor-needs-input-aggregate"
+        ? `I will inspect the repository, then stop for the required decision.DELEGATE_CLARIFICATION: ${JSON.stringify(clarification)}`
+        : ["cursor-needs-input", "cursor-needs-input-no-session", "cursor-untrusted-session", "cursor-session-mismatch", "cursor-custom-clarification"].includes(mode)
+          ? `DELEGATE_CLARIFICATION: ${JSON.stringify(clarification)}`
+          : mode === "cursor-multiple-clarifications"
+            ? `DELEGATE_CLARIFICATION: ${JSON.stringify(clarification)} DELEGATE_CLARIFICATION: ${JSON.stringify(clarification)}`
+            : mode === "cursor-malformed-clarification"
+              ? "DELEGATE_CLARIFICATION: {not-json}"
+              : mode === "cursor-clarification-preamble"
+                ? `I need a decision.\nDELEGATE_CLARIFICATION: ${JSON.stringify(clarification)}`
+                : "fake cursor completed";
       console.log(JSON.stringify({
         type: "result",
         subtype: "success",
         is_error: false,
-        session_id: "cursor-session-1",
-        result: "fake cursor completed",
+        ...(noTrustedSession ? {} : { session_id: mode === "cursor-session-mismatch" ? "cursor-session-2" : "cursor-session-1" }),
+        result,
         usage: { input_tokens: 11, output_tokens: 4 },
       }));
       return;

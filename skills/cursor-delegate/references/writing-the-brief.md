@@ -54,6 +54,29 @@ Add extra blocks only when the task needs them:
   plausible cause) and `<missing_context_gating>` (find missing repo facts or state what is unknown).
 - **Research or recommendations** — add `<research_mode>` (separate observed facts, inferences, and
   open questions).
+- **Unresolved judgment may stop the task** — dispatch with `--clarifications` and add the following
+  block. Clarification is an escape hatch, not a replacement for a good brief.
+
+```xml
+<clarification_protocol>
+First resolve uncertainty from this brief, the repository, project documentation, existing
+architecture decisions, and established conventions. Do not ask about naming, style, routine
+implementation choices, or safe inferences that do not change architecture or business behavior.
+
+Stop and request one clarification only for an ambiguous business rule, conflicting or changed
+architecture assumption, unauthorized destructive migration, unclear authorization/security
+behavior, material scope expansion, or a choice that establishes significant architectural
+precedent. Ask the earliest blocking decision when several may exist. Do not continue past it and do
+not treat clarification as permission to expand scope.
+
+When blocked, make your entire final response exactly one line using the request envelope documented
+in references/dispatch-and-poll.md, beginning with DELEGATE_CLARIFICATION:. Otherwise return the
+normal structured report.
+</clarification_protocol>
+```
+
+The request and answer envelopes are documented in
+[dispatch-and-poll.md](dispatch-and-poll.md#clarification-protocol).
 
 ## Always ask for the report explicitly
 

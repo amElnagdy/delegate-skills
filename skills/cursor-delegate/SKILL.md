@@ -70,6 +70,7 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 # pin a model from `cursor-agent models`:              add --model <name>
 # resume the most recent session:                      add --resume-last  (delta brief only)
 # resume a specific session:                           add --session <id> (delta brief only)
+# allow structured pause + exact-session clarification: add --clarifications
 # hard time limit (watchdog):                          add --timeout 2h  (the 30m default suits short runs; implementation briefs routinely need 1-2h)
 # see all options:                                     node .../relay.mjs --help
 ```
@@ -85,9 +86,15 @@ The helper blocks until Cursor finishes. Run it with the orchestrator's backgrou
 or background it in the shell and poll for `result.json`. A pre-run usage error exits 2 and writes no
 result; a missing `cursor-agent` exits 127 and writes `status: "cursor_agent_unavailable"`.
 
-Trust process state and the working tree over a progress display. Completion means the process exited
-and `result.json` exists. Cursor's full report is the `finalMessage` field in `result.json` (also
-printed in full on stdout between the report markers).
+Trust process state and the working tree over a progress display. A run is finished when the process
+exited and `result.json` exists; implementation is complete only when its status is `completed`.
+Cursor's full report is the `finalMessage` field in `result.json` (also printed in full on stdout
+between the report markers).
+
+With `--clarifications`, a valid blocking request instead produces `status: "needs_input"`, a
+structured `clarification`, and exit 0. Answer it and resume the exact `sessionId`; do not review or
+land partial work as if the task completed. See the
+[clarification protocol](references/dispatch-and-poll.md#clarification-protocol).
 
 **Windows + hooks caveat:** if the user has Cursor hooks configured (`~/.cursor/hooks.json`, or
 Claude Code `PreToolUse` hooks, which cursor-agent imports), dispatching from a Git Bash (MSYS)
@@ -111,6 +118,10 @@ See [references/review-and-land.md](references/review-and-land.md).
 The implementer edits the working tree; **the orchestrator commits.** Commit only after the gates
 pass and the diff holds. If rework is needed, send a delta brief with `--resume-last` or
 `--session <id>`, then review again.
+
+If implementation may cross a genuine decision boundary, opt into `--clarifications` and include
+the policy block from [references/writing-the-brief.md](references/writing-the-brief.md). This is an
+escape hatch for unresolved judgment, not permission to ask about routine implementation choices.
 
 ## Autonomy and permissions
 

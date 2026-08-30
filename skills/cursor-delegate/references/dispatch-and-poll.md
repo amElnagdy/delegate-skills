@@ -32,6 +32,7 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 | `--read-only` | Run in Cursor's plan mode: read-only analysis, no edits, no `--force`. |
 | `--sandbox <mode>` | Override Cursor's sandbox for this dispatch: `enabled` or `disabled`. |
 | `--no-force` | Keep the run write-capable but withhold `--force`; commands requiring approval are refused. |
+| `--clarifications` | Recognize the generic clarification envelope and publish `needs_input`; inert unless explicitly enabled. |
 | `--session <id>` | Resume a specific Cursor chat (`--resume <id>`); send only the delta brief. |
 | `--resume-last` | Resume the most recent Cursor chat (`--continue`); send only the delta brief. |
 | `--add-dir <dir>` | Add an extra workspace root on Cursor `2026.07.23` or newer. Repeatable. Edits there are not reported in `touchedFiles`. |
@@ -41,6 +42,51 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 
 `--session` and `--resume-last` are mutually exclusive. The child cwd pins the primary workspace;
 `--add-dir` adds extra workspace roots only.
+
+## Clarification protocol
+
+Clarification is an escape hatch for unresolved judgment, not a replacement for a good brief. Enable
+it with `--clarifications` and include the policy from [writing-the-brief.md](writing-the-brief.md).
+The implementer must first use the brief, repository, documentation, architecture decisions, and
+conventions. It asks only for an ambiguous business rule, conflicting or changed architecture,
+unauthorized destructive migration, unclear authorization/security behavior, material scope
+expansion, or significant architectural precedent. It asks one blocking question per run.
+
+The entire final report must be one line in this shape:
+
+```text
+DELEGATE_CLARIFICATION: {"schema":"delegate-clarification.request.v1","id":"q-001","category":"architecture","question":"Preserve the current relationship or migrate it?","context":{"files":["prisma/schema.prisma"]},"options":[{"id":"A","label":"Preserve it"},{"id":"B","label":"Migrate it"}],"recommended":"B","reason":"The requirement permits multiple relationships.","impact":"Requires a schema migration."}
+```
+
+`category` is `business_rule`, `architecture`, `migration`, `security`, `scope`, or `other`.
+`context`, `options`, `recommended`, `reason`, and `impact` are optional; `recommended` must identify
+a supplied option. IDs, strings, option count, and repository-relative context paths are bounded.
+Unknown fields are discarded. A malformed, prose-wrapped, or repeated envelope fails safely instead
+of reporting completion. A valid request requires one safe session id from Cursor's init or result
+events, and all such trusted events must agree. A session-like value inside assistant output or the
+envelope is never a resume target.
+
+Cursor may aggregate earlier progress text into its closing result field. In that runtime shape, the
+relay accepts a request only when the final assistant event is itself the exact envelope, the
+aggregate ends with that event, and the whole aggregate contains exactly one clarification marker.
+Earlier or trailing prose inside the final assistant event remains invalid.
+
+After deciding or obtaining a human decision, preserve the tree and use a separate output directory.
+Resume the exact session with a delta brief beginning:
+
+```text
+DELEGATE_CLARIFICATION_ANSWER: {"schema":"delegate-clarification.answer.v1","questionId":"q-001","decision":"B","reason":"Approved after architecture review."}
+```
+
+Follow that line with any constraints introduced by the decision. A resumed run may complete or ask
+the next blocking question. Timeout and cancellation retain their existing statuses and take
+precedence over partial assistant text.
+
+The answer envelope is brief content, not a relay control message, so this version deliberately does
+not parse it. Session selection remains a separate, validated `--session <id>` argument. This keeps
+free-form decisions away from process arguments while Cursor checks the answer against its existing
+conversation. If a future relay accepts an answer as a dedicated option or reads prior artifacts
+automatically, request/answer matching belongs at that new relay boundary.
 
 A fresh run defaults to write-capable with `--force` (commands run without approval unless your
 Cursor config denies them). `--no-force` withholds automatic command approval while retaining file
@@ -60,12 +106,15 @@ inside the worktree can make the artifacts appear there:
 
 `result.json` fields:
 
-- `schema`, `tool` (`"cursor-agent"`), `status` (`completed` | `failed` | `timeout` | `aborted` |
+- `schema`, `tool` (`"cursor-agent"`), `status` (`completed` | `needs_input` | `failed` | `timeout` | `aborted` |
   `cursor_agent_unavailable`), `exitCode`, and `signal` (`null` unless the child died on a signal).
 - `workdir`, `model` (the requested name or `null`), `resolvedModel` (the model Cursor actually
   served, from its init event), `permissionMode` (the mode Cursor reported applying), `readOnly`,
   `force`, `sandbox` (the requested value or `null`, not a claim about what Cursor applied),
-  `resumed`, `cursorAgentVersion`, `sessionId`, `startedAt`, and `finishedAt`.
+  `resumed`, `cursorAgentVersion`, `sessionId`, `startedAt`, and `finishedAt`. `clarifications: true`
+  is added only when the opt-in flag is present.
+- `clarification` — present only for `needs_input`; the validated
+  `delegate-clarification.request.v1` object from Cursor's final report.
 - `briefPath`, `finalPath`, `eventsPath`, and `stderrPath`.
 - `finalMessage` — the `result` field of Cursor's closing event; when the run died before emitting
   one, the assistant text chunks joined with `"\n\n"` instead. Tool calls and tool results are
@@ -91,6 +140,11 @@ and poll for `result.json`. The run is done only when the process exits and the 
 A pre-run usage error exits 2 and writes no result. A missing `cursor-agent` exits 127 and writes
 `status: "cursor_agent_unavailable"`.
 
+`needs_input` exits 0 because Cursor stopped successfully and the orchestrator has an actionable
+question. It is not completion. Preserve the working tree, decide or obtain a human decision, then
+resume the exact `sessionId` with the structured answer and delta described in
+[the clarification protocol](#clarification-protocol).
+
 ## When a run misbehaves
 
 - **`status: "cursor_agent_unavailable"` (exit 127):** install the Cursor CLI, authenticate with
@@ -99,6 +153,10 @@ A pre-run usage error exits 2 and writes no result. A missing `cursor-agent` exi
   result event carried `is_error: true` the relay reports `failed` even on a zero exit; Cursor's own
   message is in `finalMessage`. An unknown `--model` name fails fast — re-check against
   `cursor-agent models`.
+- **`status: "failed"` with `invalid clarification protocol`:** Cursor attempted a clarification but
+  did not emit the exact one-line envelope. Preserve the session and partial tree; resume with a
+  delta asking it to re-emit a valid request, or make the decision only if the available evidence is
+  sufficient.
 - **A version-preflight failure:** the relay writes `failed` with the probe's exit code, or `timeout`
   with exit 124 when the probe exceeds the smaller of the run watchdog and 10 seconds. Cursor is not
   dispatched.

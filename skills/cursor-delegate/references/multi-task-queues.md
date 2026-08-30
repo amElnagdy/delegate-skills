@@ -24,9 +24,11 @@ default because it preserves clean task boundaries.
 Fresh Cursor sessions do not remember earlier tasks. If task 2 chooses a helper name, fixture
 location, or interface that task 5 needs, write that fact into task 5's brief.
 
-Use a resumed Cursor session only for rework on the same task. Send a delta brief with
-`--resume-last`, or with `--session <id>` from that task's `result.json`. Start unrelated queue items
-in fresh sessions.
+Use a resumed Cursor session only for rework or a clarification round on the same task. For
+clarification, pass the exact `--session <id>` from that task's `needs_input` result with the answer
+delta brief. `--resume-last` is suitable only when deliberately choosing Cursor's most recent
+session; it cannot prove task identity. Start every unrelated queue item with neither resume flag so
+it gets a fresh session.
 
 ## Keep a progress file
 

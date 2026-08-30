@@ -166,6 +166,12 @@ Every relay speaks the same `delegate-relay.result.v1` contract: `status`, `exit
 `touchedFiles`, and a session id where the CLI exposes one. Learn the loop once, swap the implementer
 freely.
 
+`cursor-delegate` also has opt-in support for the generic
+[clarification protocol](docs/clarification-protocol.md): an implementer can end a run with a
+structured blocking question, producing `status: "needs_input"`, and the orchestrator can answer and
+resume the exact session. Clarification is exceptional unresolved judgment, not routine steering or
+a substitute for a complete brief.
+
 You feel it when a bounded task — a migration, a mechanical refactor, a removal sweep — comes back as
 a clean diff with a structured report, and you land it after re-running the gates yourself instead of
 typing it all by hand.

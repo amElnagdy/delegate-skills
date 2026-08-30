@@ -43,6 +43,8 @@
  *                           this dispatch (enabled | disabled).
  *   --no-force              Withhold --force on a write-capable run; commands
  *                           that require approval are refused instead of run.
+ *   --clarifications        Recognize the generic clarification envelope in
+ *                           Cursor's final report and publish `needs_input`.
  *   --session <id>          Resume a specific Cursor chat (`--resume <id>`);
  *                           send only the delta brief.
  *   --resume-last           Resume the most recent Cursor chat (`--continue`);
@@ -58,6 +60,7 @@
  * Result: written to <out-dir>/result.json and summarized on stdout —
  *   status, exitCode, signal, cursorAgentVersion, sessionId, resolvedModel,
  *   permissionMode, force, sandbox (requested value or null), usage,
+ *   clarifications, clarification (on `needs_input`),
  *   finalMessage (Cursor's own report),
  *   touchedFiles (git porcelain, null if git cannot report), and paths to
  *   brief.txt, final.txt, events.jsonl, and stderr.txt.
@@ -68,7 +71,8 @@
  * code mirrors cursor-agent's own (0 success, non-zero failure). If the child
  * dies on a signal, the exit code is 128 plus the signal number and
  * `result.json` records the signal. Once the brief validates, `result.json` is
- * written on every outcome — completed, failed, timeout (the --timeout
+ * written on every outcome — completed, needs_input (a valid clarification
+ * request), failed, timeout (the --timeout
  * watchdog fired), aborted (the relay itself was killed and forwarded the kill
  * to cursor-agent), or cursor_agent_unavailable.
  */
@@ -85,8 +89,20 @@ const DEFAULT_TIMEOUT = "30m";
 const MAX_TIMER_MS = 2_147_483_647;
 const VERSION_PROBE_TIMEOUT_MS = 10_000;
 const SAFE_MODEL = /^[A-Za-z0-9][A-Za-z0-9._:@/[\],=-]*$/;
-const SAFE_SESSION = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+const SAFE_SESSION = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
+const SAFE_CLARIFICATION_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
 const SANDBOX_MODES = new Set(["enabled", "disabled"]);
+const CLARIFICATION_MARKER = "DELEGATE_CLARIFICATION:";
+const CLARIFICATION_PREFIX = `${CLARIFICATION_MARKER} `;
+const CLARIFICATION_SCHEMA = "delegate-clarification.request.v1";
+const CLARIFICATION_CATEGORIES = new Set(["business_rule", "architecture", "migration", "security", "scope", "other"]);
+const MAX_CLARIFICATION_JSON_CHARS = 32_768;
+const MAX_CLARIFICATION_QUESTION_CHARS = 4_096;
+const MAX_CLARIFICATION_DETAIL_CHARS = 4_096;
+const MAX_CLARIFICATION_FILES = 32;
+const MAX_CLARIFICATION_PATH_CHARS = 1_024;
+const MAX_CLARIFICATION_OPTIONS = 16;
+const MAX_CLARIFICATION_OPTION_LABEL_CHARS = 512;
 
 const IMPLEMENTER_KEY = "cursor";
 
@@ -203,6 +219,7 @@ function parseArgs(argv) {
     model: null,
     readOnly: false,
     force: true,
+    clarifications: false,
     sandbox: null,
     session: null,
     resumeLast: false,
@@ -231,6 +248,7 @@ function parseArgs(argv) {
       case "--read-only": opts.readOnly = true; flagged.add("readOnly"); break;
       case "--sandbox": opts.sandbox = next(); flagged.add("sandbox"); break;
       case "--no-force": opts.force = false; flagged.add("force"); break;
+      case "--clarifications": opts.clarifications = true; break;
       case "--session": opts.session = next(); break;
       case "--resume-last": opts.resumeLast = true; break;
       case "--add-dir": opts.addDirs.push(next()); break;
@@ -251,7 +269,7 @@ function parseArgs(argv) {
     fail("--model contains unsupported characters (allowed: letters, digits, . _ : @ / [ ] , = -)");
   }
   if (opts.session !== null && !SAFE_SESSION.test(opts.session)) {
-    fail("--session contains unsupported characters (allowed: letters, digits, . _ : -)");
+    fail("--session must be 1-256 characters (allowed: letters, digits, . _ : -)");
   }
   // cursor-agent resolves a relative --add-dir against ITS cwd, so resolve
   // against --cd (not the relay's own cwd) — and only after the loop, since
@@ -380,6 +398,111 @@ function timestamp() {
   return new Date().toISOString().replace(/[:.]/g, "-");
 }
 
+function parseClarification(message) {
+  if (!message.includes(CLARIFICATION_MARKER)) return { kind: "none" };
+  const markerCount = message.split(CLARIFICATION_MARKER).length - 1;
+  if (markerCount !== 1 || message !== message.trim() || !message.startsWith(CLARIFICATION_PREFIX) || /[\r\n]/.test(message)) {
+    return { kind: "error", error: `the clarification request must be the entire final report on one line beginning with ${CLARIFICATION_PREFIX}` };
+  }
+  const jsonText = message.slice(CLARIFICATION_PREFIX.length);
+  if (!jsonText.startsWith("{") || jsonText.length > MAX_CLARIFICATION_JSON_CHARS) {
+    return { kind: "error", error: `the clarification request JSON must be an object no longer than ${MAX_CLARIFICATION_JSON_CHARS} characters` };
+  }
+  let value;
+  try {
+    value = JSON.parse(jsonText);
+  } catch {
+    return { kind: "error", error: "the clarification request contains malformed JSON" };
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { kind: "error", error: "the clarification request must be a JSON object" };
+  }
+  if (value.schema !== CLARIFICATION_SCHEMA) {
+    return { kind: "error", error: `the clarification request schema must be ${CLARIFICATION_SCHEMA}` };
+  }
+  if (typeof value.id !== "string" || !SAFE_CLARIFICATION_ID.test(value.id)) {
+    return { kind: "error", error: "the clarification request id must be 1-64 safe identifier characters" };
+  }
+  if (!CLARIFICATION_CATEGORIES.has(value.category)) {
+    return { kind: "error", error: `the clarification category must be one of: ${[...CLARIFICATION_CATEGORIES].join(", ")}` };
+  }
+  if (typeof value.question !== "string" || !value.question.trim() || value.question.length > MAX_CLARIFICATION_QUESTION_CHARS) {
+    return { kind: "error", error: `the clarification question must be a non-empty string no longer than ${MAX_CLARIFICATION_QUESTION_CHARS} characters` };
+  }
+  let context;
+  if (value.context !== undefined) {
+    if (!value.context || typeof value.context !== "object" || Array.isArray(value.context)) {
+      return { kind: "error", error: "clarification context must be an object when present" };
+    }
+    if (value.context.files !== undefined) {
+      if (!Array.isArray(value.context.files) || value.context.files.length > MAX_CLARIFICATION_FILES || value.context.files.some((file) => {
+        if (typeof file !== "string" || !file.trim() || file.length > MAX_CLARIFICATION_PATH_CHARS || /[\0\r\n]/.test(file)) return true;
+        const normalized = file.replaceAll("\\", "/");
+        return normalized.startsWith("/") || /^[A-Za-z]:\//.test(normalized) || normalized.split("/").some((part) => !part || part === "." || part === "..");
+      })) {
+        return { kind: "error", error: `clarification context.files must contain at most ${MAX_CLARIFICATION_FILES} bounded repository-relative paths` };
+      }
+      context = { files: [...value.context.files] };
+    } else {
+      context = {};
+    }
+  }
+  let options;
+  if (value.options !== undefined) {
+    if (!Array.isArray(value.options) || value.options.length < 2 || value.options.length > MAX_CLARIFICATION_OPTIONS || value.options.some((option) =>
+      !option || typeof option !== "object" || Array.isArray(option) ||
+      typeof option.id !== "string" || !SAFE_CLARIFICATION_ID.test(option.id) ||
+      typeof option.label !== "string" || !option.label.trim() || option.label.length > MAX_CLARIFICATION_OPTION_LABEL_CHARS)) {
+      return { kind: "error", error: `clarification options must contain 2-${MAX_CLARIFICATION_OPTIONS} objects with bounded id and label strings` };
+    }
+    const ids = value.options.map((option) => option.id);
+    if (new Set(ids).size !== ids.length) {
+      return { kind: "error", error: "clarification option ids must be unique" };
+    }
+    if (value.recommended !== undefined && (!ids.includes(value.recommended))) {
+      return { kind: "error", error: "clarification recommended must match an option id" };
+    }
+    options = value.options.map(({ id, label }) => ({ id, label }));
+  } else if (value.recommended !== undefined) {
+    return { kind: "error", error: "clarification recommended requires options" };
+  }
+  for (const field of ["reason", "impact"]) {
+    if (value[field] !== undefined && (typeof value[field] !== "string" || !value[field].trim() || value[field].length > MAX_CLARIFICATION_DETAIL_CHARS)) {
+      return { kind: "error", error: `clarification ${field} must be a non-empty string no longer than ${MAX_CLARIFICATION_DETAIL_CHARS} characters when present` };
+    }
+  }
+  return {
+    kind: "request",
+    clarification: {
+      schema: value.schema,
+      id: value.id,
+      category: value.category,
+      question: value.question,
+      ...(context !== undefined ? { context } : {}),
+      ...(options !== undefined ? { options } : {}),
+      ...(value.recommended !== undefined ? { recommended: value.recommended } : {}),
+      ...(value.reason !== undefined ? { reason: value.reason } : {}),
+      ...(value.impact !== undefined ? { impact: value.impact } : {}),
+    },
+  };
+}
+
+function parseCursorClarification(resultMessage, lastAssistantMessage) {
+  const resultParsed = parseClarification(resultMessage);
+  if (resultParsed.kind !== "error" || !lastAssistantMessage) return resultParsed;
+  const markerCount = resultMessage.split(CLARIFICATION_MARKER).length - 1;
+  const assistantParsed = parseClarification(lastAssistantMessage);
+  // Cursor's result event can aggregate earlier progress prose with the final
+  // assistant message. Accept that runtime shape only when the final assistant
+  // message is itself the exact envelope, the aggregate ends with it, and the
+  // entire aggregate contains one marker. This keeps trailing prose and
+  // multiple-envelope runs fail-closed.
+  if (markerCount === 1 && resultMessage.endsWith(lastAssistantMessage) && assistantParsed.kind === "request") {
+    return assistantParsed;
+  }
+  return resultParsed;
+}
+
 function winq(value) {
   // shell:true on win32 (needed for the cursor-agent.cmd shim) doesn't quote
   // args, so a path with spaces (C:\Users\First Last\...) would split, and a
@@ -432,6 +555,7 @@ function makeResultWriter(opts, version, run) {
       model: opts.model,
       readOnly: opts.readOnly,
       force: opts.force && !opts.readOnly,
+      ...(opts.clarifications ? { clarifications: true } : {}),
       sandbox: opts.sandbox,
       resumed: Boolean(opts.resumeLast || opts.session),
       cursorAgentVersion: version,
@@ -535,26 +659,41 @@ function dispatchToCursor(opts, brief, run, writeResult) {
     ? spawn(["cursor-agent", ...argv].join(" "), { cwd: opts.cd, stdio: ["pipe", "pipe", "pipe"], shell: true })
     : spawn("cursor-agent", argv, { cwd: opts.cd, stdio: ["pipe", "pipe", "pipe"], detached: true });
 
-  let sessionId = null;
+  let initSessionId = null;
+  let resultSessionId = null;
+  const trustedSessionIds = new Set();
   let resolvedModel = null;
   let permissionMode = null;
   let usage = null;
   let resultMessage = null;
   let resultIsError = false;
   const textChunks = [];
+  let lastAssistantMessage = null;
   const stderrTail = [];
   const scan = makeEventScanner((event) => {
-    if (typeof event.session_id === "string") sessionId = event.session_id;
     if (event.type === "system" && event.subtype === "init") {
+      if (typeof event.session_id === "string" && SAFE_SESSION.test(event.session_id)) {
+        initSessionId = event.session_id;
+        trustedSessionIds.add(event.session_id);
+      }
       if (typeof event.model === "string") resolvedModel = event.model;
       if (typeof event.permissionMode === "string") permissionMode = event.permissionMode;
     }
     if (event.type === "assistant" && event.message && Array.isArray(event.message.content)) {
+      const messageChunks = [];
       for (const part of event.message.content) {
-        if (part && part.type === "text" && typeof part.text === "string") textChunks.push(part.text);
+        if (part && part.type === "text" && typeof part.text === "string") {
+          textChunks.push(part.text);
+          messageChunks.push(part.text);
+        }
       }
+      if (messageChunks.length > 0) lastAssistantMessage = messageChunks.join("\n\n");
     }
     if (event.type === "result") {
+      if (typeof event.session_id === "string" && SAFE_SESSION.test(event.session_id)) {
+        resultSessionId = event.session_id;
+        trustedSessionIds.add(event.session_id);
+      }
       if (typeof event.result === "string") resultMessage = event.result;
       if (event.is_error === true) resultIsError = true;
       if (event.usage && typeof event.usage === "object") usage = event.usage;
@@ -594,6 +733,7 @@ function dispatchToCursor(opts, brief, run, writeResult) {
     if (message) writeFileSync(run.finalPath, message, "utf8");
     return message;
   };
+  const capturedSessionId = () => resultSessionId || initSessionId;
 
   let settled = false;
   let watchdogFired = false;
@@ -626,7 +766,7 @@ function dispatchToCursor(opts, brief, run, writeResult) {
         status: "aborted",
         exitCode: 128 + (constants.signals[sig] || 15),
         signal: sig,
-        sessionId,
+        sessionId: capturedSessionId(),
         resolvedModel,
         permissionMode,
         usage,
@@ -659,7 +799,7 @@ function dispatchToCursor(opts, brief, run, writeResult) {
       status: "failed",
       exitCode: 1,
       signal: null,
-      sessionId,
+      sessionId: capturedSessionId(),
       resolvedModel,
       permissionMode,
       usage,
@@ -685,19 +825,34 @@ function dispatchToCursor(opts, brief, run, writeResult) {
     // is_error true is failed even on exit 0.
     const succeeded = code === 0 && !watchdogFired && !resultIsError;
     const mapped = code ?? (constants.signals[signal] ? 128 + constants.signals[signal] : 1);
-    const exitCode = succeeded ? 0 : mapped === 0 ? 1 : mapped;
+    const finalMessage = assembleFinal();
+    const parsedClarification = succeeded && opts.clarifications
+      ? parseCursorClarification(finalMessage, lastAssistantMessage)
+      : { kind: "none" };
+    const sessionId = capturedSessionId();
+    const mismatchedClarificationSession = parsedClarification.kind === "request" && trustedSessionIds.size > 1;
+    const missingClarificationSession = parsedClarification.kind === "request" && !sessionId;
+    const protocolFailed = parsedClarification.kind === "error" || missingClarificationSession || mismatchedClarificationSession;
+    const needsInput = parsedClarification.kind === "request" && !missingClarificationSession && !mismatchedClarificationSession;
+    const exitCode = succeeded && !protocolFailed ? 0 : mapped === 0 ? 1 : mapped;
     const touched = gitTouchedFiles(opts.cd);
     const result = writeResult({
-      status: succeeded ? "completed" : watchdogFired ? "timeout" : "failed",
+      status: protocolFailed ? "failed" : needsInput ? "needs_input" : succeeded ? "completed" : watchdogFired ? "timeout" : "failed",
       exitCode,
       signal: signal ?? null,
       sessionId,
       resolvedModel,
       permissionMode,
       usage,
-      finalMessage: assembleFinal(),
+      finalMessage,
       touchedFiles: touched,
-      ...(succeeded ? {} : { stderrTail: stderrTail.slice(-20) }),
+      ...(succeeded && !protocolFailed ? {} : { stderrTail: stderrTail.slice(-20) }),
+      ...(needsInput ? { clarification: parsedClarification.clarification } : {}),
+      ...(protocolFailed ? { error: missingClarificationSession
+        ? "invalid clarification protocol: cursor-agent emitted a clarification request without a session id; the run cannot be resumed safely"
+        : mismatchedClarificationSession
+          ? "invalid clarification protocol: trusted cursor-agent events reported different session ids; refusing an ambiguous resume target"
+        : `invalid clarification protocol: ${parsedClarification.error}` } : {}),
       ...(watchdogFired ? { error: `cursor-agent did not finish within --timeout ${opts.timeout}; killed by the relay watchdog` } : {}),
       ...(resultIsError && !watchdogFired ? { error: "cursor-agent reported an error result (is_error: true in its result event)" } : {}),
     });
@@ -744,6 +899,7 @@ function printSummary(result, resultPath) {
   if (result.readOnly) lines.push("mode: read-only (plan)");
   if (result.resolvedModel) lines.push(`model: ${result.resolvedModel}${result.permissionMode ? `  ·  permission mode: ${result.permissionMode}` : ""}`);
   if (result.sessionId) lines.push(`session id (resume with: --session ${result.sessionId}): ${result.sessionId}`);
+  if (result.status === "needs_input") lines.push(`clarification: ${result.clarification.id} (${result.clarification.category}) — answer, then resume this exact session`);
   const touched = result.touchedFiles;
   if (touched === null) {
     lines.push("touched files: git unavailable — inspect the working tree directly");

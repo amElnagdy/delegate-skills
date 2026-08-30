@@ -80,6 +80,21 @@ A resumed run carries the same autonomy flags as a fresh one — write-capable w
 default, write-capable without automatic command approval under `--no-force`, or plan mode under
 `--read-only`. Confirm `touchedFiles` after every fresh or resumed run.
 
+## Clarification: decide before resuming
+
+When an opted-in run returns `needs_input`, it has paused rather than completed. Inspect the
+structured `clarification`, its cited files, and any partial diff. Decide only when the brief,
+repository, and architecture evidence support it; otherwise obtain the human's decision. Do not let
+the implementer choose merely because resuming is convenient.
+
+Preserve the working tree and the first run's artifacts. Put the
+`DELEGATE_CLARIFICATION_ANSWER` envelope and any new constraints in a delta brief, then resume the
+exact `sessionId` with `--clarifications --session <id>`. Use a separate `--out-dir` so the question
+and answer remain auditable. Multiple rounds repeat this cycle one question at a time.
+
+The full envelope, decision policy, and failure behavior are in
+[dispatch-and-poll.md](dispatch-and-poll.md#clarification-protocol).
+
 ## Surface, do not absorb
 
 The human opted into delegation, so committing verified, gate-passing work is the contract. Keep them
