@@ -20,6 +20,7 @@ import { runAider } from "./aider.mjs";
 import { runCopilot } from "./copilot.mjs";
 import { runCommandcode } from "./commandcode.mjs";
 import { runZcode } from "./zcode.mjs";
+import { runDsh } from "./dsh.mjs";
 
 export const runners = [
   ["package-shape", runPackageShape],
@@ -43,5 +44,6 @@ export const runners = [
   ["timeout-tree", runTimeoutTree],
   ["abort", runAbort],
   ["zcode", runZcode],
+  ["dsh", runDsh],
   ["delegate-setup", runDelegateSetup],
 ];
