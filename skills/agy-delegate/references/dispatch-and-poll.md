@@ -42,6 +42,7 @@ Options:
 | `--dangerously-skip-permissions` | Pass Antigravity's permission-bypass flag; mutually exclusive with `--read-only`. Never use this unless the human explicitly accepts it. |
 | `--print-timeout <duration>` | Timeout agy itself applies to print mode (default: `30m`). |
 | `--timeout <dur>` | Relay-side watchdog (e.g. `30m`); overrides the default of `--print-timeout` plus a 60s grace. On expiry the agy process tree is killed and `result.json` gets `status: "timeout"`. Set it explicitly when agy may hang past its own print timeout. Malformed, zero, and out-of-range durations are rejected; the maximum is `596h31m23s`. |
+| `--stall-timeout <dur>` | Activity-based stall detector (default: `5m`). Monitors the agy log for `streamGenerateContent` activity. If no generation appears for this duration while the process is alive, the run is killed and `result.json` gets `status: "stalled"`. Distinct from `--timeout`: a stalled run usually has usable work in the tree; a timeout usually means the brief was too large. Set to `off` to disable. Malformed durations are rejected. |
 | `--add-dir <dir>` | Add an extra workspace directory. Repeatable; relative paths resolve against `--cd`. Fresh runs always add the `--cd` repo (absolute path) as a workspace dir. Edits inside extra workspaces are not reported in `touchedFiles`. |
 | `--out-dir <dir>` | Where artifacts go (default: a fresh dir under the system temp dir). |
 
@@ -54,7 +55,7 @@ touched-files report shows only Antigravity's edits and nothing of the helper's 
 
 - `schema` - the result-format version (currently `delegate-relay.result.v1`)
 - `tool` - `agy`
-- `status` - `completed` | `failed` | `timeout` | `aborted` | `agy_unavailable`
+- `status` - `completed` | `failed` | `timeout` | `stalled` | `aborted` | `agy_unavailable`
 - `exitCode` - mirrors Antigravity's exit code; `128` plus the signal number if the child was killed; `127` if `agy` is not on PATH; on a `timeout` the relay forces a non-zero code even when the child exited `0` after the watchdog's SIGTERM
 - `signal` - the signal that killed the child, otherwise `null`
 - `agyVersion` - inferred from `agy changelog` when available
@@ -96,6 +97,12 @@ process has exited and `result.json` is written.
 - **`status: timeout`:** the relay watchdog killed the run. Inspect `error` to see whether the selected
   limit was explicit `--timeout` or the derived `--print-timeout` plus 60s grace. The working tree may
   hold a half-applied change — inspect it before changing that limit, reducing the brief, or resuming.
+- **`status: stalled`:** the relay's activity-based stall detector killed the run after
+  `--stall-timeout` (default 5m) with no `streamGenerateContent` activity in the agy log. This means
+  agy stopped generating (e.g., after a TCP connection reset) but the process stayed alive doing auth
+  handshakes. The working tree likely holds most of the work — inspect the diff, finish the remaining
+  edits, and re-dispatch with `--stall-timeout off` or a longer value if the task needs more generation
+  time. A stalled run is usually recoverable; a timeout usually means the brief was too large.
 - **`status: aborted`:** the relay itself was killed (its parent's timeout, a stopped task, a
   closed terminal) and forwarded the kill to agy. The result is written before the relay exits;
   inspect the working tree before re-dispatching. On native Windows a hard kill of the relay is

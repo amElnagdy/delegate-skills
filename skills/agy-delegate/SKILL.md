@@ -72,7 +72,9 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 # reasoning effort (low, medium, high): add --effort high
 # read-only (plan mode — no edits):     add --read-only
 # enable Antigravity terminal sandbox:  add --sandbox
-# resume the most recent conversation:  add --resume-last  (delta brief only)
+# resume the most recent conversation:  add --resume-last  (delta only)
+# stall timeout (default 5m):           add --stall-timeout 10m
+# disable stall detection:              add --stall-timeout off
 # see all options:                      node .../relay.mjs --help
 ```
 
