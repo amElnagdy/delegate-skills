@@ -32,6 +32,7 @@ import {
   CLAUDE_EFFORT,
   COPILOT_EFFORT,
   OMP_THINKING,
+  MUSE_EFFORT,
   CODEX_SANDBOX,
   CONFIG_VERSION,
   GROK_SANDBOX,
@@ -169,6 +170,12 @@ function validateLane(name, lane, label) {
       return `${label}: lane ${name}.model must be provider/model (e.g. opencode/grok)`;
     }
   }
+  if (impl.key === "kilo" && typeof lane.model === "string" && lane.model) {
+    const separator = lane.model.indexOf("/");
+    if (separator <= 0 || !/[^/]/.test(lane.model.slice(separator + 1))) {
+      return `${label}: lane ${name}.model must be provider/model (e.g. kilo/stepfun/step-3.7-flash)`;
+    }
+  }
   const autonomyError = validateAutonomyConsistency(impl.key, lane, name, label);
   if (autonomyError) return autonomyError;
   return null;
@@ -231,6 +238,9 @@ function validateDialValue(implementer, field, value, laneName, label) {
     if (implementer === "omp" && !OMP_THINKING.includes(value)) {
       return `${label}: lane ${laneName}.effort must be one of: ${OMP_THINKING.join(", ")}`;
     }
+    if (implementer === "muse" && !MUSE_EFFORT.includes(value)) {
+      return `${label}: lane ${laneName}.effort must be one of: ${MUSE_EFFORT.join(", ")}`;
+    }
     if (
       (implementer === "codex" || implementer === "grok" || implementer === "commandcode") &&
       !/^[a-z][a-z0-9-]*$/i.test(value)
@@ -279,6 +289,9 @@ function validateModelOrProvider(implementer, field, value, laneName, label) {
   if (implementer === "claude") {
     pattern = MODEL_TOKEN.claude;
     hint = "letters, digits, . _ : @ / [ ] -";
+  } else if (implementer === "kilo") {
+    pattern = MODEL_TOKEN.kilo;
+    hint = "letters, digits, . _ : / ~ -";
   } else if (implementer === "cursor") {
     pattern = MODEL_TOKEN.cursor;
     hint = "letters, digits, . _ : @ / [ ] , = -";

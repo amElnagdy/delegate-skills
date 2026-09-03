@@ -10,7 +10,7 @@
  *   { "lane", "source", "implementer", "skill", "dials": { ...relay-native fields } }
  *
  * `dials` uses field names the target relay understands (e.g. grok gets `autonomy`,
- * opencode gets `agent` for read-only). Relays apply dials only where a CLI flag
+ * opencode and kilo get `agent` for read-only). Relays apply dials only where a CLI flag
  * did not already set the field.
  *
  * Node built-ins only.
@@ -97,7 +97,7 @@ function normalizeDials(implementerKey, raw) {
     if (dials.sandbox === undefined) dials.sandbox = "read-only";
     delete dials.readOnly;
   }
-  if (implementerKey === "opencode" && dials.readOnly === true) {
+  if ((implementerKey === "opencode" || implementerKey === "kilo") && dials.readOnly === true) {
     dials.agent = "plan";
     delete dials.readOnly;
   }

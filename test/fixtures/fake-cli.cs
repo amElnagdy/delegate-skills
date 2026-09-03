@@ -100,6 +100,35 @@ class FakeCli {
       Console.WriteLine("{\"type\":\"agent_end\",\"messages\":[]}");
       return 0;
     }
+    if (mode == "kilo-success" || mode == "kilo-error") {
+      var brief = Console.In.ReadToEnd() ?? "";
+      var failed = mode == "kilo-error";
+      var argsFile = Environment.GetEnvironmentVariable("SMOKE_ARGS_FILE");
+      if (!String.IsNullOrEmpty(argsFile)) {
+        var payload = new System.Text.StringBuilder();
+        payload.Append("{\"args\":[");
+        for (int i = 0; i < args.Length; i++) {
+          if (i > 0) payload.Append(",");
+          payload.Append(JsonString(args[i]));
+        }
+        payload.Append("],\"brief\":");
+        payload.Append(JsonString(brief));
+        payload.Append("}");
+        File.WriteAllText(argsFile, payload.ToString());
+      }
+      Console.WriteLine("{\"type\":\"text\",\"sessionID\":\"ses_kilo-1\",\"part\":{\"id\":\"prt_1\",\"type\":\"text\",\"text\":\"" + (failed ? "fake kilo failed" : "fake kilo completed") + "\"}}");
+      Console.WriteLine("{\"type\":\"step_finish\",\"sessionID\":\"ses_kilo-1\",\"part\":{\"cost\":" + (failed ? "0" : "0.001") + "}}");
+      return failed ? 1 : 0;
+    }
+    if (mode == "muse-success" || mode == "muse-unfinished") {
+      var argsFile = Environment.GetEnvironmentVariable("SMOKE_ARGS_FILE");
+      if (!String.IsNullOrEmpty(argsFile)) File.WriteAllLines(argsFile, args);
+      Console.WriteLine("{\"payload_type\":\"session.run.linked\",\"stream\":{\"kind\":\"session\",\"id\":\"01a06628-aaaa-bbbb-cccc-ddddeeeeffff\"},\"payload\":{}}");
+      if (mode == "muse-success") {
+        Console.WriteLine("{\"payload_type\":\"run.terminal.completed\",\"payload\":{\"kind\":\"run_terminal\",\"terminal\":\"completed\",\"text\":\"fake muse completed\"}}");
+      }
+      return 0;
+    }
     var psi = new ProcessStartInfo {
       FileName = Environment.GetEnvironmentVariable("SMOKE_NODE"),
       Arguments = "-e setInterval(()=>{},1000)",

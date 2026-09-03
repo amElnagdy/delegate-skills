@@ -240,6 +240,8 @@ if (observation === "models") {
         tests: { implementer: "grok", effort: "medium" },
         "codex-review": { implementer: "codex", readOnly: true },
         "opencode-review": { implementer: "opencode", model: "opencode/grok", readOnly: true },
+        "kilo-review": { implementer: "kilo", readOnly: true },
+        "muse-review": { implementer: "muse", readOnly: true, effort: "high" },
       },
     };
     const goodFile = join(cfgRepo, "lanes.json");
@@ -274,6 +276,68 @@ if (observation === "models") {
       env: process.env,
     });
     h.check("config validate requires provider/model for opencode", rejectBareModel.status === 2);
+
+    const bareKilo = {
+      version: "delegate-fleet.v1",
+      lanes: { feature: { implementer: "kilo" } },
+    };
+    const bareKiloFile = join(cfgRepo, "bare-kilo.json");
+    writeFileSync(bareKiloFile, `${JSON.stringify(bareKilo)}\n`);
+    const acceptBareKilo = spawnSync(process.execPath, [join(setupDir, "config.mjs"), "validate", bareKiloFile], {
+      encoding: "utf8",
+      env: process.env,
+    });
+    h.check("config validate allows kilo without model", acceptBareKilo.status === 0);
+
+    const kiloTilde = {
+      version: "delegate-fleet.v1",
+      lanes: { feature: { implementer: "kilo", model: "kilo/~anthropic/claude-fable-latest" } },
+    };
+    const kiloTildeFile = join(cfgRepo, "kilo-tilde.json");
+    writeFileSync(kiloTildeFile, `${JSON.stringify(kiloTilde)}\n`);
+    const acceptKiloTilde = spawnSync(process.execPath, [join(setupDir, "config.mjs"), "validate", kiloTildeFile], {
+      encoding: "utf8",
+      env: process.env,
+    });
+    h.check("config validate allows kilo model ids with ~", acceptKiloTilde.status === 0);
+
+    const kiloBareModel = {
+      version: "delegate-fleet.v1",
+      lanes: { feature: { implementer: "kilo", model: "grok" } },
+    };
+    const kiloBareModelFile = join(cfgRepo, "kilo-bare-model.json");
+    writeFileSync(kiloBareModelFile, `${JSON.stringify(kiloBareModel)}\n`);
+    const rejectKiloBareModel = spawnSync(process.execPath, [join(setupDir, "config.mjs"), "validate", kiloBareModelFile], {
+      encoding: "utf8",
+      env: process.env,
+    });
+    h.check("config validate requires provider/model when kilo sets model", rejectKiloBareModel.status === 2);
+
+    const museProvider = {
+      version: "delegate-fleet.v1",
+      lanes: { feature: { implementer: "muse", provider: "echo" } },
+    };
+    const museProviderFile = join(cfgRepo, "muse-provider.json");
+    writeFileSync(museProviderFile, `${JSON.stringify(museProvider)}\n`);
+    const rejectMuseProvider = spawnSync(process.execPath, [join(setupDir, "config.mjs"), "validate", museProviderFile], {
+      encoding: "utf8",
+      env: process.env,
+    });
+    h.check("config validate rejects provider on muse",
+      rejectMuseProvider.status === 2 && /does not support provider/.test(rejectMuseProvider.stderr));
+
+    const museEffort = {
+      version: "delegate-fleet.v1",
+      lanes: { feature: { implementer: "muse", effort: "banana" } },
+    };
+    const museEffortFile = join(cfgRepo, "muse-effort.json");
+    writeFileSync(museEffortFile, `${JSON.stringify(museEffort)}\n`);
+    const rejectMuseEffort = spawnSync(process.execPath, [join(setupDir, "config.mjs"), "validate", museEffortFile], {
+      encoding: "utf8",
+      env: process.env,
+    });
+    h.check("config validate rejects unknown muse effort",
+      rejectMuseEffort.status === 2 && /none, minimal, low/.test(rejectMuseEffort.stderr));
 
     for (const [model, boundary] of [
       ["opencode/", "after"],
@@ -773,6 +837,79 @@ if (observation === "models") {
         !opencodeResumeArgs.includes("--auto") &&
         h.result(opencodeResumeOut).agent === "plan" &&
         h.result(opencodeResumeOut).resumed === true);
+
+    const kiloReviewResolve = spawnSync(
+      process.execPath,
+      [join(setupDir, "lane.mjs"), "resolve", "--cwd", cfgRepo, "--lane", "kilo-review", "--implementer", "kilo"],
+      { encoding: "utf8", env: process.env },
+    );
+    let kiloReviewJson = null;
+    try {
+      kiloReviewJson = JSON.parse(kiloReviewResolve.stdout);
+    } catch {
+      kiloReviewJson = null;
+    }
+    h.check("lane resolve: kilo readOnly → agent plan",
+      kiloReviewResolve.status === 0 &&
+        kiloReviewJson?.dials?.agent === "plan" &&
+        kiloReviewJson?.dials?.readOnly === undefined);
+
+    const kiloReviewOut = join(cfgRepo, "out-lane-kilo-review");
+    const kiloReviewArgsFile = join(cfgRepo, "args-lane-kilo-review.json");
+    mkdirSync(kiloReviewOut, { recursive: true });
+    const kiloReviewRun = spawnSync(
+      process.execPath,
+      [
+        h.relayPath("kilo"),
+        "--brief", laneBrief,
+        "--cd", cfgRepo,
+        "--out-dir", kiloReviewOut,
+        "--lane", "kilo-review",
+      ],
+      {
+        encoding: "utf8",
+        env: { ...fleetEnv, SMOKE_MODE: "kilo-success", SMOKE_ARGS_FILE: kiloReviewArgsFile },
+      },
+    );
+    const kiloReviewArgs = existsSync(kiloReviewArgsFile)
+      ? JSON.parse(readFileSync(kiloReviewArgsFile, "utf8")).args
+      : [];
+    h.check("relay --lane: kilo read-only lane selects plan without --auto",
+      kiloReviewRun.status === 0 &&
+        h.pair(kiloReviewArgs, "--agent", "plan") &&
+        !kiloReviewArgs.includes("--auto") &&
+        h.result(kiloReviewOut).agent === "plan");
+
+    const museReviewOut = join(cfgRepo, "out-lane-muse-review");
+    const museReviewArgsFile = join(cfgRepo, "args-lane-muse-review.json");
+    mkdirSync(museReviewOut, { recursive: true });
+    const museReviewRun = spawnSync(
+      process.execPath,
+      [
+        h.relayPath("muse"),
+        "--brief", laneBrief,
+        "--cd", cfgRepo,
+        "--out-dir", museReviewOut,
+        "--lane", "muse-review",
+      ],
+      {
+        encoding: "utf8",
+        env: { ...fleetEnv, SMOKE_MODE: "muse-success", SMOKE_ARGS_FILE: museReviewArgsFile },
+      },
+    );
+    const museReviewArgs = existsSync(museReviewArgsFile)
+      ? (h.WIN
+        ? readFileSync(museReviewArgsFile, "utf8").split(/\r?\n/).filter(Boolean)
+        : JSON.parse(readFileSync(museReviewArgsFile, "utf8")))
+      : [];
+    h.check("relay --lane: muse read-only lane adds disable-write and disable-shell",
+      museReviewRun.status === 0 &&
+        museReviewArgs.includes("--disable-write") &&
+        museReviewArgs.includes("--disable-shell") &&
+        museReviewArgs.includes("--disable-approval") &&
+        !museReviewArgs.includes("--yolo") &&
+        h.pair(museReviewArgs, "--reasoning-effort", "high") &&
+        h.result(museReviewOut).readOnly === true);
 
     const wrongSkill = spawnSync(
       process.execPath,

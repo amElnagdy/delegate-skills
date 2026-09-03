@@ -151,6 +151,21 @@ export const IMPLEMENTERS = Object.freeze([
     winShell: true,
   },
   {
+    key: "kilo",
+    skill: "kilo-delegate",
+    binary: "kilo",
+    versionArgs: ["--version"],
+    // Exits 0 with an empty list too; a "●" row is the only auth signal, so a clean run
+    // without one is the logged-out state, not an ambiguous miss.
+    authProbe: { args: ["auth", "list"], successPattern: /^●\s/m, missMeansFalse: true },
+    modelProbe: { args: ["models"], format: "lines" },
+    // No usage probe: session files would mean opening conversation content.
+    usageProbe: null,
+    // Kilo reasoning intensity is --variant, not --effort. Model is optional.
+    supports: ["model", "variant", "timeout", "readOnly"],
+    winShell: false,
+  },
+  {
     key: "agy",
     skill: "agy-delegate",
     binary: "agy",
@@ -204,6 +219,27 @@ export const IMPLEMENTERS = Object.freeze([
       match: /^session_/,
     },
     supports: ["model", "timeout"],
+    winShell: false,
+  },
+  {
+    key: "muse",
+    skill: "muse-delegate",
+    binary: "muse",
+    versionArgs: ["--version"],
+    // No status command that is safe to parse; `muse login` / META_API_KEY are the
+    // documented auth paths, and auth.json must not be opened.
+    authProbe: null,
+    modelProbe: null,
+    // sessions/<yyyy>/<mm>/<dd>/<id>/ — one directory per session; session.jsonl
+    // inside is conversation content and is never opened.
+    usageProbe: {
+      homeSubdir: ".local/share/muse",
+      path: ["sessions", "*", "*", "*"],
+      entry: "dir",
+      match: /./,
+    },
+    // --provider echo|meta is relay-only, not a fleet dial.
+    supports: ["model", "effort", "timeout", "readOnly"],
     winShell: false,
   },
   {
@@ -394,6 +430,7 @@ export const CLAUDE_EFFORT = Object.freeze(["low", "medium", "high", "xhigh", "m
 export const AGY_EFFORT = Object.freeze(["low", "medium", "high"]);
 export const COPILOT_EFFORT = Object.freeze(["low", "medium", "high", "xhigh", "max"]);
 export const OMP_THINKING = Object.freeze(["off", "auto", "minimal", "low", "medium", "high", "xhigh", "max"]);
+export const MUSE_EFFORT = Object.freeze(["none", "minimal", "low", "medium", "high", "xhigh", "ultra"]);
 export const CODEX_SANDBOX = Object.freeze(["read-only", "workspace-write", "danger-full-access"]);
 export const GROK_SANDBOX = Object.freeze(["workspace", "read-only", "off"]);
 export const QODER_PERMISSION = Object.freeze([
@@ -425,6 +462,8 @@ export const MODEL_TOKEN = Object.freeze({
   cursor: /^[A-Za-z0-9][A-Za-z0-9._:@\/\[\]\,=-]*$/,
   /** Keep in lockstep with grok/pi/codex/commandcode shell-safe tokens (also used for opencode). */
   shellSafe: /^[A-Za-z0-9][A-Za-z0-9._:\/-]*$/,
+  /** Keep in lockstep with kilo-delegate SAFE_MODEL (catalog ids include `~`). */
+  kilo: /^[A-Za-z0-9][A-Za-z0-9._:\/~-]*$/,
 });
 
 export const CONFIG_VERSION = "delegate-fleet.v1";

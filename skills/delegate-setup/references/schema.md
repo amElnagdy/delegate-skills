@@ -53,7 +53,9 @@ later-edited project config fails closed until it is reviewed and written again 
 | `opencode` | opencode-delegate | `opencode` | model, **variant**, timeout, readOnly |
 | `agy` | agy-delegate | `agy` | model, effort, timeout, readOnly |
 | `grok` | grok-delegate | `grok` | model, effort, sandbox, timeout, readOnly |
+| `kilo` | kilo-delegate | `kilo` | model, **variant**, timeout, readOnly |
 | `kimi` | kimi-delegate | `kimi` | model, timeout |
+| `muse` | muse-delegate | `muse` | model, effort, timeout, readOnly |
 | `qoder` | qoder-delegate | `qodercli` | model, permissionMode, timeout, readOnly |
 | `vibe` | vibe-delegate | `vibe` | timeout, readOnly |
 | `cursor` | cursor-delegate | `cursor-agent` | model, force, timeout, readOnly |
@@ -71,6 +73,8 @@ the CLI's own config file — so `model` is not a dial for `zcode` lanes. ZCode 
 inside the desktop app rather than on PATH, so discovery falls back to the installed app bundle.
 
 OpenCode uses `variant` for reasoning intensity, not `effort`. Do not write `effort` on an `opencode` lane.
+Kilo also uses `variant`, not `effort`. Kilo `model` is optional; when set it must be `provider/model`, and catalog ids may include `~`.
+Muse `effort` is `--reasoning-effort` (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `ultra`). Muse `--provider echo|meta` is relay-only — do not write `provider` on a `muse` lane.
 Oh My Pi (`omp`) uses the lane `effort` dial for omp's `--thinking` (`off`, `auto`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`). Do not write `thinking` as a lane field.
 OpenCode lanes **require** `model` in `provider/model` form, with a non-empty provider before the first
 `/` and at least one non-`/` character after it. Cline accepts `provider` and `model` as separate
@@ -81,7 +85,8 @@ Boolean dials: `readOnly`, `force`. All other dials are non-empty strings. Durat
 Do not combine `readOnly: true` with a write-capable `sandbox` / `permissionMode` / `force`.
 `model` / `provider` / OpenCode `variant` must match the bound relay’s token rules (e.g. Claude
 rejects spaces; Grok/Pi/Oh My Pi/OpenCode/Codex/Command Code use a shell-safe token set — Windows `shell:true`
-launches, and Oh My Pi's flag-injection defense even without a shell).
+launches, and Oh My Pi's flag-injection defense even without a shell). Kilo model tokens additionally
+allow `~`.
 
 ## Helpers
 
