@@ -6,7 +6,7 @@
  * capture the run, and write a structured result the orchestrating agent can
  * review. The orchestrator runs this one command and reads the result JSON —
  * every Kilo-specific mechanic lives in here, which keeps the skill
- * orchestrator-agnostic. Verified against kilo CLI v7.4.22.
+ * orchestrator-agnostic.
  *
  * Trust posture: relay.mjs itself makes no network calls, reads or writes no
  * credentials, and sends no telemetry; it has no dependencies (Node built-ins
@@ -68,8 +68,8 @@
  */
 
 import {spawn, execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync, renameSync, readFileSync, existsSync, appendFileSync } from "node:fs";
-import {join, resolve, basename, dirname, delimiter } from "node:path";
+import { mkdirSync, writeFileSync, renameSync, readFileSync, existsSync, appendFileSync, rmSync } from "node:fs";
+import {join, resolve, basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { constants, tmpdir } from "node:os";
 import { StringDecoder } from "node:string_decoder";
@@ -330,39 +330,21 @@ function versionProbeTimeout(opts) {
   return timeoutMs === null ? VERSION_PROBE_TIMEOUT_MS : Math.min(timeoutMs, VERSION_PROBE_TIMEOUT_MS);
 }
 
-function kiloNeedsShell() {
-  if (process.platform !== "win32") return false;
-  for (const dir of (process.env.PATH || "").split(delimiter)) {
-    if (!dir) continue;
-    if (existsSync(join(dir, "kilo.exe"))) return false;
-    if (existsSync(join(dir, "kilo.cmd")) || existsSync(join(dir, "kilo.bat"))) return true;
-  }
-  return false;
-}
-
 function kiloVersion(probeTimeoutMs) {
   try {
-    // Native kilo.exe (and the Windows smoke fake) launch without a shell.
-    // A .cmd/.bat shim still needs shell:true — Node's CreateProcess never
-    // auto-appends .cmd (see gitTouchedFiles, which must stay unshell'd).
+    // Native kilo.exe (and the Windows smoke fake). Never shell:true — winShell is
+    // false, and --dir / --session ride argv unquoted.
     const version = execFileSync("kilo", ["--version"], {
       encoding: "utf8",
-      shell: kiloNeedsShell(),
       timeout: probeTimeoutMs,
       killSignal: "SIGKILL",
     }).trim();
     return { version: version || "unknown", error: null };
   } catch (error) {
     if (error?.code === "ENOENT") return { version: null, error: null };
-    // shell:true routes a missing binary through cmd.exe, which reports it as a non-zero
-    // exit rather than ENOENT; that is still "not installed", not a broken install.
-    if (process.platform === "win32" &&
-        /not recognized as an internal or external command/i.test(String(error?.stderr || ""))) {
-      return { version: null, error: null };
-    }
-    // Anything else — a hung probe we killed, or a real non-zero exit — means kilo is
-    // installed but not usable. Reporting that as "unavailable" would send the caller
-    // off to reinstall a binary that is already there.
+    // A hung probe we killed, or a real non-zero exit, means kilo is installed
+    // but not usable. Reporting that as "unavailable" would send the caller off
+    // to reinstall a binary that is already there.
     return { version: null, error };
   }
 }
@@ -426,6 +408,8 @@ function prepareRunDir(opts, brief) {
     briefPath: join(outDir, "brief.txt"),
     resultPath: join(outDir, "result.json"),
   };
+  rmSync(run.finalPath, { force: true });
+  rmSync(run.resultPath, { force: true });
   writeFileSync(run.briefPath, brief, "utf8");
   writeFileSync(run.eventsPath, "", "utf8");
   return run;
@@ -501,19 +485,13 @@ function dispatchToKilo(opts, brief, run, writeResult) {
   // is set explicitly because Kilo can resolve its project root from the
   // inherited PWD env — which spawn does NOT rewrite — so without it a run could
   // operate on the orchestrator's directory instead of opts.cd (and, with --auto
-  // on, edit it unattended). Passing the path via env, not argv, keeps it clear of
-  // shell quoting.
-  // shell:true on Windows so the kilo.cmd shim resolves (see kiloVersion).
-  // Safe: the brief is fed via child.stdin below — never argv — and argv holds only
-  // flag names, an agent enum, a model string, and a session id, with no shell
-  // metacharacters or spaceable paths.
+  // on, edit it unattended). Never shell:true: --dir is an argv value, and a
+  // shell would split spaces and reinterpret metacharacters. The brief is fed
+  // via child.stdin below — never argv.
   const child = spawn("kilo", argv, {
     cwd: opts.cd,
     env: { ...process.env, PWD: opts.cd },
     stdio: ["pipe", "pipe", "pipe"],
-    // Native binary (and the Windows smoke fake is kilo.exe). shell:true only if a
-    // resolved .cmd/.bat shim appears on PATH — Node cannot CreateProcess a .cmd.
-    shell: process.platform === "win32" && kiloNeedsShell(),
     detached: process.platform !== "win32", // POSIX: lead a new process group so killChild can fell the whole tree
   });
 

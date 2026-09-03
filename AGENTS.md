@@ -100,8 +100,8 @@ CLI flag, field, and command in the docs must match the installed implementer CL
   The `claude` and `cursor-agent` launches serialize a pre-joined
   command string through the shell on win32 for the same shim reason; `agy`, `kimi`, `kilo`, current
   `qodercli`, `vibe`, `aider`, `oz`, and `omp` installs use native binaries (pip puts a real `aider.exe` in
-  Scripts, so that launch needs no `shell:true`; `kilo` takes `shell:true` only when it resolved to a
-  `.cmd`/`.bat` shim). `muse` is UNIX-only (the upstream launcher is Darwin/Linux) and is still
+  Scripts, so that launch needs no `shell:true`). Never give `kilo` a shell — `--dir` is an argv
+  value. `muse` is UNIX-only (the upstream launcher is Darwin/Linux) and is still
   registered in the Windows contract matrix as a compiled fake; never give `muse exec` a shell — the
   brief is `--prompt-file` and `--workspace` is an argv value. The `oz` launch must never gain a shell on any
   platform: `oz agent run` takes the brief as its `--prompt` argv value (its `-f/--file` config path

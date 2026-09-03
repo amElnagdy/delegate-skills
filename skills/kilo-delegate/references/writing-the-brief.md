@@ -23,8 +23,8 @@ orchestrator**, pick one of them to fit the task in front of you.
   a cheap, fast model. A brief whose risk lives in judgment — a concurrency fix, a money or auth path,
   an ambiguous spec — wants a strong one, because the sweep's failure modes (plausible-but-wrong logic,
   swallowed errors) are exactly what a weaker model produces more of.
-- **A resumed run keeps the first run's model.** `--resume-last` / `--session` don't take `--model`; the
-  session already has one. Send only the delta brief.
+- **A resumed run keeps the first run's model unless you pass `--model`.** `--resume-last` /
+  `--session` still accept `--model`; omit it to keep the session's model. Send only the delta brief.
 
 ## The shape that works
 

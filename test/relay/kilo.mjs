@@ -137,6 +137,7 @@ for (const [mode, expectedStatus, expectedExit] of [
   ], { env: { ...process.env, PATH: "" }, encoding: "utf8" });
   h.check("kilo unavailable: structured result replaces stale artifacts",
     missing.status === 127 &&
-    h.result(outDir).status === "kilo_unavailable");
+    h.result(outDir).status === "kilo_unavailable" &&
+    !existsSync(join(outDir, "final.txt")));
 }
 }

@@ -5,7 +5,7 @@
  * Dispatch a self-contained brief to Muse Code (`muse exec`), capture the run,
  * and write a structured result the orchestrating agent can review. The
  * orchestrator runs this one command and reads the result JSON — every
- * Muse-specific mechanic lives in here. Verified against Muse Code 1.0.2.
+ * Muse-specific mechanic lives in here.
  *
  * Trust posture: relay.mjs itself makes no network calls, reads or writes no
  * credentials, and sends no telemetry; it has no dependencies (Node built-ins
