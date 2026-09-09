@@ -166,6 +166,11 @@ Every relay speaks the same `delegate-relay.result.v1` contract: `status`, `exit
 `touchedFiles`, and a session id where the CLI exposes one. Learn the loop once, swap the implementer
 freely.
 
+For repeated dispatches in one project, put stable decisions in a repository file such as `AGENTS.md`,
+`CLAUDE.md`, or `docs/PROJECT_CONTEXT.md`, then reference that file from each brief. Do not rely on an
+earlier orchestrator conversation or a stale pasted background block; update the durable context file
+when architecture decisions, API constraints, gates, or rollout rules change.
+
 You feel it when a bounded task — a migration, a mechanical refactor, a removal sweep — comes back as
 a clean diff with a structured report, and you land it after re-running the gates yourself instead of
 typing it all by hand.

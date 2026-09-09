@@ -75,6 +75,17 @@ Keep each brief to a single, bounded job. "Review this, fix what you find, updat
 suggest a roadmap" produces a muddled run; split it into separate dispatches. One brief → one Codex
 run → one commit keeps review and rollback clean, and lets a later task assume the earlier one landed.
 
+## Persistent project context
+
+For repeated dispatches in the same project, keep stable decisions in a repository file such as
+`AGENTS.md`, `CLAUDE.md`, or `docs/PROJECT_CONTEXT.md`, then reference that file in each brief. Do
+not rely on an earlier orchestrator conversation, a prior delegate run, or a stale pasted background
+block. Update the file when an architectural decision, API constraint, test command, or rollout rule
+changes, and tell the implementer exactly which sections are load-bearing for this task.
+
+Keep ephemeral run state out of that file. A failed attempt, partial diff, or review note belongs in
+the current brief or the relay artifacts; only durable project facts should become shared context.
+
 ## Premises freeze at dispatch
 
 The implementer starts from the brief's facts and there is no steering channel mid-run. Audit the

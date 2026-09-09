@@ -97,6 +97,17 @@ Turns are capped (Command Code's own default is 100; `--max-turns` changes it). 
 jobs is also the brief most likely to hit that cap and stop mid-way, reported as `stopReason:
 max_turns` with a half-finished tree.
 
+## Persistent project context
+
+For repeated dispatches in the same project, keep stable decisions in a repository file such as
+`AGENTS.md`, `CLAUDE.md`, or `docs/PROJECT_CONTEXT.md`, then reference that file in each brief. Do
+not rely on an earlier orchestrator conversation, a prior delegate run, or a stale pasted background
+block. Update the file when an architectural decision, API constraint, test command, or rollout rule
+changes, and tell the implementer exactly which sections are load-bearing for this task.
+
+Keep ephemeral run state out of that file. A failed attempt, partial diff, or review note belongs in
+the current brief or the relay artifacts; only durable project facts should become shared context.
+
 ## Premises freeze at dispatch
 
 The implementer starts from the brief's facts and there is no steering channel mid-run. Audit the

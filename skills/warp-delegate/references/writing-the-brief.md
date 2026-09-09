@@ -67,6 +67,17 @@ A brief that carries two unrelated changes produces a diff you cannot review cle
 conversation you cannot resume precisely. Split them and queue the parts — see
 [multi-task-queues.md](multi-task-queues.md).
 
+## Persistent project context
+
+For repeated dispatches in the same project, keep stable decisions in a repository file such as
+`AGENTS.md`, `CLAUDE.md`, or `docs/PROJECT_CONTEXT.md`, then reference that file in each brief. Do
+not rely on an earlier orchestrator conversation, a prior delegate run, or a stale pasted background
+block. Update the file when an architectural decision, API constraint, test command, or rollout rule
+changes, and tell the implementer exactly which sections are load-bearing for this task.
+
+Keep ephemeral run state out of that file. A failed attempt, partial diff, or review note belongs in
+the current brief or the relay artifacts; only durable project facts should become shared context.
+
 ## Delta briefs
 
 When you continue a conversation with `--conversation <id>`, Warp still holds the earlier exchange.

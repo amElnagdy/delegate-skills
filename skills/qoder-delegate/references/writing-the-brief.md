@@ -68,6 +68,17 @@ An explicit output contract makes the result reviewable even when the edits are 
 One brief -> one Qoder run -> one reviewed commit. Split mixed implementation, review, documentation,
 and roadmap requests. Resume only for rework on that same task.
 
+## Persistent project context
+
+For repeated dispatches in the same project, keep stable decisions in a repository file such as
+`AGENTS.md`, `CLAUDE.md`, or `docs/PROJECT_CONTEXT.md`, then reference that file in each brief. Do
+not rely on an earlier orchestrator conversation, a prior delegate run, or a stale pasted background
+block. Update the file when an architectural decision, API constraint, test command, or rollout rule
+changes, and tell the implementer exactly which sections are load-bearing for this task.
+
+Keep ephemeral run state out of that file. A failed attempt, partial diff, or review note belongs in
+the current brief or the relay artifacts; only durable project facts should become shared context.
+
 ## Premises freeze at dispatch
 
 Audit the brief's facts before dispatch: ownership, target branch, constraints, and any premise a

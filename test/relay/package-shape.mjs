@@ -43,6 +43,14 @@ export function runPackageShape(h) {
         readdirSync(join(skillsDir, dir, "references")).filter((f) => f.endsWith(".md")).length === REFERENCES.length,
     );
     h.check(`${name}: listed in skills.sh.json`, registered.has(dir));
+    const briefReference = readFileSync(join(skillsDir, dir, "references", "writing-the-brief.md"), "utf8");
+    h.check(
+      `${name}: brief reference covers persistent project context`,
+      briefReference.includes("## Persistent project context") &&
+        briefReference.includes("docs/PROJECT_CONTEXT.md") &&
+        briefReference.includes("earlier orchestrator conversation") &&
+        briefReference.includes("durable project facts"),
+    );
   }
   for (const dir of UTILITY_SKILLS) {
     h.check(`${dir}: directory present`, existsSync(join(skillsDir, dir)));
