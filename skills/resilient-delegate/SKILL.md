@@ -2,7 +2,6 @@
 name: resilient-delegate
 description: Delegate a coding brief through a local-first, provider-diverse fallback profile when an implementer is unavailable or capacity constrained. Use for bounded implementation work that must preserve the working diff for orchestrator review and landing.
 license: MIT
-compatibility: Requires Node 18+, Git, and one or more installed sibling delegate skills.
 metadata:
   version: 0.5.0
 ---
