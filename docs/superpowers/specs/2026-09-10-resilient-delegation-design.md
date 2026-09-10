@@ -15,7 +15,7 @@ Add a local-first delegation workflow that uses Qwen3-Coder 30B through Aider an
 
 ### Routine
 
-1. Aider: `openai/qwen3-coder:30b`, local Ollama `/v1`, whole-file edit format.
+1. Aider: `ollama_chat/qwen3-coder:30b`, native local Ollama provider, whole-file edit format.
 2. Agy: `gemini-3.8-flash-medium`, medium effort.
 3. Copilot: `auto`, medium effort, only when authenticated.
 4. Codex: `gpt-5.6-terra`, medium effort.
@@ -74,4 +74,3 @@ If all cloud providers are exhausted, Hermes remains usable on local Qwen and re
 - Install Aider as an isolated user tool when a suitable tool manager is available.
 - Install the custom resilient skill only after its script and behavioral contract pass tests.
 - Configure Hermes/Codex authentication interactively only where OAuth requires human interaction; never copy or print credential values.
-

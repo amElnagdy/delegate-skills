@@ -1,8 +1,9 @@
 # Configuration
 
-Without `--config`, `routine` starts locally with Aider using
-`openai/qwen3-coder:30b` at Ollama's `http://127.0.0.1:11434/v1` endpoint and
-whole-file edits. Its cloud fallbacks are Agy, Copilot, then Codex. `complex`
+Without `--config`, `routine` starts locally with Aider using its native
+`ollama_chat/qwen3-coder:30b` provider and whole-file edits. This avoids
+requiring or overwriting any OpenAI API key. Its cloud fallbacks are Agy,
+Copilot, then Codex. `complex`
 and `critical` lead with Codex, then use Agy and Copilot before the bounded
 local Aider recovery attempt. The critical Codex candidate is GPT-6 Astra at
 `medium` effort.
@@ -15,7 +16,7 @@ A configuration file is strict JSON:
   "profiles": {
     "routine": {
       "candidates": [
-        { "implementer": "aider", "model": "openai/qwen3-coder:30b", "apiBase": "http://127.0.0.1:11434/v1", "editFormat": "whole" },
+        { "implementer": "aider", "model": "ollama_chat/qwen3-coder:30b", "editFormat": "whole" },
         { "implementer": "agy", "model": "gemini-3.8-flash-medium", "effort": "medium" }
       ]
     }

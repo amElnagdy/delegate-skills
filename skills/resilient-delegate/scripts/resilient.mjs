@@ -17,7 +17,7 @@ const TEST_MODE = process.env.SMOKE_NODE === process.execPath;
 
 const DEFAULT_PROFILES = {
   routine: { candidates: [
-    { implementer: "aider", model: "openai/qwen3-coder:30b", apiBase: "http://127.0.0.1:11434/v1", editFormat: "whole" },
+    { implementer: "aider", model: "ollama_chat/qwen3-coder:30b", editFormat: "whole" },
     { implementer: "agy", model: "gemini-3.8-flash-medium", effort: "medium" },
     { implementer: "copilot", model: "auto", effort: "medium" },
     { implementer: "codex", model: "gpt-5.6-terra", effort: "medium" },
@@ -26,13 +26,13 @@ const DEFAULT_PROFILES = {
     { implementer: "codex", model: "gpt-5.6-sol", effort: "medium" },
     { implementer: "agy", model: "claude-sonnet-4-6", effort: "medium" },
     { implementer: "copilot", model: "auto", effort: "medium" },
-    { implementer: "aider", model: "openai/qwen3-coder:30b", apiBase: "http://127.0.0.1:11434/v1", editFormat: "whole" },
+    { implementer: "aider", model: "ollama_chat/qwen3-coder:30b", editFormat: "whole" },
   ] },
   critical: { candidates: [
     { implementer: "codex", model: "gpt-6-astra", effort: "medium" },
     { implementer: "agy", model: "claude-opus-4-6-thinking", effort: "medium" },
     { implementer: "copilot", model: "auto", effort: "medium" },
-    { implementer: "aider", model: "openai/qwen3-coder:30b", apiBase: "http://127.0.0.1:11434/v1", editFormat: "whole" },
+    { implementer: "aider", model: "ollama_chat/qwen3-coder:30b", editFormat: "whole" },
   ] },
 };
 
