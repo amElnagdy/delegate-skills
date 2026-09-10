@@ -27,15 +27,18 @@ Completed the requested RED-only test and registration phase. No
    - This is the expected missing-production failure; the test module parsed and
      ran successfully.
 2. `node test/relay-smoke.mjs --only package-shape`
-   - Exited 1 because this intentionally registered utility has no production
-     directory or `SKILL.md` during RED.
+   - This is a separate expected RED invocation. It exited 1 because the
+     intentionally registered utility has no production directory or `SKILL.md`
+     yet; it is not part of the controller test's one-check failure claim.
 3. `git diff --check`
    - Exited 0.
 
 ## Concern for Task 2
 
 The behavior table drives deterministic attempt outcomes through candidate
-`testResult` and `testTouchedFiles` fixture fields. Task 2 should keep those
+`testResult` and `testTouchedFiles` fixture fields. It requires distinct
+`failureClass` values for missing versus unauthenticated implementers and exact
+`stopReason` values for every non-failover category. Task 2 should keep those
 fields test-only (or replace this narrow fixture seam with an equivalent
 controlled relay fixture) so the runtime configuration accepts only real
 implementer settings.

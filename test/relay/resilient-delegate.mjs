@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
@@ -41,38 +41,46 @@ export function runResilientDelegate(h) {
     return;
   }
 
-  const complete = runController(h, "first-success", [candidate("aider"), candidate("codex")], {
-    env: { SMOKE_MODE: "aider-success" },
-  });
+  const complete = runController(h, "first-success", [
+    candidate("aider", {
+      testResult: { status: "completed", finalMessage: "first candidate completed" },
+      testTouchedFiles: [" M src/first-success.mjs"],
+    }),
+    candidate("codex", { testResult: { status: "completed", finalMessage: "must not run" } }),
+  ]);
   h.check("resilient: first candidate succeeds and stops the chain",
     complete.run.status === 0 && complete.result?.status === "completed" &&
-    complete.result.selectedImplementer === "aider" && complete.result.attempts?.length === 1);
+    complete.result.selectedImplementer === "aider" && complete.result.attempts?.length === 1 &&
+    complete.result.touchedFiles?.includes(" M src/first-success.mjs"));
 
   // The controller's test relay fixture emits each listed outcome in sequence. These
   // cases name the failover boundary: only capacity/infrastructure may advance.
-  for (const [name, failure] of [
-    ["429-rate-limit", { status: "failed", error: "HTTP 429 rate limit exceeded" }],
-    ["unavailable", { status: "aider_unavailable", error: "aider was not found on PATH" }],
-    ["503", { status: "failed", error: "HTTP 503 service unavailable" }],
-    ["529", { status: "failed", error: "HTTP 529 overloaded" }],
-    ["connection", { status: "failed", error: "connection refused by endpoint" }],
-    ["watchdog", { status: "timeout", error: "relay watchdog timeout" }],
+  for (const [name, failure, failureClass] of [
+    ["429-rate-limit", { status: "failed", error: "HTTP 429 rate limit exceeded" }, "rate_limited"],
+    ["missing-implementer", { status: "aider_unavailable", error: "aider was not found on PATH" }, "missing_implementer"],
+    ["unauthenticated", { status: "aider_unavailable", error: "aider is installed but unauthenticated" }, "unauthenticated"],
+    ["503", { status: "failed", error: "HTTP 503 service unavailable" }, "service_unavailable"],
+    ["529", { status: "failed", error: "HTTP 529 overloaded" }, "overloaded"],
+    ["connection", { status: "failed", error: "connection refused by endpoint" }, "connection_failure"],
+    ["watchdog", { status: "timeout", error: "relay watchdog timeout" }, "watchdog_timeout"],
   ]) {
     const value = runController(h, name, [candidate("aider", { testResult: failure }), candidate("codex", { testResult: { status: "completed" } })]);
     h.check(`resilient: ${name} advances to the next candidate`,
-      value.run.status === 0 && value.result?.selectedImplementer === "codex" && value.result.attempts?.length === 2);
+      value.run.status === 0 && value.result?.selectedImplementer === "codex" && value.result.attempts?.length === 2 &&
+      value.result.attempts[0]?.failureClass === failureClass);
   }
 
-  for (const [name, failure] of [
-    ["permission", { status: "failed", error: "Permission denied" }],
-    ["bad-arguments", { status: "failed", error: "bad arguments" }],
-    ["malformed-result", { status: "failed", error: "malformed result.json" }],
-    ["project-failure", { status: "failed", error: "project test failure" }],
-    ["arbitrary", { status: "failed", error: "implementation failed" }],
+  for (const [name, failure, stopReason] of [
+    ["permission", { status: "failed", error: "Permission denied" }, "permission_denied"],
+    ["bad-arguments", { status: "failed", error: "bad arguments" }, "invalid_arguments"],
+    ["malformed-result", { status: "failed", error: "malformed result.json" }, "malformed_result"],
+    ["project-failure", { status: "failed", error: "project test failure" }, "project_failure"],
+    ["arbitrary", { status: "failed", error: "implementation failed" }, "implementation_failure"],
   ]) {
     const value = runController(h, name, [candidate("aider", { testResult: failure }), candidate("codex", { testResult: { status: "completed" } })]);
-    h.check(`resilient: ${name} stops without advancing`,
-      value.run.status !== 0 && value.result?.selectedImplementer === null && value.result.attempts?.length === 1);
+    h.check(`resilient: ${name} stops as ${stopReason} without advancing`,
+      value.run.status !== 0 && value.result?.selectedImplementer === null && value.result?.stopReason === stopReason &&
+      value.result.attempts?.length === 1 && value.result.attempts[0]?.failureClass === stopReason);
   }
 
   const aggregate = runController(h, "aggregate", [
