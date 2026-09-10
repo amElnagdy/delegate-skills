@@ -20,6 +20,7 @@ import { runAider } from "./aider.mjs";
 import { runCopilot } from "./copilot.mjs";
 import { runCommandcode } from "./commandcode.mjs";
 import { runZcode } from "./zcode.mjs";
+import { runResilientDelegate } from "./resilient-delegate.mjs";
 
 export const runners = [
   ["package-shape", runPackageShape],
@@ -44,4 +45,5 @@ export const runners = [
   ["abort", runAbort],
   ["zcode", runZcode],
   ["delegate-setup", runDelegateSetup],
+  ["resilient-delegate", runResilientDelegate],
 ];

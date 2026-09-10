@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { join } from "node:path";
 
 /** Utility skills: not *-delegate, no relay.mjs / four-reference contract. */
-const UTILITY_SKILLS = ["delegate-setup"];
+const UTILITY_SKILLS = ["delegate-setup", "resilient-delegate"];
 
 function metadataVersion(source) {
   const lines = source.split(/\r?\n/);
