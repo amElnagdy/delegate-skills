@@ -33,7 +33,8 @@ and writes one atomic aggregate result.
 
 ## Commit
 
-`6bc649f80a21cd9a4863094de048d3a41dc45d5f` — `feat: add resilient local-first delegation controller`
+`2bddf88887187ad3774affc28969dfa6d8dd6ff0` — current Task 2 head, including
+the terminal-classification and no-result regression fixes.
 
 ## Evidence
 
