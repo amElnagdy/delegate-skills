@@ -38,8 +38,9 @@ and writes one atomic aggregate result.
 ## Evidence
 
 1. `node --check skills/resilient-delegate/scripts/resilient.mjs` exited 0.
-2. `node test/relay-smoke.mjs --only resilient-delegate` exited 0 with all 20
-   focused checks green.
+2. `node test/relay-smoke.mjs --only resilient-delegate` exited 0 with all 26
+   focused checks green, including unavailable-status semantic-precedence and
+   missing-result watchdog, connection, and malformed-output regressions.
 3. `node test/relay-smoke.mjs --only package-shape` exited 0.
 4. `git diff --check` exited 0 before committing.
 
@@ -48,3 +49,12 @@ and writes one atomic aggregate result.
 The deterministic test seam is intentionally narrow but remains an
 environment-based smoke fixture. A future dedicated fixture-relay mechanism
 could remove that seam entirely while preserving the same behavioral coverage.
+
+## Review follow-up
+
+Classification now checks permission denial, invalid arguments/configuration,
+malformed output, and project/test/gate failures before unavailable or capacity
+signals. If a child leaves no `result.json`, its `spawnSync` status, error code,
+stdout, and stderr are inspected: watchdog evidence becomes `timeout`, known
+connection errors become a connection failure, and all remaining no-output
+outcomes stop as `malformed_result`.
