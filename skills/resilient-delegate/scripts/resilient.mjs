@@ -98,7 +98,7 @@ function validateCandidates(config, profile) {
   for (const candidate of selected.candidates) {
     if (!candidate || typeof candidate !== "object" || Array.isArray(candidate) || !IMPLEMENTERS.has(candidate.implementer)) fail("each candidate must name aider, agy, copilot, or codex");
     const permitted = ["implementer", "model", "effort", "apiBase", "editFormat"];
-    const fixture = ["testResult", "testTouchedFiles"];
+    const fixture = ["testResult", "testTouchedFiles", "testExecution"];
     if (Object.keys(candidate).some((key) => !permitted.includes(key) && !(TEST_MODE && profile === "smoke" && fixture.includes(key)))) fail("candidate contains an unsupported field");
     // Codex receives an explicit bounded default, so an otherwise valid simple
     // candidate cannot inherit an unsafe ambient reasoning configuration.
@@ -107,6 +107,7 @@ function validateCandidates(config, profile) {
     if (candidate.implementer === "codex" && !SAFE_EFFORTS.has(candidate.effort)) fail("Codex candidates require low or medium effort");
     if (candidate.model === "gpt-6-astra" && !SAFE_EFFORTS.has(candidate.effort)) fail("GPT-6 Astra effort must be low or medium");
     if (candidate.testResult !== undefined && (!candidate.testResult || typeof candidate.testResult !== "object" || typeof candidate.testResult.status !== "string")) fail("testResult must be a structured relay result");
+    if (candidate.testExecution !== undefined && (!candidate.testExecution || typeof candidate.testExecution !== "object" || typeof candidate.testExecution.kind !== "string")) fail("testExecution must name a fixture outcome");
   }
   return selected.candidates;
 }
@@ -119,16 +120,19 @@ function writeAtomic(path, value) {
 
 function classify(result) {
   const text = `${result.status || ""}\n${result.error || ""}\n${result.finalMessage || ""}\n${(result.stderrTail || []).join("\n")}`.toLowerCase();
+  // Semantic failures are terminal even when a relay reports a misleading
+  // unavailable status. An unavailable binary is failover-safe; a denied
+  // permission or failed project gate is not.
+  if (/permission denied|auto-denied|not permitted/.test(text)) return "permission_denied";
+  if (/bad arguments?|invalid arguments?|usage:|unknown option|config/.test(text)) return "invalid_arguments";
+  if (/malformed result|invalid json/.test(text)) return "malformed_result";
+  if (/project (?:test|gate|failure)|test failure|gate failure/.test(text)) return "project_failure";
   if (result.status === "timeout" || /watchdog|timed out/.test(text)) return "watchdog_timeout";
   if (/_unavailable$/.test(result.status || "")) return /unauthenticated|not authenticated|login|api.?key/.test(text) ? "unauthenticated" : "missing_implementer";
   if (/\b429\b|rate.?limit|quota|usage.?limit|billing.?cap/.test(text)) return "rate_limited";
   if (/\b503\b|service unavailable/.test(text)) return "service_unavailable";
   if (/\b529\b|overloaded/.test(text)) return "overloaded";
   if (/connection|econn|network unreachable|socket/.test(text)) return "connection_failure";
-  if (/permission denied|auto-denied|not permitted/.test(text)) return "permission_denied";
-  if (/bad arguments?|invalid arguments?|usage:|unknown option|config/.test(text)) return "invalid_arguments";
-  if (/malformed result|invalid json|result\.json/.test(text)) return "malformed_result";
-  if (/project (?:test|gate|failure)|test failure|gate failure/.test(text)) return "project_failure";
   return "implementation_failure";
 }
 
@@ -137,8 +141,29 @@ function attemptBrief(original, prior) {
   return `${original.trimEnd()}\n\nContinuation note: earlier infrastructure outcomes were ${prior.join(", ")}. Inspect the existing working-tree diff before continuing. Do not reuse another provider's session.\n`;
 }
 
+function missingArtifactResult(child, implementer) {
+  const errorCode = child.error?.code;
+  const details = [child.error?.message, child.stderr, child.stdout].filter(Boolean).map(String).join("\n");
+  if (errorCode === "ETIMEDOUT" || child.status === 124 || /watchdog|timed out/.test(details)) {
+    return { status: "timeout", error: `relay watchdog timeout before result.json${details ? `: ${details}` : ""}`, touchedFiles: [] };
+  }
+  if (["ECONNREFUSED", "ECONNRESET", "ENETUNREACH", "EHOSTUNREACH", "ENOTFOUND"].includes(errorCode) || /connection|econn|network unreachable|socket/.test(details.toLowerCase())) {
+    return { status: "failed", error: `connection failure before result.json${details ? `: ${details}` : ""}`, touchedFiles: [] };
+  }
+  if (errorCode === "ENOENT") return { status: `${implementer}_unavailable`, error: `${implementer} relay could not be spawned`, touchedFiles: [] };
+  return { status: "failed", error: `malformed result.json from ${implementer}`, touchedFiles: [] };
+}
+
 function invoke(opts, candidate, index, attemptDir, brief) {
   if (candidate.testResult) return { ...candidate.testResult, touchedFiles: candidate.testTouchedFiles ?? [] };
+  if (candidate.testExecution) {
+    const child = candidate.testExecution.kind === "watchdog"
+      ? { status: 124, stderr: "relay watchdog timeout" }
+      : candidate.testExecution.kind === "connection"
+        ? { error: { code: "ECONNREFUSED", message: "connect ECONNREFUSED" }, status: null, stderr: "" }
+        : { status: 7, stderr: "relay exited without a result" };
+    return missingArtifactResult(child, candidate.implementer);
+  }
   const root = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
   const relay = join(root, `${candidate.implementer}-delegate`, "scripts", "relay.mjs");
   if (!existsSync(relay)) return { status: `${candidate.implementer}_unavailable`, error: `relay for ${candidate.implementer} is not installed`, touchedFiles: [] };
@@ -152,7 +177,7 @@ function invoke(opts, candidate, index, attemptDir, brief) {
   if (candidate.implementer === "aider" && candidate.editFormat) argv.push("--edit-format", candidate.editFormat);
   const child = spawnSync(process.execPath, argv, { cwd: opts.cd, encoding: "utf8", timeout: 2_147_483_647 });
   const resultPath = join(attemptDir, "result.json");
-  if (!existsSync(resultPath)) return { status: "failed", error: `malformed result.json from ${candidate.implementer}`, touchedFiles: [] };
+  if (!existsSync(resultPath)) return missingArtifactResult(child, candidate.implementer);
   try { return JSON.parse(readFileSync(resultPath, "utf8")); }
   catch { return { status: "failed", error: `malformed result.json from ${candidate.implementer}`, touchedFiles: [] }; }
 }

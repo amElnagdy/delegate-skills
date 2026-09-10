@@ -83,6 +83,34 @@ export function runResilientDelegate(h) {
       value.result.attempts?.length === 1 && value.result.attempts[0]?.failureClass === stopReason);
   }
 
+  for (const [name, failure, stopReason] of [
+    ["permission-unavailable", { status: "aider_unavailable", error: "Permission denied" }, "permission_denied"],
+    ["arguments-unavailable", { status: "aider_unavailable", error: "invalid arguments" }, "invalid_arguments"],
+    ["project-unavailable", { status: "aider_unavailable", error: "project gate failure" }, "project_failure"],
+  ]) {
+    const value = runController(h, name, [candidate("aider", { testResult: failure }), candidate("codex", { testResult: { status: "completed" } })]);
+    h.check(`resilient: ${name} semantic failure takes precedence over unavailable`,
+      value.run.status !== 0 && value.result?.stopReason === stopReason && value.result.attempts?.length === 1 &&
+      value.result.attempts[0]?.failureClass === stopReason);
+  }
+
+  for (const [name, testExecution, failureClass] of [
+    ["missing-result-watchdog", { kind: "watchdog" }, "watchdog_timeout"],
+    ["missing-result-connection", { kind: "connection" }, "connection_failure"],
+  ]) {
+    const value = runController(h, name, [candidate("aider", { testExecution }), candidate("codex", { testResult: { status: "completed" } })]);
+    h.check(`resilient: ${name} fails over as infrastructure`,
+      value.run.status === 0 && value.result?.selectedImplementer === "codex" && value.result.attempts?.length === 2 &&
+      value.result.attempts[0]?.failureClass === failureClass);
+  }
+  const missingOutput = runController(h, "missing-result-malformed", [
+    candidate("aider", { testExecution: { kind: "missing-output" } }),
+    candidate("codex", { testResult: { status: "completed" } }),
+  ]);
+  h.check("resilient: missing relay output stops as malformed result",
+    missingOutput.run.status !== 0 && missingOutput.result?.stopReason === "malformed_result" &&
+    missingOutput.result.attempts?.length === 1 && missingOutput.result.attempts[0]?.failureClass === "malformed_result");
+
   const aggregate = runController(h, "aggregate", [
     candidate("aider", { testResult: { status: "failed", error: "HTTP 429 rate limit exceeded" } }),
     candidate("codex", { testResult: { status: "completed" }, testTouchedFiles: [" M src/example.mjs"] }),
