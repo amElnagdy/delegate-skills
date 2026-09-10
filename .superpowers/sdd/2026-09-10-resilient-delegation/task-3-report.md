@@ -9,8 +9,12 @@ Astra `low`/`medium` cap explicitly.
 
 ## Structural and deterministic validation
 
-- `npx skills add . --list` validated the local package and reported 19
+- `npx skills add . --list` validated package discovery and reported 19
   discoverable skills, including `resilient-delegate`.
+- This package-level check is distinct from the requested skill-creator
+  validator. It first identified the unsupported `compatibility` frontmatter
+  key. Commit `af04f18` removed that key, after which `quick_validate.py`
+  returned `Skill is valid!` under Python 3.11.
 - `node test/relay-smoke.mjs --only resilient-delegate` passed all 26 focused
   behavioral checks.
 - `node test/relay-smoke.mjs --only package-shape` passed.
@@ -50,11 +54,13 @@ No cloud fallback was used.
    stop as malformed result — matches the controller.
 4. Dirty tree without `--allow-dirty`: Qwen chose abort/reject — matches the
    controller.
-5. Astra at high effort: Qwen incorrectly advised proceeding. This exposed
+5. Astra at high effort: Qwen initially advised proceeding. This exposed
    that the primary `SKILL.md` did not itself state the cap; the controller and
    configuration reference already rejected it. The skill now explicitly says
-   to reject Astra above medium. Per the bounded-validation instruction, this
-   scenario was not retried.
+   to reject Astra above medium.
+6. After that correction, one additional bounded Qwen run read the current
+   `SKILL.md` and explicitly answered that `gpt-6-astra` at `high` must be
+   rejected. It completed in about six seconds.
 
 ## Baseline comparison
 
@@ -67,8 +73,17 @@ now visible in the main skill, not only in its reference and implementation.
 
 ## Remaining risk
 
-The corrected Astra sentence was not re-run through Qwen because the task
-limited the local pressure run to five single attempts. The deterministic
-controller test already covers both rejected high/xhigh and accepted low/medium
-Astra configurations. Real authenticated provider dispatch remains outside
-this validation-only scope.
+The deterministic controller test covers both rejected high/xhigh and accepted
+low/medium Astra configurations. The skill now passes the skill-creator
+validator and has local-Qwen evidence for the cap. Real authenticated provider
+dispatch remains outside this validation-only scope.
+
+## Relevant commits
+
+- `0e40a47` — instruction-surface fix adding the explicit hard boundaries and
+  Astra cap to `SKILL.md`.
+- `c8b7f4b` — initial Task 3 validation report.
+- `af04f18` — remove unsupported frontmatter and pass `quick_validate.py`.
+- This report update is committed after the evidence is recorded. Its parent is
+  `c8b7f4b`; the resulting report commit hash is returned with this validation
+  so the document does not attempt an impossible self-reference.
