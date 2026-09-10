@@ -23,7 +23,9 @@ function metadataVersion(source) {
 
 export function runPackageShape(h) {
   const skillsDir = join(h.testDir, "..", "skills");
-  const onDiskDelegate = readdirSync(skillsDir).filter((d) => d.endsWith("-delegate")).sort();
+  const onDiskDelegate = readdirSync(skillsDir)
+    .filter((d) => d.endsWith("-delegate") && !UTILITY_SKILLS.includes(d))
+    .sort();
   const onDiskUtility = readdirSync(skillsDir).filter((d) => UTILITY_SKILLS.includes(d)).sort();
   const registered = new Set(
     JSON.parse(readFileSync(join(h.testDir, "..", "skills.sh.json"), "utf8"))
