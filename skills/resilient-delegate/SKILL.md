@@ -14,6 +14,11 @@ the local Aider/Ollama path for routine work and advances only after an observab
 capacity or infrastructure failure. It never commits, pushes, installs software,
 or changes credentials.
 
+Hard boundaries: stop (do not fail over) for permission denial, invalid
+arguments or configuration, malformed relay output, and project/test/gate
+failures. Codex reasoning is restricted to `low` or `medium`; in particular,
+reject every GPT-6 Astra candidate above `medium`.
+
 Run it from a clean Git working tree unless you explicitly intend to preserve
 existing changes:
 
