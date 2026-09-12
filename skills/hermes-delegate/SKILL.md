@@ -41,9 +41,10 @@ judgment; Hermes does the typing in its own session; you verify and commit.
 
 - No sandbox, no permission modes - none may be invented.
 - Write runs: the relay passes `--yolo` explicitly so unattended writes never depend on user config.
-- Read-only runs: restricted `--toolsets` and no `--yolo`. On hermes 0.20.x this leaves the session
-  with zero file tools (measured: an ordered write was refused for lack of any file tool). This is
-  still best-effort, NOT enforcement - treat `touchedFiles` and the diff as the guarantee, never the flag.
+- Read-only runs: restricted `--toolsets` and no `--yolo`. On hermes 0.20.x and 0.21.2 this leaves
+  the session with zero file tools (measured: an ordered write was refused for lack of any file
+  tool). This is still best-effort, NOT enforcement - treat `touchedFiles` and the diff as the
+  guarantee, never the flag.
 - Provider/billing failures can arrive as prose on stdout with exit 1: exit codes alone are not proof
   of success - read the report and `touchedFiles`.
 - Never pass `--worktree`: Hermes deletes the isolated tree at session end, destroying uncommitted

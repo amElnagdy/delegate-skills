@@ -99,7 +99,8 @@ tree instead.
   be `null` if both fail. Feed it back through `--resume <id>`
 - `finalMessage` — Hermes's final response: exactly the report your `<report_contract>` asked for,
   captured whole from stdout
-- `reportCaptured` — `"complete"` | `"empty"`. Hermes has no structured output mode; this says
+- `reportCaptured` — `"complete"` | `"empty"` (`null` on preflight outcomes, where no run
+  happened). Hermes has no structured output mode; this says
   whether any report text was captured at all. Treat `"empty"` like a failed run
 - `readOnly` — whether the run was dispatched read-only-leaning
 - `resumed` — whether the run continued a previous session
@@ -108,7 +109,7 @@ tree instead.
 - `briefPath` / `finalPath` / `stderrPath` — the exact brief relay sent, the captured report file,
   and the child's stderr
 - `workdir`, `model`, `provider`, `startedAt`, `finishedAt`
-- `stderrTail` — last ~20 stderr lines; present on every run that did not complete
+- `stderrTail` — last ~20 stderr lines; present on every dispatched run that did not complete
 - `error` — present on every non-clean outcome (launch failures, `timeout`, `aborted`, detected
   provider/billing failures); never infer cause from `exitCode` alone
 
