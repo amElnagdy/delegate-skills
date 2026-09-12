@@ -336,9 +336,18 @@ Per skill — platform, CLI version, and what the run exercised:
   absent from the shared read-only tripwire scenario matrix, which runs `claude` and `grok` only —
   its tripwire helpers are parity-enforced byte-identical, but no zcode-specific worktree-state run
   is recorded. No macOS or Linux run is recorded.
-- `codex-delegate`, `opencode-delegate`, `vibe-delegate` — contract-tested only: argument validation,
+- `codex-delegate` — macOS, `codex` codex-cli 0.150.1: fresh `workspace-write` dispatch against a
+  throwaway repo created the briefed file and reported it in `touchedFiles`, with `status:
+  "completed"` and exit 0; a `--read-only` dispatch left the tree clean (`touchedFiles: []`) and
+  returned a `threadId`; a follow-up `--session <id>` resume against that thread was asked to recall
+  a word from the first turn without it being named again — the delta brief said only "the word you
+  picked a moment ago" — and it answered correctly, confirming the resumed turn saw prior context, not
+  just that the id was accepted. Contract-tested: argument validation,
   bounded version preflight, missing binary, result parsing, and whole-process-tree timeout/abort
-  cleanup. No end-to-end run is recorded here.
+  cleanup. No Windows or Linux run is recorded.
+- `opencode-delegate`, `vibe-delegate` — contract-tested only: argument validation, bounded version
+  preflight, missing binary, result parsing, and whole-process-tree timeout/abort cleanup. No
+  end-to-end run is recorded here.
 - `cline-delegate` — macOS, `cline` 3.0.52: current-binary unauthenticated plan probe reached
   `run_start` with the fixed positional instruction plus the real brief on stdin, accepted a
   provider-local model id, parsed the failing `run_result`, and left the tree clean. Contract-tested:

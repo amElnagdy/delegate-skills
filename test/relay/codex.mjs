@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export async function runCodex(h) {
@@ -14,6 +14,18 @@ h.check("codex effort: forwarded as a config override",
   effortRun.status === 0 && effortArgs.includes("-c") && effortArgs[effortArgs.indexOf("-c") + 1] === "model_reasoning_effort=low");
 h.check("codex effort: recorded in result.json",
   existsSync(join(effortOutDir, "result.json")) && h.result(effortOutDir).effort === "low");
+// ---- codex --ignore-user-config isolates reviews from ambient MCP/user config ----
+const isolatedOutDir = join(h.scratch, "out-ignore-user-config-codex");
+const isolatedArgsFile = join(h.scratch, "args-ignore-user-config-codex");
+const isolatedRun = spawnSync(process.execPath, [
+  h.relayPath("codex"), "--brief", h.briefPath, "--cd", h.freshRepo("work-ignore-user-config-codex"),
+  "--out-dir", isolatedOutDir, "--read-only", "--ignore-user-config",
+], { env: { ...h.baseEnv, SMOKE_MODE: "capture", SMOKE_ARGS_FILE: isolatedArgsFile }, encoding: "utf8" });
+const isolatedArgs = existsSync(isolatedArgsFile) ? JSON.parse(readFileSync(isolatedArgsFile, "utf8")) : [];
+h.check("codex ignore-user-config: forwarded before exec options",
+  isolatedRun.status === 0 && isolatedArgs[0] === "exec" && isolatedArgs[1] === "--ignore-user-config");
+h.check("codex ignore-user-config: recorded in result.json",
+  existsSync(join(isolatedOutDir, "result.json")) && h.result(isolatedOutDir).ignoreUserConfig === true);
 // ---- codex --clean-env isolates both preflight and dispatch ----
 const cleanEnvHelp = spawnSync(process.execPath, [h.relayPath("codex"), "--help"], { encoding: "utf8" });
 h.check("codex clean-env: help scopes the flag to inherited variables, not same-user secrets",
@@ -104,4 +116,58 @@ const emptyEffortRun = spawnSync(process.execPath,
   [h.relayPath("codex"), "--brief", h.briefPath, "--effort", ""],
   { env: h.baseEnv, encoding: "utf8" });
 h.check("codex effort: an empty value is rejected", emptyEffortRun.status === 2);
+// ---- codex stderr: the full log survives a transcript longer than the tail ----
+const floodOutDir = join(h.scratch, "out-stderr-flood-codex");
+const floodRun = spawnSync(process.execPath,
+  [h.relayPath("codex"), "--brief", h.briefPath, "--cd", h.freshRepo("work-stderr-flood-codex"), "--out-dir", floodOutDir],
+  { env: { ...h.baseEnv, SMOKE_MODE: "codex-stderr-flood" }, encoding: "utf8" });
+const floodResult = existsSync(join(floodOutDir, "result.json")) ? h.result(floodOutDir) : null;
+const floodTail = floodResult?.stderrTail ?? [];
+const floodLog = floodResult?.stderrPath && existsSync(floodResult.stderrPath)
+  ? readFileSync(floodResult.stderrPath, "utf8")
+  : "";
+h.check("codex stderr: the flooded run still fails with the implementer's exit",
+  floodRun.status === 1 && floodResult?.status === "failed" && floodResult.exitCode === 1);
+h.check("codex stderr: result.json points at the full log",
+  Boolean(floodResult?.stderrPath) && existsSync(floodResult.stderrPath));
+h.check("codex stderr: the full log keeps a diagnostic the tail cannot hold",
+  floodLog.includes("early marker") && !floodTail.some((line) => line.includes("early marker")));
+h.check("codex stderr: the full log drops nothing",
+  floodLog.split("\n").filter((line) => line.includes("failed to renew cache TTL")).length === 300);
+h.check("codex stderr: the tail stays bounded and ends at the failure",
+  floodTail.length === 20 && Boolean(floodTail.at(-1)?.includes("fatal: dispatch failed")));
+
+// PR #102: a small heap must still publish the failure after a large stderr stream.
+const largeOutDir = join(h.scratch, "out-stderr-large-codex");
+const largeRun = spawnSync(process.execPath,
+  ["--max-old-space-size=32", h.relayPath("codex"), "--brief", h.briefPath,
+    "--cd", h.freshRepo("work-stderr-large-codex"), "--out-dir", largeOutDir],
+  { env: { ...h.baseEnv, SMOKE_MODE: "codex-stderr-large" }, stdio: "ignore", timeout: 30_000 });
+const largeResult = existsSync(join(largeOutDir, "result.json")) ? h.result(largeOutDir) : null;
+h.check("codex stderr: large logs preserve the failure result under a small heap",
+  largeRun.status === 7 && largeResult?.status === "failed" && largeResult.exitCode === 7);
+h.check("codex stderr: the tail preserves logical lines, UTF-8, and an unterminated final line",
+  JSON.stringify(largeResult?.stderrTail) === JSON.stringify([
+    ...Array(18).fill("x"), "fatal: café انتهى 🐎", "last diagnostic without newline",
+  ]));
+h.check("codex stderr: the complete large stream remains on disk",
+  existsSync(join(largeOutDir, "stderr.txt")) &&
+  statSync(join(largeOutDir, "stderr.txt")).size === 4 * 1024 * 1024 +
+    Buffer.byteLength("\r\n  \r\nfatal: café انتهى 🐎\r\nlast diagnostic without newline"));
+
+for (const [mode, expectedTail] of [
+  ["codex-stderr-long-line", ["[truncated; read stderrPath] " + "🐎".repeat(16383) + "fin"]],
+  ["codex-stderr-window-boundary", ["first complete diagnostic", "last diagnostic"]],
+  ["codex-version-fail", ["fake version failure"]],
+]) {
+  const outDir = join(h.scratch, `out-${mode}`);
+  const run = spawnSync(process.execPath,
+    ["--max-old-space-size=32", h.relayPath("codex"), "--brief", h.briefPath,
+      "--cd", h.freshRepo(`work-${mode}`), "--out-dir", outDir],
+    { env: { ...h.baseEnv, SMOKE_MODE: mode }, stdio: "ignore", timeout: 30_000 });
+  const result = existsSync(join(outDir, "result.json")) ? h.result(outDir) : null;
+  h.check(`codex stderr: ${mode} preserves the bounded diagnostic and failure code`,
+    run.status === 7 && result?.status === "failed" && result.exitCode === 7 &&
+    JSON.stringify(result.stderrTail) === JSON.stringify(expectedTail));
+}
 }

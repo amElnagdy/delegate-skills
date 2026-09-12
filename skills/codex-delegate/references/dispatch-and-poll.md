@@ -71,8 +71,9 @@ filtered environment is used for preflight and dispatch.
 - `finalMessage` — Codex's own final report (the `<structured_output_contract>` you asked for)
 - `touchedFiles` — `git status --porcelain` lines in the working root: your review starting point. `null` (not `[]`) when git can't report — `git` missing, or a non-repo run under `--skip-git-repo-check`; `[]` means git ran and the tree is clean
 - `briefPath` / `eventsPath` / `finalPath` — the exact brief relay sent, the raw JSONL event stream, and the final-message file
+- `stderrPath` — the complete stderr stream in `stderr.txt`, including diagnostics omitted from the summary
 - `workdir`, `sandbox`, `model`, `effort`, `resumeLast`, `session`, `cleanEnv`, `keepEnv`, `startedAt`, `finishedAt` — `sandbox` is the applied mode, or a note that Codex used its active config on an unqualified resume; `session` is the explicit session id, or `null` for fresh and `--resume-last` runs; `keepEnv` records names only, never values
-- `stderrTail` — last ~20 stderr lines; present on every run that did not complete (`failed`, `timeout`, `aborted`), absent on `completed`, `codex_unavailable`, and launch failures
+- `stderrTail` — up to 20 nonblank lines from the final 64 KiB of stderr; a partial first line is marked as truncated. Present on every run that did not complete (`failed`, `timeout`, `aborted`), absent on `completed`, `codex_unavailable`, and launch failures. Read `stderrPath` for the complete diagnostics.
 - `error` — present on a launch failure, and on `timeout` and `aborted` runs
 
 The helper also prints a summary to stdout and exits with Codex's exit code, so a wrapping script can
@@ -102,7 +103,7 @@ process has exited and `result.json` is written — not when a status line says 
   `codex --version` probe exited non-zero or hung past its cap (10s, or `--timeout` when shorter), so
   codex was never dispatched; only the relay's own artifacts may already exist under `--out-dir`.
   Check the install by running `codex --version` yourself.
-- **`status: failed`:** read `result.json`'s `stderrTail` and the tail of `eventsPath` for the cause.
+- **`status: failed`:** read `result.json`'s `stderrTail`, the full `stderrPath` log, and the tail of `eventsPath` for the cause.
   Common causes: an auth lapse, an invalid `--model` or unsupported `--effort`, or a sandbox that
   blocked something the task needed. Fix the cause and re-dispatch; don't paper over it by doing the
   work yourself unless that's what the user wants.

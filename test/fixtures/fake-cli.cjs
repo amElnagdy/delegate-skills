@@ -73,6 +73,37 @@ if (process.env.SMOKE_GIT_RENAME_FROM && process.env.SMOKE_GIT_RENAME_TO) {
     "mv", "-f", process.env.SMOKE_GIT_RENAME_FROM, process.env.SMOKE_GIT_RENAME_TO,
   ]);
 }
+if (process.env.SMOKE_MODE === "codex-stderr-long-line") {
+  // The 64 KiB suffix starts inside a four-byte character.
+  fs.writeSync(2, "🐎".repeat(20000) + "fin");
+  process.exit(7);
+}
+if (process.env.SMOKE_MODE === "codex-stderr-window-boundary") {
+  const first = "first complete diagnostic\n";
+  const last = "\nlast diagnostic\n";
+  fs.writeSync(2, "outside window\n" + first +
+    " ".repeat(64 * 1024 - Buffer.byteLength(first + last)) + last);
+  process.exit(7);
+}
+if (process.env.SMOKE_MODE === "codex-stderr-large") {
+  // Many short lines make an unbounded split/map/filter allocate far more than the log.
+  const block = Buffer.from("x\n".repeat(32768));
+  for (let i = 0; i < 64; i += 1) fs.writeSync(2, block);
+  fs.writeSync(2, "\r\n  \r\nfatal: café انتهى 🐎\r\nlast diagnostic without newline");
+  process.exit(7);
+}
+if (process.env.SMOKE_MODE === "codex-stderr-flood") {
+  // Stands in for a real `codex exec` transcript: codex streams the banner, its tool calls
+  // and the full output of every command it runs to stderr, so the line that explains the
+  // failure sits hundreds of lines above the end. Synchronous writes so every line lands
+  // before the process dies, and the unread brief on stdin exercises the swallowed-EPIPE path.
+  fs.writeSync(2, "early marker: the line that explains the failure\n");
+  for (let i = 0; i < 300; i += 1) {
+    fs.writeSync(2, `2026-01-01T00:00:00.${String(i).padStart(6, "0")}Z WARN fake cache: failed to renew cache TTL\n`);
+  }
+  fs.writeSync(2, "fatal: dispatch failed after the flood\n");
+  process.exit(1);
+}
 if (process.env.SMOKE_MODE === "aider-success") {
   fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify(args));
   // Mentions OPENAI_API_KEY in prose so a bare-substring matcher would false-fail.
