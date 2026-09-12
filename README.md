@@ -267,7 +267,10 @@ Per skill — platform, CLI version, and what the run exercised:
   `--read-only` dispatch (restricted `--toolsets memory,search`, no `--yolo`) left the target write
   unperformed — Hermes reported having no file tools and refused, so the tree stayed clean. Negatives:
   a missing `hermes` (via `HERMES_DELEGATE_BIN`) exits 127 and writes `status: "hermes_unavailable"`;
-  bogus flags exit 2 with no result file. Windows untested.
+  bogus flags exit 2 with no result file. Re-verified on `hermes` 0.21.2 (2026-09-13): the write, resume,
+  and read-only scenarios above were re-run through the relay on a throwaway repo with the same outcomes
+  (exact `touchedFiles`, session id captured from the child's stderr, read-only refusal for lack of file
+  tools, clean tree), and every flag the relay passes still exists on `hermes chat`. Windows untested.
 - `pi-delegate` — macOS: stdin brief delivery, explicit provider and model selection, JSON
   session/provider/model/usage capture, and a `--read-only` run leaving a clean tree. Write,
   `--session`, and `--resume-last` runs are contributor-reported.

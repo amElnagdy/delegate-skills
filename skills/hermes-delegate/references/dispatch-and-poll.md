@@ -75,8 +75,10 @@ be misread as a flag.
 
 **Never pass `--worktree`.** Measured hazard: Hermes creates `<repo>/.worktrees/hermes-<hex>/`,
 does the work inside it correctly — then **deletes the whole tree at session end**
-("✓ Worktree cleaned up"), destroying every uncommitted edit. Nothing survives: no branch, no
-reflog. The relay refuses to pass it; don't try to add it back. Work directly in the dispatch
+("✓ Worktree cleaned up"), destroying every uncommitted edit. Nothing survives for a dispatched
+run: no branch, no reflog. (Hermes 0.21.x spares a worktree holding unpushed *commits* — but this
+skill never lets Hermes commit, so dispatched work is always uncommitted and nothing is spared.)
+The relay refuses to pass it; don't try to add it back. Work directly in the dispatch
 tree instead.
 
 ## The result
