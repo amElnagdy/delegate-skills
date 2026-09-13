@@ -19,6 +19,12 @@ const versionProbe = args.includes("--version") || args[0] === "version" || args
 if (versionProbe && process.env.SMOKE_PREFLIGHT_ENV_FILE) {
   fs.writeFileSync(process.env.SMOKE_PREFLIGHT_ENV_FILE, JSON.stringify(capturedEnv()));
 }
+if (versionProbe && process.env.SMOKE_DEVIN_PREFLIGHT_ENV_FILE) {
+  fs.writeFileSync(process.env.SMOKE_DEVIN_PREFLIGHT_ENV_FILE, JSON.stringify({
+    windsurfApiKey: process.env.WINDSURF_API_KEY ?? null,
+    smokeSecretToken: process.env.SMOKE_SECRET_TOKEN ?? null,
+  }));
+}
 if (versionProbe && process.env.SMOKE_PREFLIGHT_PID_FILE) {
   fs.writeFileSync(process.env.SMOKE_PREFLIGHT_PID_FILE, String(process.pid));
 }
@@ -208,6 +214,27 @@ if (process.env.SMOKE_MODE === "grok-read-only") {
   }
   console.log(JSON.stringify({ type: "text", data: "fake grok completed" }));
   console.log(JSON.stringify({ type: "end", sessionId: "grok-session-1" }));
+  process.exit(0);
+}
+if (process.env.SMOKE_MODE === "devin-success") {
+  if (process.env.SMOKE_ARGS_FILE) fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify(args));
+  if (process.env.SMOKE_CAPTURE_FILE) {
+    fs.writeFileSync(process.env.SMOKE_CAPTURE_FILE, JSON.stringify({
+      windsurfApiKey: process.env.WINDSURF_API_KEY ?? null,
+      smokeSecretToken: process.env.SMOKE_SECRET_TOKEN ?? null,
+    }));
+  }
+  const exportAt = args.indexOf("--export");
+  if (exportAt !== -1 && args[exportAt + 1]) {
+    fs.writeFileSync(args[exportAt + 1], JSON.stringify({
+      schema_version: "ATIF-v1.7",
+      session_id: "devin-session-1",
+      agent: { name: "devin", version: "0.0.0-smoke", model_name: "fake-model" },
+      steps: [],
+      final_metrics: {},
+    }));
+  }
+  console.log("fake devin completed");
   process.exit(0);
 }
 if (["omp-success", "omp-error"].includes(process.env.SMOKE_MODE)) {

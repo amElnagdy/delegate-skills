@@ -22,7 +22,7 @@ export function installShim(h) {
       join(windir, "Microsoft.NET", "Framework64", "v4.0.30319", "csc.exe"),
       join(windir, "Microsoft.NET", "Framework", "v4.0.30319", "csc.exe"),
     ].find((p) => existsSync(p));
-    h.check("windows: the in-box C# compiler exists (builds the native fake for agy/kimi/qoder/vibe/aider/oz/omp)", Boolean(csc));
+    h.check("windows: the in-box C# compiler exists (builds the native fake for agy/kimi/qoder/vibe/aider/oz/omp/devin)", Boolean(csc));
     if (csc) {
       const csFile = join(shimDir, "fake-cli.cs");
       copyFileSync(join(fixturesDir, "fake-cli.cs"), csFile);
@@ -37,6 +37,9 @@ export function installShim(h) {
         copyFileSync(join(shimDir, "kimi.exe"), join(shimDir, "aider.exe"));
         copyFileSync(join(shimDir, "kimi.exe"), join(shimDir, "oz.exe"));
         copyFileSync(join(shimDir, "kimi.exe"), join(shimDir, "omp.exe"));
+        // Devin is a native binary (docs cover macOS/Linux; Windows native is unverified
+        // and there is no `.cmd` shim assumption), so the fake must be an .exe too.
+        copyFileSync(join(shimDir, "kimi.exe"), join(shimDir, "devin.exe"));
       } else {
         console.error(`${compiled.stdout ?? ""}${compiled.stderr ?? ""}`);
       }

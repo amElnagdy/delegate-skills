@@ -105,6 +105,10 @@ function normalizeDials(implementerKey, raw) {
     if (dials.permissionMode === undefined) dials.permissionMode = "plan";
     delete dials.readOnly;
   }
+  if (implementerKey === "devin" && dials.readOnly === true) {
+    if (dials.permissionMode === undefined) dials.permissionMode = "normal";
+    delete dials.readOnly;
+  }
   if (implementerKey === "omp" && typeof dials.effort === "string") {
     dials.thinking = dials.effort;
     delete dials.effort;

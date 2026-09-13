@@ -380,6 +380,21 @@ export const IMPLEMENTERS = Object.freeze([
     winShell: false,
 
   },
+  {
+    key: "devin",
+    skill: "devin-delegate",
+    binary: "devin",
+    versionArgs: ["version"],
+    versionFallbackArgs: ["--version"],
+    authProbe: { args: ["auth", "status"], successPattern: /logged in/i, failPattern: /not logged in|logged out/i },
+    // `devin models list --format json` exists but no list format parses the
+    // families/aliases JSON yet — document `devin models list` for users.
+    modelProbe: null,
+    // Sessions live in ~/.local/share/devin/cli/sessions.db (sqlite) — no honest file count.
+    usageProbe: null,
+    supports: ["model", "permissionMode", "timeout", "readOnly"],
+    winShell: false,
+  },
 ]);
 
 /** Prototype-free map so names like "toString" cannot pass as implementers. */
@@ -411,6 +426,12 @@ export const QODER_PERMISSION = Object.freeze([
  * the same reason, so a lane must not be able to select one either.
  */
 export const ZCODE_MODE = Object.freeze(["plan", "yolo"]);
+/**
+ * Devin's --permission-mode. `autonomous` is excluded — it needs `--sandbox`, and
+ * in sandbox sessions edit/write tools still prompt, which headless runs cannot
+ * answer. Aliases `auto`/`yolo`/`bypass` excluded — canonical names only.
+ */
+export const DEVIN_PERMISSION = Object.freeze(["normal", "accept-edits", "smart", "dangerous"]);
 /** Positive h/m/s duration, same shape relays accept. */
 export const TIMEOUT_RE = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/;
 

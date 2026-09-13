@@ -41,6 +41,7 @@ import {
   QODER_PERMISSION,
   TIMEOUT_RE,
   ZCODE_MODE,
+  DEVIN_PERMISSION,
 } from "./implementers.mjs";
 
 /** Same ceiling relays use for --timeout (Node setTimeout max ~24.8 days). */
@@ -189,6 +190,13 @@ function validateAutonomyConsistency(implementer, lane, laneName, label) {
   ) {
     return `${label}: lane ${laneName}: readOnly contradicts permissionMode ${JSON.stringify(lane.permissionMode)}`;
   }
+  if (
+    implementer === "devin" &&
+    typeof lane.permissionMode === "string" &&
+    lane.permissionMode !== "normal"
+  ) {
+    return `${label}: lane ${laneName}: readOnly contradicts permissionMode ${JSON.stringify(lane.permissionMode)}`;
+  }
   if (implementer === "cursor" && lane.force === true) {
     return `${label}: lane ${laneName}: readOnly contradicts force true`;
   }
@@ -256,6 +264,9 @@ function validateDialValue(implementer, field, value, laneName, label) {
   if (field === "permissionMode" && implementer === "zcode" && !ZCODE_MODE.includes(value)) {
     return `${label}: lane ${laneName}.permissionMode must be one of: ${ZCODE_MODE.join(", ")}`;
   }
+  if (field === "permissionMode" && implementer === "devin" && !DEVIN_PERMISSION.includes(value)) {
+    return `${label}: lane ${laneName}.permissionMode must be one of: ${DEVIN_PERMISSION.join(", ")}`;
+  }
   if (field === "variant") {
     // OpenCode appends --variant on win32 shell:true; reject cmd metacharacters.
     if (!MODEL_TOKEN.shellSafe.test(value)) {
@@ -288,6 +299,7 @@ function validateModelOrProvider(implementer, field, value, laneName, label) {
     implementer === "omp" ||
     implementer === "opencode" ||
     implementer === "commandcode" ||
+    implementer === "devin" ||
     // codex (and any other win32 shell:true relay) must not accept cmd metacharacters in -m.
     implementer === "codex" ||
     IMPLEMENTER_BY_KEY[implementer]?.winShell

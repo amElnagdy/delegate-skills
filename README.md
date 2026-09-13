@@ -71,6 +71,7 @@ Skip setup when you want one implementer or one-off dials. Pick the skill for a 
 | [`codex-delegate`](skills/codex-delegate/SKILL.md) | [OpenAI Codex](https://github.com/openai/codex) (`codex`) | `--sandbox workspace-write` | `--read-only` | `--resume-last`, `--session <id>` |
 | [`commandcode-delegate`](skills/commandcode-delegate/SKILL.md) | [Command Code](https://commandcode.ai/docs/headless) (`cmd`; `cmdc` on Windows) | `--yolo` — the only headless write state; no sandbox [^commandcode] | `--read-only` (withheld tools + `plan`) | `--continue-last`, `--session <id>` |
 | [`cursor-delegate`](skills/cursor-delegate/SKILL.md) | [Cursor Agent](https://cursor.com/cli) (`cursor-agent`) | `--force`; `--no-force` withholds command approval | `--read-only` (plan mode) | `--resume-last`, `--session <id>` |
+| [`devin-delegate`](skills/devin-delegate/SKILL.md) | [Devin CLI](https://devin.ai/docs) (`devin`) | `--permission-mode smart` default; `dangerous` opt-in; no `--sandbox` [^devin] | `--read-only` (`--permission-mode normal` — headless rejects writes/exec) | `--resume-last` (`--continue`), `--session <id>` (`--resume`) |
 | [`grok-delegate`](skills/grok-delegate/SKILL.md) | Grok Build (`grok`) | workspace-scoped; `--full-access` opt-in | `--read-only` — best-effort [^grok] | `--resume-last`, `--session <id>` |
 | [`kimi-delegate`](skills/kimi-delegate/SKILL.md) | [Kimi Code](https://moonshotai.github.io/kimi-code/en/) (`kimi`) | `auto permission mode`, always | — [^none] | `--resume-last`, `--session <id>` |
 | [`opencode-delegate`](skills/opencode-delegate/SKILL.md) | [OpenCode](https://opencode.ai) (`opencode`) | agent `build` (`--model` required) | `--read-only` (agent `plan`) | `--resume-last`, `--session <id>` |
@@ -90,6 +91,13 @@ the brief's path list is guidance, not containment. A worktree isolates the chec
 container or another OS-enforced sandbox is required when writes outside the target tree are
 unacceptable. `touchedFiles` is a review aid based on `git status`; it cannot show ignored files or
 writes outside the repository.
+
+[^devin]: Devin's `--sandbox` forces `autonomous` mode, under which the `edit`/`write` tools still
+prompt. A `--print` run cannot answer a prompt — it rejects the tool and continues — so
+`--sandbox`/`autonomous` is unusable headlessly and this relay never passes `--sandbox`. Default write
+autonomy is `--permission-mode smart`; `dangerous` is the unrestricted opt-in. `accept-edits` alone
+cannot run an implementation (its first gate command is rejected). Canonical names only:
+`normal`/`accept-edits`/`smart`/`dangerous` — not the aliases `auto`/`yolo`/`bypass`.
 
 [^none]: No CLI-enforced read-only mode. `touchedFiles` and the diff are what you review against, not
 a guarantee: they are post-run `git status` in the workspace, so they cannot show ignored files,
@@ -252,6 +260,11 @@ Per skill — platform, CLI version, and what the run exercised:
   `--read-only` touching nothing; `--session <id>` resume applying a delta brief; usage errors exiting
   2. A maintainer-run native macOS plan-mode smoke against the same version captured model, session,
   and usage with no touched files.
+- `devin-delegate` — macOS, `devin` 3000.10.21: contract-tested against the shared smoke matrix.
+  Live `--print` write run against a throwaway git repo created `probe.txt` containing `ok`, with
+  `status: "completed"`, `permissionMode: "smart"`, and a real ATIF `sessionId`. A follow-up
+  `--resume-last` (`--continue`) delta brief appended a second line to that file with the same
+  session id. Native Windows is unverified (docs route Windows through WSL).
 - `grok-delegate` — macOS, `grok` 0.2.101: streaming-json report capture, file-based brief delivery,
   resume; read-only is best-effort by measurement, hence the violation flag.
 - `kimi-delegate` — macOS, `kimi` 0.24.0: headless `-p` edit run, stream-json parsing, and both
