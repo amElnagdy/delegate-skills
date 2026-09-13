@@ -418,6 +418,39 @@ if (["omp-success", "omp-error"].includes(process.env.SMOKE_MODE)) {
       console.log(JSON.stringify(resultEvent));
     }
   });
+} else if (["kilo-success", "kilo-error"].includes(process.env.SMOKE_MODE)) {
+  let brief = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (chunk) => { brief += chunk; });
+  process.stdin.on("end", () => {
+    const failed = process.env.SMOKE_MODE === "kilo-error";
+    if (process.env.SMOKE_ARGS_FILE) fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify({ args, brief }));
+    console.log(JSON.stringify({
+      type: "text",
+      sessionID: "ses_kilo-1",
+      part: { id: "prt_1", type: "text", text: failed ? "fake kilo failed" : "fake kilo completed" },
+    }));
+    console.log(JSON.stringify({
+      type: "step_finish",
+      sessionID: "ses_kilo-1",
+      part: { cost: failed ? 0 : 0.001 },
+    }));
+    process.exit(failed ? 1 : 0);
+  });
+} else if (["muse-success", "muse-unfinished"].includes(process.env.SMOKE_MODE)) {
+  if (process.env.SMOKE_ARGS_FILE) fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify(args));
+  console.log(JSON.stringify({
+    payload_type: "session.run.linked",
+    stream: { kind: "session", id: "01a06628-aaaa-bbbb-cccc-ddddeeeeffff" },
+    payload: {},
+  }));
+  if (process.env.SMOKE_MODE === "muse-success") {
+    console.log(JSON.stringify({
+      payload_type: "run.terminal.completed",
+      payload: { kind: "run_terminal", terminal: "completed", text: "fake muse completed" },
+    }));
+  }
+  process.exit(0);
 } else {
   process.stdin.resume();
   const grandProgram = process.env.SMOKE_GRAND_IGNORES_SIGTERM

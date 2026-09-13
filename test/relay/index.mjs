@@ -20,6 +20,8 @@ import { runAider } from "./aider.mjs";
 import { runCopilot } from "./copilot.mjs";
 import { runCommandcode } from "./commandcode.mjs";
 import { runZcode } from "./zcode.mjs";
+import { runKilo } from "./kilo.mjs";
+import { runMuse } from "./muse.mjs";
 
 export const runners = [
   ["package-shape", runPackageShape],
@@ -43,5 +45,7 @@ export const runners = [
   ["timeout-tree", runTimeoutTree],
   ["abort", runAbort],
   ["zcode", runZcode],
+  ["kilo", runKilo],
+  ["muse", runMuse],
   ["delegate-setup", runDelegateSetup],
 ];

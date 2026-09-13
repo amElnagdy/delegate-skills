@@ -72,7 +72,9 @@ Skip setup when you want one implementer or one-off dials. Pick the skill for a 
 | [`commandcode-delegate`](skills/commandcode-delegate/SKILL.md) | [Command Code](https://commandcode.ai/docs/headless) (`cmd`; `cmdc` on Windows) | `--yolo` — the only headless write state; no sandbox [^commandcode] | `--read-only` (withheld tools + `plan`) | `--continue-last`, `--session <id>` |
 | [`cursor-delegate`](skills/cursor-delegate/SKILL.md) | [Cursor Agent](https://cursor.com/cli) (`cursor-agent`) | `--force`; `--no-force` withholds command approval | `--read-only` (plan mode) | `--resume-last`, `--session <id>` |
 | [`grok-delegate`](skills/grok-delegate/SKILL.md) | Grok Build (`grok`) | workspace-scoped; `--full-access` opt-in | `--read-only` — best-effort [^grok] | `--resume-last`, `--session <id>` |
+| [`kilo-delegate`](skills/kilo-delegate/SKILL.md) | Kilo (`kilo`) | agent `code` (`--model` optional) | `--read-only` (agent `plan`) | `--resume-last`, `--session <id>` |
 | [`kimi-delegate`](skills/kimi-delegate/SKILL.md) | [Kimi Code](https://moonshotai.github.io/kimi-code/en/) (`kimi`) | `auto permission mode`, always | — [^none] | `--resume-last`, `--session <id>` |
+| [`muse-delegate`](skills/muse-delegate/SKILL.md) | Muse Code (`muse`) | `--disable-approval` (sandbox on); not `--yolo` [^muse] | `--read-only` (`--disable-write` + `--disable-shell`) | `--session <id>` (no headless `--resume-last`) |
 | [`opencode-delegate`](skills/opencode-delegate/SKILL.md) | [OpenCode](https://opencode.ai) (`opencode`) | agent `build` (`--model` required) | `--read-only` (agent `plan`) | `--resume-last`, `--session <id>` |
 | [`pi-delegate`](skills/pi-delegate/SKILL.md) | [Pi](https://github.com/earendil-works/pi-mono) (`pi`) | full local tools — no sandbox, no permission modes [^none]; project trust opt-in | `--read-only` (`read,grep,find,ls`) | `--resume-last`, `--session <id>` |
 | [`omp-delegate`](skills/omp-delegate/SKILL.md) | [Oh My Pi](https://github.com/can1357/oh-my-pi) (`omp`) | `--yolo` (`tools.approvalMode: yolo`); project `.omp` extras off unless `--approve` | `--read-only` (`read,grep,glob`) | `--resume-last`, `--session <id>` |
@@ -102,6 +104,11 @@ is configurable through it.
 
 [^grok]: `grok` cannot be prevented from writing headlessly. The relay reports a tri-state
 `readOnlyViolation` tripwire for detected Git-visible changes; it does not enforce or attribute them.
+
+[^muse]: Write `muse exec` keeps Muse's sandbox on and passes `--disable-approval` so a headless run
+cannot hang on a tool-approval prompt. `--read-only` adds `--disable-write` and `--disable-shell`.
+`--yolo` is not the default and is not exposed. Upstream's launcher is Darwin/Linux only. Headless
+resume is `--session-id`; `muse resume` is TUI-only.
 
 [^zcode]: ZCode ships its CLI **inside the desktop app** — there is no `zcode` on PATH, no npm
 package, and the public docs cover only the GUI. The relay resolves it from
@@ -331,6 +338,17 @@ Per skill — platform, CLI version, and what the run exercised:
   just that the id was accepted. Contract-tested: argument validation,
   bounded version preflight, missing binary, result parsing, and whole-process-tree timeout/abort
   cleanup. No Windows or Linux run is recorded.
+- `kilo-delegate` — macOS, `kilo` 7.4.22: `--read-only` (`plan`) run reported the briefed README
+  line and left the tracked tree unchanged. Contract-tested: argv exactness (`code`/`plan`, `--auto`
+  withheld on plan, `--continue`, `--session`, `~` in `--model`), bounded version preflight, missing
+  binary, result parsing, and whole-process-tree timeout/abort cleanup. No write run or Windows run
+  is recorded here.
+- `muse-delegate` — macOS, Muse Code 1.0.2: `--read-only` `--provider echo` run completed with a
+  terminal event and left the tracked tree unchanged. Contract-tested: argv exactness (`muse exec`
+  with `--disable-approval` / `--disable-write` / `--disable-shell`, no `--yolo`, `--session-id`,
+  `--resume-last` rejected), exit 0 without `run.terminal.completed` reported `failed`, bounded
+  version preflight, missing binary, and whole-process-tree timeout/abort cleanup. Upstream's
+  launcher is UNIX-only. No write run or Windows run is recorded here.
 - `opencode-delegate`, `vibe-delegate` — contract-tested only: argument validation, bounded version
   preflight, missing binary, result parsing, and whole-process-tree timeout/abort cleanup. No
   end-to-end run is recorded here.
@@ -354,9 +372,10 @@ Per skill — platform, CLI version, and what the run exercised:
   flag-override against relays. The smoke suite runs live discovery against installed CLIs
   (versions vary by machine). Native Windows discover smoke not yet claimed.
 
-Not yet verified: native Windows launches for `claude`, exact-head `cline`, `grok`, `kimi`,
-`pi`, `qoder`, `vibe`, and `omp` (`codex`/`opencode`/`grok`/`commandcode` have contract-tested `.cmd` shim handling;
-Cursor serializes a pre-joined, quoted command; Qoder and Vibe target their documented native executables).
+Not yet verified: native Windows launches for `claude`, exact-head `cline`, `grok`, `kilo`, `kimi`,
+`muse`, `pi`, `qoder`, `vibe`, and `omp` (`codex`/`opencode`/`grok`/`commandcode` have contract-tested `.cmd` shim handling;
+Cursor serializes a pre-joined, quoted command; Qoder, Vibe, Kilo, and Muse target native executables —
+Muse's upstream launcher is UNIX-only).
 Claude's own shell sandbox is unsupported on native Windows regardless of launch mechanics, and upstream
 Vibe officially targets UNIX. A native Linux `cursor-agent` run is unverified. The full delegate →
 review → commit loop is designed for and run on Claude Code; other orchestrators (Cursor, …) are
