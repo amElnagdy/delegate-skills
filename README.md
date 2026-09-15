@@ -72,6 +72,7 @@ Skip setup when you want one implementer or one-off dials. Pick the skill for a 
 | [`commandcode-delegate`](skills/commandcode-delegate/SKILL.md) | [Command Code](https://commandcode.ai/docs/headless) (`cmd`; `cmdc` on Windows) | `--yolo` — the only headless write state; no sandbox [^commandcode] | `--read-only` (withheld tools + `plan`) | `--continue-last`, `--session <id>` |
 | [`cursor-delegate`](skills/cursor-delegate/SKILL.md) | [Cursor Agent](https://cursor.com/cli) (`cursor-agent`) | `--force`; `--no-force` withholds command approval | `--read-only` (plan mode) | `--resume-last`, `--session <id>` |
 | [`grok-delegate`](skills/grok-delegate/SKILL.md) | Grok Build (`grok`) | workspace-scoped; `--full-access` opt-in | `--read-only` — best-effort [^grok] | `--resume-last`, `--session <id>` |
+| [`hermes-delegate`](skills/hermes-delegate/SKILL.md) | [Hermes Agent](https://hermes-agent.nousresearch.com/docs) (`hermes`) | headless `chat --query-file -Q`; explicit `--yolo` on write runs; no sandbox or permission modes exist [^none] | `--read-only` (restricted `--toolsets`) — best-effort [^none] | `--resume-last`, `--resume <id>` |
 | [`kimi-delegate`](skills/kimi-delegate/SKILL.md) | [Kimi Code](https://moonshotai.github.io/kimi-code/en/) (`kimi`) | `auto permission mode`, always | — [^none] | `--resume-last`, `--session <id>` |
 | [`opencode-delegate`](skills/opencode-delegate/SKILL.md) | [OpenCode](https://opencode.ai) (`opencode`) | agent `build` (`--model` required) | `--read-only` (agent `plan`) | `--resume-last`, `--session <id>` |
 | [`pi-delegate`](skills/pi-delegate/SKILL.md) | [Pi](https://github.com/earendil-works/pi-mono) (`pi`) | full local tools — no sandbox, no permission modes [^none]; project trust opt-in | `--read-only` (`read,grep,find,ls`) | `--resume-last`, `--session <id>` |
@@ -264,6 +265,19 @@ Per skill — platform, CLI version, and what the run exercised:
 - `kimi-delegate` — macOS, `kimi` 0.24.0: headless `-p` edit run, stream-json parsing, and both
   resume paths — the relay's `--session`/`--resume-last`, which drive Kimi's own `--session` and
   `--continue`.
+- `hermes-delegate` — macOS, `hermes` 0.20.5: **live edit run verified**. A relay dispatch against a
+  throwaway git repository had Hermes add a `slugify()` function plus three tests; the project gate was
+  re-run independently by the orchestrator (2 tests before, 5 passing after), the diff matched the
+  brief with no writes outside the three named files, and `HEAD` was untouched — the relay does not
+  commit, and the run did not either. A second dispatch with `--resume <id>` verified resume through the
+  relay: a delta brief extended the function, with the session id from the first run carried forward. A
+  `--read-only` dispatch (restricted `--toolsets memory,search`, no `--yolo`) left the target write
+  unperformed — Hermes reported having no file tools and refused, so the tree stayed clean. Negatives:
+  a missing `hermes` (via `HERMES_DELEGATE_BIN`) exits 127 and writes `status: "hermes_unavailable"`;
+  bogus flags exit 2 with no result file. Re-verified on `hermes` 0.21.2 (2026-09-13): the write, resume,
+  and read-only scenarios above were re-run through the relay on a throwaway repo with the same outcomes
+  (exact `touchedFiles`, session id captured from the child's stderr, read-only refusal for lack of file
+  tools, clean tree), and every flag the relay passes still exists on `hermes chat`. Windows untested.
 - `pi-delegate` — macOS: stdin brief delivery, explicit provider and model selection, JSON
   session/provider/model/usage capture, and a `--read-only` run leaving a clean tree. Write,
   `--session`, and `--resume-last` runs are contributor-reported.
