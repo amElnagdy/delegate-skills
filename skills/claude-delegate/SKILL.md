@@ -8,7 +8,7 @@ description: >-
   separate Claude session." Do not trigger merely because the current orchestrator is Claude, and do
   not use when the user asks the current Claude to implement directly without delegation.
 license: MIT
-compatibility: Requires the `claude` CLI (Claude Code) installed and authenticated, Node 18+, and git. The orchestrating agent must be able to run shell commands and read files. Claude's shell sandbox requires macOS, Linux, or WSL2; native Windows launch is pending verification.
+compatibility: Requires the `claude` CLI (Claude Code) installed and authenticated, Node 18+, and git. The orchestrating agent must be able to run shell commands and read files. Claude's shell sandbox requires macOS, Linux, or WSL2; native Windows launch is pending verification. The optional --autocompact flag requires claude 2.1.221 or newer.
 metadata:
   version: 0.5.0
 ---
@@ -65,6 +65,7 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 # continue the latest session:           add --resume-last
 # continue the recorded session:         add --session <id>
 # choose limits:                         add --max-turns 40 --max-budget-usd 10
+# set the auto-compact window:           add --autocompact 400k
 # hard relay deadline:                   add --timeout 2h
 # inspect every option:                  node .../relay.mjs --help
 ```
@@ -74,6 +75,8 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 The relay runs `claude -p --output-format stream-json --verbose`, sends the brief through stdin, and
 writes artifacts under the system temp directory by default. It never uses `--bg` or `--bare`, and it
 never commits. See [references/dispatch-and-poll.md](references/dispatch-and-poll.md).
+
+`--autocompact <auto|tokens>` passes Claude Code's auto-compact window setting on every new or resumed invocation, and needs Claude Code `2.1.221` or newer — older builds fail the dispatch with `unknown option '--autocompact'`. The installed CLI owns the accepted range (`auto`, or 100k–1M tokens); the relay records the requested value but does not claim that Claude applied or enforced it.
 
 ### 3. Wait
 

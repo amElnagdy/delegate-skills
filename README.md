@@ -248,6 +248,7 @@ Per skill — platform, CLI version, and what the run exercised:
   `--session`/`--resume-last` resume; `claude_unavailable`/127 and usage errors exiting 2 without a
   result file; deny rules and the shell sandbox blocking `git commit`, `git push`, `git -C <dir> push`,
   a nested `claude`, and a `$HOME` write.
+  macOS, `claude` 2.1.271: `--autocompact` argument handling only. The installed CLI accepted `auto`, `400k`, `1M`, `200`, and `200000` and rejected `auto2`, `50k`, `2m`, `99`, `1000001`, and `0` with exit 1, each observed through `claude --autocompact <value> --help`, which validates the option and exits before any model call; `claude` 2.1.220 rejects the option itself with `unknown option '--autocompact'`, which is the documented 2.1.221 floor. The relay's pass-through, resume re-pass, and `result.json` record are contract-tested against the smoke matrix; no delegated run has been dispatched with `--autocompact` set.
 - `cursor-delegate` — Windows, `cursor-agent` 2026.07.23-e383d2b: write run under `--force`; plan-mode
   `--read-only` touching nothing; `--session <id>` resume applying a delta brief; usage errors exiting
   2. A maintainer-run native macOS plan-mode smoke against the same version captured model, session,
