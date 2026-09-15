@@ -63,7 +63,8 @@
  *   --timeout <dur>         Relay-side watchdog (default: 30m). Copilot has no
  *                           timeout flag; durations use h/m/s strings.
  *   --out-dir <dir>         Where to write run artifacts (default: a fresh dir
- *                           under the system temp dir).
+ *                           under the system temp dir). The relay passes it to
+ *                           copilot as `--add-dir` so the brief stays readable.
  *   -h, --help              Show this help.
  *
  * Result: written to <out-dir>/result.json and summarized on stdout —
@@ -401,6 +402,11 @@ function buildArgv(opts, briefPath) {
   if (opts.model) argv.push("--model", opts.model);
   if (opts.effort) argv.push("--effort", opts.effort);
 
+  // Copilot only reads files under its cwd, the system temp dir, and --add-dir
+  // paths. A custom --out-dir elsewhere left the @brief unreadable and the run
+  // did nothing (verified on copilot 1.0.83), so always grant the run dir.
+  argv.push("--add-dir", quotePath(dirname(briefPath)));
+
   // Deliver the brief via a file, not argv: keeps it out of the host process
   // list, isn't bounded by the OS arg-length cap, and a brief that begins with
   // "-" can't be misread as a flag. prepareRunDir already wrote run.briefPath.
@@ -705,7 +711,9 @@ function dispatchToCopilot(opts, run, writeResult, onReady) {
     const mapped = code ?? (constants.signals[signal] ? 128 + constants.signals[signal] : 1);
     const exitCode = succeeded ? 0 : mapped === 0 ? 1 : mapped;
     const denialError = deniedRun
-      ? `copilot auto-denied a tool call in headless mode: ${denialMessage}. Pass --allow-all-tools to grant full tool permissions`
+      ? opts.allowAllTools
+        ? `copilot denied a tool call despite --allow-all-tools: ${denialMessage}. This is a path or URL permission, not a tool one - copilot only reads the working directory, the system temp dir, and --add-dir paths`
+        : `copilot auto-denied a tool call in headless mode: ${denialMessage}. Pass --allow-all-tools to grant full tool permissions`
       : null;
     const result = writeResult({
       status: succeeded ? "completed" : watchdogFired ? "timeout" : "failed",
