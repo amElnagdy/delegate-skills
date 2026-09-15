@@ -36,10 +36,41 @@ If no CLI is found — including when you name one explicitly that does not exis
 | `--disallowed-tools <list>` | Comma/space-separated denylist, e.g. `"Write,Edit,Bash"`. Enforced by ZCode. |
 | `--session <id>` | Continue a specific session by `sess_…` id from a prior `result.json`. |
 | `--resume-last` | Continue the latest session **for `--cd`**. Mutually exclusive with `--session`. |
+| `--model <provider/model>` | Pin one provider and model for this run. Requires the two flags below. Mutually exclusive with `--session` and `--resume-last`. |
+| `--model-base-url <url>` | The provider's endpoint. Required with `--model`. |
+| `--model-kind <kind>` | `anthropic`, `openai`, or `openai-compatible`. Required with `--model`. |
 | `--zcode-path <file>` | Point at the CLI explicitly. |
 | `--timeout <dur>` | Relay-side watchdog (default: off). `30m`, `2h`. ZCode has no timeout flag of its own. |
 | `--out-dir <dir>` | Where to write run artifacts (default: a fresh dir under the system temp dir). |
 | `-h, --help` | Show help. |
+
+### How `--model` selects a provider
+
+ZCode has no `--model` flag; it reads the model from `~/.zcode/cli/config.json`, and it derives that
+path from the process home directory. So the relay generates a config under
+`<home>/.zcode/cli/config.json` pinning the named provider and model, and launches the ZCode child
+with `HOME` and `USERPROFILE` both set to that home — both, because `os.homedir()` reads a different
+one per platform. The relay's own environment is untouched.
+
+That home is a fresh directory under the **system temp dir**, not under `--out-dir`, and
+`result.json` records it as `modelHome`. It is deliberately outside the repository: ZCode fills a
+home with live state — a session database, logs, a plugin cache — and `--out-dir` can point into the
+repo under review. The read-only tripwire cannot exclude a tree whose contents do not exist until
+the run creates them, since git collapses an untracked directory into a single entry and the
+exclusion list matches whole paths. Keeping the home out of the repository is what makes a
+`--model --read-only` run report `readOnlyViolation: false` instead of accusing ZCode of writes it
+never made.
+
+The generated provider block carries `kind`, `baseURL`, and `apiKeyRequired`, and no `apiKey`. The
+key comes from the environment, which is what keeps this relay's promise that it reads and writes no
+credentials. `result.json` records the pinned `model` and the `modelHome` it generated; both are
+`null` on a run without `--model`, which leaves the home directory alone entirely.
+
+Because ZCode's session store also lives under that home, a `--model` run's session does not survive
+the run — hence the mutual exclusion with `--session` and `--resume-last`.
+
+Both the home-derived config path and the environment fallback for the key are undocumented ZCode
+behaviour, verified against zcode 0.16.5.
 
 ### Why `build` and `edit` are rejected
 

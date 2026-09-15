@@ -370,8 +370,16 @@ export const IMPLEMENTERS = Object.freeze([
     // No auth-status command exists, and `zcode login` fails with ZaiCliOAuthError
     // (seen on 0.16.1 and 0.16.3), so auth stays unknown rather than guessed.
     authProbe: null,
-    // No --model flag: the model is chosen in the CLI's own config file.
-    modelProbe: null,
+    // No --model flag and no `models` command: the catalogue lives in the CLI's
+    // own config file, which is therefore the only offline listing. That file
+    // also holds an API key, so the parser lifts provider routing and model ids
+    // and nothing else, and a malformed file reports "failed" rather than
+    // surfacing a single byte of it.
+    modelProbe: {
+      homeSubdir: ".zcode/cli",
+      file: "config.json",
+      format: "zcode-config",
+    },
     // ~/.zcode/cli holds sess_* directories under several subdirectories, but their
     // counts disagree, so none is proven one-per-session. Unknown, not guessed.
     usageProbe: null,
