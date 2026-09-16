@@ -22,14 +22,16 @@
  * Grok's default permission mode is `ask`, which blocks on approval prompts in
  * a non-interactive pipe. The relay therefore sets autonomy explicitly:
  *   default        — `--always-approve --sandbox workspace` (write in CWD)
- *   --read-only    — `--sandbox read-only --permission-mode plan` (review intent)
+ *   --read-only    — `--always-approve --sandbox read-only` (review intent)
  *   --full-access  — `--always-approve --sandbox off` (unrestricted; opt-in)
  *
- * `--read-only` is best-effort, NOT a hard guarantee: on grok 0.2.101 the
- * read-only sandbox governs out-of-workspace filesystem/network access, not the
- * agent's own edit tool, and headless `plan` mode is advisory — a determined run
- * can still write the working tree. Always confirm `touchedFiles` after a
- * read-only run; don't rely on the flag alone.
+ * `--read-only` is kernel-enforced on grok 1.0.25 (Seatbelt on macOS, Landlock
+ * on Linux): grok's write/search_replace tools and shell redirects alike fail
+ * with EPERM. It is not total, though — the profile still permits writes to
+ * /tmp, /var/tmp and ~/.grok/, so a repo under one of those paths is NOT
+ * protected, and on macOS the profile does not restrict child-process network.
+ * Always confirm `touchedFiles` after a read-only run; don't rely on the flag
+ * alone.
  * The relay reports `readOnlyViolation` as true when git porcelain or an
  * already-dirty Git-visible path proves a change, false when coverage is
  * complete and detects none, and null when coverage is incomplete. It cannot
@@ -773,17 +775,33 @@ function timestamp() {
 
 function autonomyFlags(autonomy) {
   // Maps the relay's three autonomy modes onto Grok's native --sandbox /
-  // --always-approve / --permission-mode flags. Grok's default permission mode
-  // is `ask`, which hangs a headless pipe — so every path sets autonomy
-  // explicitly. Sandbox profiles (verified valid on grok 0.2.101):
-  //   workspace  — write CWD /tmp ~/.grok/   (workspace-write analog)
-  //   read-only  — review intent ONLY; the sandbox restricts out-of-workspace
-  //                access, not grok's own edit tool, so a headless run can still
-  //                write the tree. Best-effort — verify touchedFiles afterward.
+  // --always-approve flags. Grok's default permission mode is `ask`, which
+  // hangs a headless pipe — so every path sets autonomy explicitly.
+  // Sandbox profiles (verified on grok 1.0.25):
+  //   workspace  — read everywhere; write CWD + /tmp + /var/tmp + ~/.grok/
+  //   read-only  — read everywhere; write ONLY /tmp + /var/tmp + ~/.grok/
   //   off        — unrestricted              (full-access opt-in)
   switch (autonomy) {
     case "read-only":
-      return ["--sandbox", "read-only", "--permission-mode", "plan"];
+      // Enforcement is the sandbox, not the permission mode. This previously
+      // paired the sandbox with `--permission-mode plan`, but plan mode is
+      // designed not to execute tools: headless, grok's first
+      // run_terminal_command came back "User cancelled the execution" and the
+      // session ended with stopReason=cancelled, so a read-only run returned no
+      // work at all. Any command grok cannot statically prove safe — an
+      // `echo "${VAR:-unset}"` is enough — trips it.
+      //
+      // The read-only sandbox is kernel-enforced (Seatbelt on macOS, Landlock
+      // on Linux) and denies grok's own write/search_replace tools AND shell
+      // redirects with EPERM, so --always-approve is safe here and is a
+      // stronger guarantee than advisory plan mode. This also brings grok in
+      // line with codex-delegate, which likewise leans on its sandbox alone.
+      //
+      // Caveat: the profile still permits writes to /tmp, /var/tmp and
+      // ~/.grok/, so a repo under one of those paths is NOT protected by it,
+      // and on macOS the profile does not restrict child-process network.
+      // Keep verifying touchedFiles after a read-only run.
+      return ["--sandbox", "read-only", "--always-approve"];
     case "full-access":
       return ["--always-approve", "--sandbox", "off"];
     case "workspace-write":
