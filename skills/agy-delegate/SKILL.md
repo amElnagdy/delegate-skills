@@ -126,14 +126,23 @@ requests without prompting, including a request to act outside the sandbox. Do n
 `--sandbox` as an enforced boundary when the flags are combined; treat the run as full access.
 If headless `--print` auto-denies a write, the relay reports `status: "failed"` and exits non-zero.
 The relay fingerprints the working tree before and after a `--read-only` run to report
-`readOnlyViolation` in `result.json`. Settings allow-rules under `permissions.allow` in
-`~/.gemini/antigravity-cli/settings.json` do apply to headless `--print` runs — a `write_file` rule
-naming the workspace is what allows a headless write. On Windows, however, an open upstream defect in
-Antigravity's permission engine
-([issue #614](https://github.com/google-antigravity/antigravity-cli/issues/614)) splits resolved paths on
-whitespace, preventing `command(<name>)` rules from matching binaries installed under paths with spaces
-such as `C:\Program Files\...`. See [references/dispatch-and-poll.md](references/dispatch-and-poll.md)
-for Windows workarounds. Do not add the bypass flag without explicit human approval.
+`readOnlyViolation` in `result.json`. Settings allow-rules do apply to headless `--print` runs, but
+two traps make a plain `command(<name>)` rule ineffective more often than not — independent of each
+other, and neither Windows-only. First, `command(<name>)` matches an *exact* command line with no
+arguments, so it only ever allows a bare `git` or `node` with nothing after it, which is not a command
+any real task runs; use `command(regex:git .+)` instead (see
+[references/dispatch-and-poll.md](references/dispatch-and-poll.md)). Second, on Windows, an open
+upstream defect in Antigravity's permission engine
+([issue #614](https://github.com/google-antigravity/antigravity-cli/issues/614)) splits resolved paths
+on whitespace, so a binary under `C:\Program Files\...` — which is where `git` itself commonly lives,
+making this the single most common trigger for delegated coding tasks, not just node/npm — is matched
+as its first fragment and no `command(<name>)` rule can match it. Verified live on agy 1.2.5: the
+allow-rules that actually take effect are `userSettings.globalPermissionGrants.allow` in
+`~/.gemini/config/config.json`, not `permissions.allow` in `~/.gemini/antigravity-cli/settings.json`
+(agy's own denial message points at the latter; on this version it is not the file read). This may be
+version-dependent — recheck if you're on a different `agy` version. See
+[references/dispatch-and-poll.md](references/dispatch-and-poll.md) for the full writeup. Do not add
+the bypass flag without explicit human approval.
 
 ## Authorization model
 
