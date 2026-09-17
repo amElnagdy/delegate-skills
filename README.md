@@ -111,6 +111,11 @@ they block every write tool and exit 0 having changed nothing, and the relay rej
 than report that as success. ZCode offers `--disallowed-tools` but no `--allowed-tools`, so
 capability can be subtracted, never enumerated. Where `zcode login` fails with `OAuth response is
 not valid JSON`, the key comes from `ZCODE_API_KEY` / `ANTHROPIC_API_KEY` / `ZAI_API_KEY` instead.
+ZCode also has no `--model` flag — it reads the model from its own config file, at a path derived
+from the process home directory — so the relay's `--model` generates a config pinning one provider
+and model in a home belonging to the run. That generated config holds routing only, never a key, so
+the key still comes from the environment; and because ZCode's session store lives under the same
+home, `--model` cannot be combined with `--session` or `--resume-last`.
 
 Each skill name links to its `SKILL.md`, which owns that implementer's prerequisites, flags, and
 caveats. Building one for another CLI? [Claim it first](../../issues?q=is%3Aissue+label%3Aimplementer),
@@ -316,6 +321,16 @@ Per skill — platform, CLI version, and what the run exercised:
   narration rather than a distinct final-message event, and `--cwd` governed shell commands while
   the agent's file tool resolved bare relative paths against `$HOME`. `--no-snapshot`, `--profile`,
   `--skill`, and `--mcp` are contract-tested only.
+- `zcode-delegate` — Windows, `zcode` 0.16.5: `--model` selection — a read-only (`plan`) dispatch
+  pinned to `opencode-zen/mimo-v2.5-free` over an `openai-compatible` endpoint completed, driven by a
+  config the relay generated in the run's own home; that file carried the provider's `kind`,
+  `baseURL`, and `apiKeyRequired` and no `apiKey`, and the key was read by ZCode from
+  `OPENCODE_ZEN_API_KEY` in the environment. Contract-tested alongside it: a partial flag set, an
+  unqualified model id, an unknown `--model-kind`, a non-http base URL, `--model` with `--session`
+  and with `--resume-last`, and `--model` with no key variable present — each exiting 2 before any
+  artifact; the generated config asserted free of an `apiKey` field; both `HOME` and `USERPROFILE`
+  asserted repointed on the child; and a run without `--model` leaving the home untouched. Not run
+  against an `anthropic`-kind provider through these flags: Z.AI's quota was exhausted at the time.
 - `zcode-delegate` — Windows, `zcode` 0.16.1: read-only (`plan`) run leaving a clean tree with the
   Git tripwire false; write run under `yolo` creating the briefed file and reporting it in
   `touchedFiles`; `--session` resume with an attached delta brief, which recalled the earlier turn;
