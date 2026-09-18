@@ -21,6 +21,7 @@ import { runAider } from "./aider.mjs";
 import { runCopilot } from "./copilot.mjs";
 import { runCommandcode } from "./commandcode.mjs";
 import { runZcode } from "./zcode.mjs";
+import { runDsh } from "./dsh.mjs";
 import { runGrokGitTrust } from "./grok-git-trust.mjs";
 
 export const runners = [
@@ -47,5 +48,6 @@ export const runners = [
   ["abort", runAbort],
   ["orphan-stdio", runOrphanStdio],
   ["zcode", runZcode],
+  ["dsh", runDsh],
   ["delegate-setup", runDelegateSetup],
 ];

@@ -34,6 +34,7 @@ import {
   OMP_THINKING,
   CODEX_SANDBOX,
   CONFIG_VERSION,
+  DSH_PERMISSION,
   GROK_SANDBOX,
   IMPLEMENTER_BY_KEY,
   LANE_NAME,
@@ -169,6 +170,11 @@ function validateLane(name, lane, label) {
       return `${label}: lane ${name}.model must be provider/model (e.g. opencode/grok)`;
     }
   }
+  // The relay derives one agent-default-model overlay from both halves and exits 2
+  // on a provider with no model, so a lane must not be able to store that pair.
+  if (impl.key === "dsh" && typeof lane.provider === "string" && typeof lane.model !== "string") {
+    return `${label}: lane ${name}: dsh provider needs model`;
+  }
   const autonomyError = validateAutonomyConsistency(impl.key, lane, name, label);
   if (autonomyError) return autonomyError;
   return null;
@@ -186,6 +192,13 @@ function validateAutonomyConsistency(implementer, lane, laneName, label) {
     implementer === "qoder" &&
     typeof lane.permissionMode === "string" &&
     lane.permissionMode !== "plan"
+  ) {
+    return `${label}: lane ${laneName}: readOnly contradicts permissionMode ${JSON.stringify(lane.permissionMode)}`;
+  }
+  if (
+    implementer === "dsh" &&
+    typeof lane.permissionMode === "string" &&
+    lane.permissionMode !== "read-only"
   ) {
     return `${label}: lane ${laneName}: readOnly contradicts permissionMode ${JSON.stringify(lane.permissionMode)}`;
   }
@@ -255,6 +268,9 @@ function validateDialValue(implementer, field, value, laneName, label) {
   // have no permission client, so they change nothing and still exit 0.
   if (field === "permissionMode" && implementer === "zcode" && !ZCODE_MODE.includes(value)) {
     return `${label}: lane ${laneName}.permissionMode must be one of: ${ZCODE_MODE.join(", ")}`;
+  }
+  if (field === "permissionMode" && implementer === "dsh" && !DSH_PERMISSION.includes(value)) {
+    return `${label}: lane ${laneName}.permissionMode must be one of: ${DSH_PERMISSION.join(", ")}`;
   }
   if (field === "variant") {
     // OpenCode appends --variant on win32 shell:true; reject cmd metacharacters.
