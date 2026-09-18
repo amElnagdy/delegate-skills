@@ -69,7 +69,7 @@ Skip setup when you want one implementer or one-off dials. Pick the skill for a 
 | [`claude-delegate`](skills/claude-delegate/SKILL.md) | [Claude Code](https://code.claude.com/docs/en/overview) (`claude`) | `acceptEdits` + explicit tool surface | `--read-only` (`plan` mode) | `--resume-last`, `--session <id>` |
 | [`cline-delegate`](skills/cline-delegate/SKILL.md) | [Cline](https://github.com/cline/cline) (`cline`) | `--auto-approve true` in act mode; upstream sandbox not configured by the relay | `--plan` + `--auto-approve false` (relay-enforced pair) | — (headless JSON resume unsupported) |
 | [`codex-delegate`](skills/codex-delegate/SKILL.md) | [OpenAI Codex](https://github.com/openai/codex) (`codex`) | `--sandbox workspace-write` | `--read-only` | `--resume-last`, `--session <id>` |
-| [`commandcode-delegate`](skills/commandcode-delegate/SKILL.md) | [Command Code](https://commandcode.ai/docs/headless) (`cmd`) | `--yolo` — the only headless write state; no sandbox [^commandcode] | `--read-only` (withheld tools + `plan`) | `--continue-last`, `--session <id>` |
+| [`commandcode-delegate`](skills/commandcode-delegate/SKILL.md) | [Command Code](https://commandcode.ai/docs/headless) (`cmd`; `cmdc` on Windows) | `--yolo` — the only headless write state; no sandbox [^commandcode] | `--read-only` (withheld tools + `plan`) | `--continue-last`, `--session <id>` |
 | [`cursor-delegate`](skills/cursor-delegate/SKILL.md) | [Cursor Agent](https://cursor.com/cli) (`cursor-agent`) | `--force`; `--no-force` withholds command approval | `--read-only` (plan mode) | `--resume-last`, `--session <id>` |
 | [`dsh-delegate`](skills/dsh-delegate/SKILL.md) | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) — developer preview; serves hosted or local OpenAI-compatible models | `workspace-write` (`read-only` / `danger-full-access` via `DSH_PERMISSION_MODE`) | `--read-only` (sandbox-enforced, plus tripwire) | — (no headless resume; the session record is harvested for audit) [^dsh] |
 | [`grok-delegate`](skills/grok-delegate/SKILL.md) | Grok Build (`grok`) | workspace-scoped; `--full-access` opt-in | `--read-only` — best-effort [^grok] | `--resume-last`, `--session <id>` |
@@ -256,12 +256,20 @@ Per skill — platform, CLI version, and what the run exercised:
   `--session`/`--resume-last` resume; `claude_unavailable`/127 and usage errors exiting 2 without a
   result file; deny rules and the shell sandbox blocking `git commit`, `git push`, `git -C <dir> push`,
   a nested `claude`, and a `$HOME` write.
+  macOS, `claude` 2.1.271: `--autocompact` argument handling only. The installed CLI accepted `auto`, `400k`, `1M`, `200`, and `200000` and rejected `auto2`, `50k`, `2m`, `99`, `1000001`, and `0` with exit 1, each observed through `claude --autocompact <value> --help`, which validates the option and exits before any model call; `claude` 2.1.220 rejects the option itself with `unknown option '--autocompact'`, which is the documented 2.1.221 floor. The relay's pass-through, resume re-pass, and `result.json` record are contract-tested against the smoke matrix; no delegated run has been dispatched with `--autocompact` set.
 - `cursor-delegate` — Windows, `cursor-agent` 2026.07.23-e383d2b: write run under `--force`; plan-mode
   `--read-only` touching nothing; `--session <id>` resume applying a delta brief; usage errors exiting
   2. A maintainer-run native macOS plan-mode smoke against the same version captured model, session,
   and usage with no touched files.
 - `grok-delegate` — macOS, `grok` 0.2.101: streaming-json report capture, file-based brief delivery,
   resume; read-only is best-effort by measurement, hence the violation flag.
+  Contributor-run native Windows check with `grok` 1.0.13: a no-edit dispatch using
+  `--trust-git-root` on a drive rejected by Git's ownership check completed with the pre-existing
+  untracked file reported and `readOnlyViolation: false`; that run used a real drive path whose
+  spelling did not diverge, and the verdict is claimed for Windows paths whose spelling does not
+  diverge — exact-head CI evidence for spelling-divergent temp paths lands with this repair.
+  Ownership, nested-directory, linked-worktree,
+  dirty-path, submodule, and unavailable-Git cases are covered by the `grok-git-trust` smoke module.
 - `kimi-delegate` — macOS, `kimi` 0.24.0: headless `-p` edit run, stream-json parsing, and both
   resume paths — the relay's `--session`/`--resume-last`, which drive Kimi's own `--session` and
   `--continue`.
@@ -299,9 +307,9 @@ Per skill — platform, CLI version, and what the run exercised:
   report itself can land in the discarded region. The diff is the deliverable, and a thin report
   means missing information, not a failed run.
 
-  Windows is untested and the relay refuses to guess there (the binary name `cmd` is `cmd.exe`); it
-  requires `COMMANDCODE_BIN` to be the real executable's absolute path, not the system command
-  interpreter.
+  Native Windows launch is contract-tested against the installed `cmdc.cmd` shape, including stdin
+  brief delivery and the `cmd.exe` collision guard. A live native Windows Command Code run remains
+  unverified; upstream recommends WSL for stable Windows use.
 - `dsh-delegate` — Linux (x86_64), `dsh` 0.1.1-rc.1 (npm install), driven from bash by Claude Code,
   against a **live local inference server**: vLLM on loopback serving an FP8 27B Qwen model through
   an OpenAI-compatible endpoint (not a stub). Seven live relay dispatches: a default-posture write
@@ -359,9 +367,29 @@ Per skill — platform, CLI version, and what the run exercised:
   absent from the shared read-only tripwire scenario matrix, which runs `claude` and `grok` only —
   its tripwire helpers are parity-enforced byte-identical, but no zcode-specific worktree-state run
   is recorded. No macOS or Linux run is recorded.
-- `codex-delegate`, `opencode-delegate`, `vibe-delegate` — contract-tested only: argument validation,
+- `codex-delegate` — macOS, `codex` codex-cli 0.150.1: fresh `workspace-write` dispatch against a
+  throwaway repo created the briefed file and reported it in `touchedFiles`, with `status:
+  "completed"` and exit 0; a `--read-only` dispatch left the tree clean (`touchedFiles: []`) and
+  returned a `threadId`; a follow-up `--session <id>` resume against that thread was asked to recall
+  a word from the first turn without it being named again — the delta brief said only "the word you
+  picked a moment ago" — and it answered correctly, confirming the resumed turn saw prior context, not
+  just that the id was accepted. Contract-tested: argument validation,
   bounded version preflight, missing binary, result parsing, and whole-process-tree timeout/abort
-  cleanup. No end-to-end run is recorded here.
+  cleanup. Windows 11, `codex` codex-cli 0.153.4, native (Git Bash launch, no `pwsh` installed):
+  a `workspace-write` dispatch against a throwaway repo created the briefed file and reported it
+  in `touchedFiles` with `status: "completed"`, exit 0, and a `threadId`; the brief had Codex run
+  shell commands and report its shell, which came back as System32 `powershell.exe` 5.1 with zero
+  `WindowsApps` entries on its `PATH` while the parent process carried one — the relay's PATH
+  filter reaching the sandbox, not just the child's argv. The denial the filter exists for was
+  reproduced through the unpatched relay on the same machine: a `workspace-write` dispatch asked
+  Codex to run `winget`, which lives only under `WindowsApps`, and both the PATH lookup and the
+  absolute path failed inside the sandbox with "The file cannot be accessed by the system" while
+  the same binary ran normally outside it. No Store `pwsh` is installed here, so the shell-launch
+  form of that denial (`0xC0070005` on every command) rests on the report in issue #116. No Linux
+  run is recorded.
+- `opencode-delegate`, `vibe-delegate` — contract-tested only: argument validation, bounded version
+  preflight, missing binary, result parsing, and whole-process-tree timeout/abort cleanup. No
+  end-to-end run is recorded here.
 - `cline-delegate` — macOS, `cline` 3.0.52: current-binary unauthenticated plan probe reached
   `run_start` with the fixed positional instruction plus the real brief on stdin, accepted a
   provider-local model id, parsed the failing `run_result`, and left the tree clean. Contract-tested:
@@ -383,7 +411,7 @@ Per skill — platform, CLI version, and what the run exercised:
   (versions vary by machine). Native Windows discover smoke not yet claimed.
 
 Not yet verified: native Windows launches for `claude`, exact-head `cline`, `grok`, `kimi`,
-`pi`, `qoder`, `vibe`, and `omp` (`codex`/`opencode`/`grok` have contract-tested `.cmd` shim handling;
+`pi`, `qoder`, `vibe`, and `omp` (`codex`/`opencode`/`grok`/`commandcode` have contract-tested `.cmd` shim handling;
 Cursor serializes a pre-joined, quoted command; Qoder and Vibe target their documented native executables).
 Claude's own shell sandbox is unsupported on native Windows regardless of launch mechanics, and upstream
 Vibe officially targets UNIX. A native Linux `cursor-agent` run is unverified. The full delegate →

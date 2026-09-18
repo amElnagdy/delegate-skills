@@ -8,7 +8,7 @@ description: >-
   Command Code while staying the reviewer. DO NOT USE for tasks small enough to do inline, or when the
   user wants the code written directly without delegating.
 license: MIT
-compatibility: Requires the Command Code CLI (`cmd`, from commandcode.ai) installed and authenticated via `cmd login`, Node 18+, and git. The orchestrating agent must be able to run shell commands and read files. Shell examples assume bash/zsh (macOS/Linux). On Windows the binary name collides with `cmd.exe`, so `COMMANDCODE_BIN` must be the real binary's absolute path, not the system command interpreter.
+compatibility: Requires the Command Code CLI (`cmd`, or `cmdc` on Windows, from commandcode.ai) installed and authenticated, Node 22+, and git. The orchestrating agent must be able to run shell commands and read files. Shell examples assume bash/zsh (macOS/Linux).
 metadata:
   version: 0.5.0
 ---
@@ -30,7 +30,7 @@ as designed-for, not yet proven.)
 - The task is small enough to just do inline — delegation overhead is not worth it.
 - The `cmd` CLI is not installed or not authenticated (run `cmd login`).
 - You want to write the code yourself, or you only need a review (Command Code has its own `/review`).
-- You are on native Windows without `COMMANDCODE_BIN` set — see the autonomy and platform notes below.
+- You are on native Windows and `cmdc --version` does not work. Upstream recommends WSL for stable Windows use.
 
 ## Read this before the first dispatch: the autonomy model
 
@@ -54,10 +54,10 @@ process. If writes outside the target tree are unacceptable, use an OS-enforced 
 
 1. `cmd --version` succeeds and `cmd status` reports authenticated. If not, install Command Code and
    run `cmd login`.
-2. **Confirm which `cmd` is on PATH.** The name is generic, so a shell builtin, an alias, or another
-   tool can shadow it — `command -v cmd` shows the active one. On native Windows `cmd` *is* `cmd.exe`;
-   the relay refuses to guess there and requires `COMMANDCODE_BIN` to be the real binary's absolute
-   path, not the system command interpreter. The relay records the version it actually ran into
+2. **Confirm the CLI on PATH.** On macOS/Linux, `command -v cmd` shows the active `cmd`. On native
+   Windows, use `cmdc --version`; `cmd` is the system shell. The relay uses `cmdc` there and launches
+   its npm `.cmd` shim through `cmd.exe`. `COMMANDCODE_BIN` remains an absolute-path override and must
+   never point to the system command interpreter. The relay records the version it ran in
    `result.json`, so a wrong binary is visible after the fact.
 3. You are in (or will point `--cd` at) the target git repository, and its tree is clean before you
    dispatch — a full-trust run is much easier to review against a clean baseline.

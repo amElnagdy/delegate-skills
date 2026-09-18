@@ -16,6 +16,10 @@ metadata:
 
 # Grok Delegate
 
+For a trusted repository rejected by Git's ownership check, the relay supports
+`--trust-git-root <exact-worktree-root>`. This opt-in affects only relay Git checks, without persistent
+Git config or Grok permission changes. See [dispatch and poll](references/dispatch-and-poll.md#git-ownership-errors-on-shared-or-remounted-drives).
+
 You are the **orchestrator**. This skill lets you hand a bounded coding task to a separate
 **implementer** — the Grok Build CLI (`grok`) — then review what it produced and land it yourself. You
 write the brief and own the judgment; Grok does the typing under an explicit autonomy profile; you

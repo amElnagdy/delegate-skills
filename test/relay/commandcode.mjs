@@ -27,20 +27,7 @@ function dispatch(h, name, relayArgs, env = {}) {
 
 export async function runCommandcode(h) {
 if (h.WIN) {
-  // Windows support is unverified. Keep the collision guard covered without pretending
-  // the POSIX fixture scenarios exercise a native Command Code executable.
   const workDir = h.freshRepo("work-win-guard-commandcode");
-  const outDir = join(h.scratch, "out-win-guard-commandcode");
-  const guarded = spawnSync(process.execPath, [
-    h.relayPath("commandcode"),
-    "--brief", h.briefPath,
-    "--cd", workDir,
-    "--out-dir", outDir,
-  ], { env: { ...h.baseEnv, COMMANDCODE_BIN: "" }, encoding: "utf8" });
-  h.check("commandcode windows guard: refuses to run without COMMANDCODE_BIN",
-    guarded.status === 2 &&
-    /COMMANDCODE_BIN/.test(guarded.stderr) &&
-    !existsSync(join(outDir, "result.json")));
   const comspec = h.baseEnv.ComSpec || h.baseEnv.COMSPEC;
   for (const [name, commandCodeBin] of [
     ["bare cmd", "cmd"],
@@ -58,7 +45,15 @@ if (h.WIN) {
       /COMMANDCODE_BIN/.test(rejected.stderr) &&
       !existsSync(join(rejectedOutDir, "result.json")));
   }
-  console.log("  skip  commandcode dispatch scenarios: native Windows launch is unverified");
+  const { run, captured } = dispatch(h, "windows-cmdc-shim", []);
+  const windowsLaunchWorked = run.status === 0 && captured.brief.includes("smoke brief");
+  if (!windowsLaunchWorked) {
+    console.error(`commandcode windows stdout:\n${run.stdout}`);
+    console.error(`commandcode windows stderr:\n${run.stderr}`);
+    console.error(`commandcode windows capture: ${JSON.stringify(captured)}`);
+  }
+  h.check("commandcode windows launch: cmdc.cmd receives the brief through stdin",
+    windowsLaunchWorked);
   return;
 }
 {

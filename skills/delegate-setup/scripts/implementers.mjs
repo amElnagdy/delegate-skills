@@ -112,8 +112,8 @@ export const IMPLEMENTERS = Object.freeze([
   {
     key: "commandcode",
     skill: "commandcode-delegate",
-    // Command Code's PATH name on non-Windows. On Windows resolveLaunch requires
-    // COMMANDCODE_BIN so discovery never mistakes cmd.exe for this implementer.
+    // Command Code uses `cmdc` on Windows because `cmd` is the system shell.
+    // resolveLaunch owns that platform-specific lookup.
     binary: "cmd",
     versionArgs: ["--version"],
     authProbe: { args: ["status"], successPattern: /Authenticated/i, failPattern: /not authenticated|logged out/i },

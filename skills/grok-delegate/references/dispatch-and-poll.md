@@ -34,6 +34,7 @@ Options:
 | --- | --- |
 | `--brief <file>` | The brief. Omit it to read the brief from stdin (`node relay.mjs … < brief.txt`). |
 | `--cd <dir>` | Working root for Grok (default: current directory); passed as `--cwd`. |
+| `--trust-git-root <dir>` | Opt in to command-scoped Git trust for this exact worktree root. Applies only to relay Git checks; defaults off. |
 | `--lane <name>` | Fleet lane from `delegate-setup` config. Applies that lane's dials; fails if the lane's `implementer` is not this relay. Explicit dial flags win. |
 | `--model <name>` | Grok model (default: Grok's own configured default). |
 | `--effort <level>` | Reasoning effort for this run (`--effort`). |
@@ -52,12 +53,32 @@ pipe; the relay always sets autonomy explicitly.
 Artifacts default to the system temp dir on purpose: the repo under review stays clean, so the
 touched-files report shows only Grok's edits and nothing of the helper's own.
 
+## Git ownership errors on shared or remounted drives
+
+If Grok completes but `touchedFiles` is `null`, inspect Git's error from the same working directory.
+For a repository you trust that Git rejects for dubious ownership, pass
+`--trust-git-root /path/to/repo`. Validation asks git once — through a single-use wildcard-trust
+query — for git's own canonical spelling of that exact root, verifies it by comparing directory
+identity on disk against the path you supplied (immune to Windows path-spelling divergence such as
+8.3 short names), and then supplies `git -c safe.directory=<that spelling>` only to the relay's own Git
+checks (git matches safe.directory against literal path forms it canonicalizes itself, which Node
+cannot reproduce reliably on Windows). This does not edit global Git config, change Grok's sandbox
+or authentication, or make Grok's own Git commands trusted. Put any needed child-side Git
+instructions in the brief separately.
+
+The supplied path must be the exact existing worktree root containing `--cd`; nested working
+directories and linked worktree roots are supported. Wildcards, unrelated roots, and subdirectories
+passed as roots are rejected before dispatch (exit 2, no result). Git must be available to validate
+the opt-in. Submodules and nested repositories do not inherit this trust. With no flag, ownership
+errors still produce `touchedFiles: null`, never a misleading empty list.
+
 ## The result
 
 `<out-dir>/result.json` is the contract. Fields:
 
 - `schema` — the result-format version (currently `delegate-relay.result.v1`)
 - `tool` — `"grok"`
+- `trustedGitRoot` — canonical root explicitly trusted for relay Git checks, or `null` when omitted
 - `status` — `completed` | `failed` | `timeout` | `aborted` | `grok_unavailable`
 - `exitCode` — mirrors Grok's exit code; `128` plus the signal number if the child was killed; `127` if `grok` isn't on PATH; on a `timeout` the relay forces a non-zero code even when the child exited `0` after the watchdog's SIGTERM
 - `signal` — the signal that killed the child, otherwise `null`

@@ -92,9 +92,10 @@ CLI flag, field, and command in the docs must match the installed implementer CL
 - Smoke-test any changed script directly (e.g. `node skills/<skill>/scripts/relay.mjs --help`, and a
   no-write or read-only run against a throwaway repo) before relying on it.
 - If you touch how a `relay.mjs` launches its implementer CLI, smoke-test on Windows too (native
-  PowerShell/cmd, not just Git Bash/WSL): the `codex`, `opencode`, `grok`, `pi`, `cline`, `copilot`, and `dsh` launches
+  PowerShell/cmd, not just Git Bash/WSL): the `codex`, `opencode`, `grok`, `pi`, `cline`, `copilot`, `commandcode`, and `dsh` launches
   need `shell:true` on win32 to resolve the `.cmd` shim. Cline streams its brief on stdin and uses the
-  child process cwd; the other launches quote spaceable args, and all value flags are token-validated.
+  child process cwd; Command Code also streams its brief on stdin. The other launches quote spaceable
+  args, and all value flags are token-validated.
   The `claude` and `cursor-agent` launches serialize a pre-joined
   command string through the shell on win32 for the same shim reason; `agy`, `kimi`, current
   `qodercli`, `vibe`, `aider`, `oz`, and `omp` installs use native binaries (pip puts a real `aider.exe` in

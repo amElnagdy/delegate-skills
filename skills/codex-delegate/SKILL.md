@@ -64,6 +64,7 @@ orchestrators use that same directory — if unsure where it landed, run
 ```bash
 node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 # read-only (review/diagnosis, no edits):   add --read-only
+# isolated review (skip ambient MCP/user config): add --ignore-user-config
 # continue the exact Codex session:         add --session <threadId>  (from result.json; send only the delta brief)
 # fallback when no thread id is available:  add --resume-last
 # hard time limit (watchdog):               add --timeout 2h  (default: off; implementation runs routinely need 1-2h)

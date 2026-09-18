@@ -15,12 +15,14 @@ import { runClaude } from "./claude.mjs";
 import { runReadOnlyTripwire } from "./read-only-tripwire.mjs";
 import { runTimeoutTree } from "./timeout-tree.mjs";
 import { runAbort } from "./abort.mjs";
+import { runOrphanStdio } from "./orphan-stdio.mjs";
 import { runDelegateSetup } from "./delegate-setup.mjs";
 import { runAider } from "./aider.mjs";
 import { runCopilot } from "./copilot.mjs";
 import { runCommandcode } from "./commandcode.mjs";
 import { runZcode } from "./zcode.mjs";
 import { runDsh } from "./dsh.mjs";
+import { runGrokGitTrust } from "./grok-git-trust.mjs";
 
 export const runners = [
   ["package-shape", runPackageShape],
@@ -41,8 +43,10 @@ export const runners = [
   ["copilot", runCopilot],
   ["commandcode", runCommandcode],
   ["read-only-tripwire", runReadOnlyTripwire],
+  ["grok-git-trust", runGrokGitTrust],
   ["timeout-tree", runTimeoutTree],
   ["abort", runAbort],
+  ["orphan-stdio", runOrphanStdio],
   ["zcode", runZcode],
   ["dsh", runDsh],
   ["delegate-setup", runDelegateSetup],

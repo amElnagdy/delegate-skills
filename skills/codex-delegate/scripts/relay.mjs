@@ -43,6 +43,8 @@
  *   --clean-env             Launch Codex and its version preflight with only runtime basics.
  *                           Changes inherited variables only; does not protect files or other
  *                           same-user secrets.
+ *   --ignore-user-config    Do not load Codex user config. Authentication still uses CODEX_HOME;
+ *                           useful for isolated reviews that must not start ambient MCP servers.
  *   --keep-env <name>       Keep one additional variable under --clean-env (repeatable).
  *                           Required for environment-backed auth and other stripped variables.
  *   --skip-git-repo-check   Allow running outside a git repository.
@@ -56,8 +58,10 @@
  *
  * Result: written to <out-dir>/result.json and summarized on stdout —
  *   status, exitCode, signal, codexVersion, threadId (for a later resume), finalMessage
- *   (Codex's own report), touchedFiles (git porcelain, null if git can't report), and the paths to
- *   events.jsonl and final.txt.
+ *   (Codex's own report), touchedFiles (git porcelain, null if git can't report), stderrTail on a
+ *   run that did not succeed, and the paths to events.jsonl, final.txt and stderr.txt. stderr.txt
+ *   holds the complete stderr stream; stderrTail is up to 20 nonblank lines from its final
+ *   64 KiB, with a partial first line marked as truncated.
  *
  * Exit codes: a pre-run usage error (bad/missing args, empty brief) exits 2
  * before any run and writes no result file; a missing `codex` binary exits 127;
@@ -69,10 +73,19 @@
  * itself was killed and forwarded the kill to codex), or codex_unavailable. An
  * orchestrator that polls for the file must therefore also treat a non-zero exit
  * with no file as a usage error.
+ *
+ * Windows: a sandboxed run (read-only or workspace-write) gets a PATH with every
+ * `WindowsApps` entry removed, for the preflight and the dispatch alike. The Microsoft
+ * Store installs apps — including PowerShell 7 — under a folder whose ACLs deny
+ * execution to the restricted token Codex's sandbox runs commands with, and Codex
+ * prefers a `pwsh` found on PATH, so a Store `pwsh` makes every sandboxed command
+ * fail with 0xC0070005. Without those entries Codex falls back to System32
+ * powershell.exe. `--sandbox danger-full-access` runs without the restricted token
+ * and gets PATH unchanged.
  */
 
 import {spawn, execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync, renameSync, readFileSync, existsSync, appendFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, renameSync, readFileSync, existsSync, appendFileSync, openSync, fstatSync, readSync, closeSync } from "node:fs";
 import {join, resolve, basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { constants, tmpdir } from "node:os";
@@ -80,6 +93,7 @@ import { StringDecoder } from "node:string_decoder";
 
 const VERSION_PROBE_TIMEOUT_MS = 10_000;
 const MAX_TIMER_MS = 2_147_483_647;
+const MAX_STDERR_TAIL_BYTES = 64 * 1024;
 const SANDBOX_MODES = new Set(["read-only", "workspace-write", "danger-full-access"]);
 const SAFE_SESSION = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 const SAFE_ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -145,6 +159,7 @@ function parseArgs(argv) {
     resumeLast: false,
     session: null,
     cleanEnv: false,
+    ignoreUserConfig: false,
     keepEnv: [],
     skipGitRepoCheck: false,
     timeout: null,
@@ -174,6 +189,7 @@ function parseArgs(argv) {
       case "--resume-last": opts.resumeLast = true; break;
       case "--session": opts.session = next(); break;
       case "--clean-env": opts.cleanEnv = true; break;
+      case "--ignore-user-config": opts.ignoreUserConfig = true; break;
       case "--keep-env": opts.keepEnv.push(next()); break;
       case "--skip-git-repo-check": opts.skipGitRepoCheck = true; break;
       case "--timeout": opts.timeout = next(); flagged.add("timeout"); break;
@@ -294,11 +310,29 @@ function versionProbeTimeout(opts) {
 }
 
 function codexEnv(opts) {
-  if (!opts.cleanEnv) return process.env;
+  const env = opts.cleanEnv ? cleanEnvironment(opts) : { ...process.env };
+  if (process.platform === "win32" && opts.sandbox !== "danger-full-access") removeWindowsAppsFromPath(env);
+  return env;
+}
+
+function cleanEnvironment(opts) {
   const keep = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "LC_CTYPE", "TERM",
     "TMPDIR", "CODEX_HOME", "SystemRoot", "SystemDrive", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
     "TEMP", "TMP", "PATHEXT", "COMSPEC", ...opts.keepEnv];
   return Object.fromEntries(keep.filter((key) => process.env[key] !== undefined).map((key) => [key, process.env[key]]));
+}
+
+// Both Store roots: "C:\Program Files\WindowsApps\<package>" and the per-user alias
+// folder "%LOCALAPPDATA%\Microsoft\WindowsApps" (a symlink into the same protected tree).
+const WINDOWS_APPS_PATH_ENTRY = /(^|[\\/])WindowsApps([\\/]|$)/i;
+
+function removeWindowsAppsFromPath(env) {
+  // process.env is case-insensitive on win32, but a spread copy keeps the original key
+  // casing ("Path"), and a caller-built env may carry both spellings — rewrite every one.
+  for (const key of Object.keys(env)) {
+    if (key.toUpperCase() !== "PATH") continue;
+    env[key] = env[key].split(";").filter((entry) => !WINDOWS_APPS_PATH_ENTRY.test(entry)).join(";");
+  }
 }
 
 function codexVersion(probeTimeoutMs, env) {
@@ -353,6 +387,7 @@ function timestamp() {
 
 function buildArgv(opts, finalPath) {
   const argv = ["exec"];
+  if (opts.ignoreUserConfig) argv.push("--ignore-user-config");
   const resuming = Boolean(opts.session || opts.resumeLast);
   // Codex accepts shared exec options before the resume subcommand. Reapply only
   // an explicitly selected sandbox; otherwise leave the active Codex config alone.
@@ -409,10 +444,12 @@ function prepareRunDir(opts, brief) {
     eventsPath: join(outDir, "events.jsonl"),
     finalPath: join(outDir, "final.txt"),
     briefPath: join(outDir, "brief.txt"),
+    stderrPath: join(outDir, "stderr.txt"),
     resultPath: join(outDir, "result.json"),
   };
   writeFileSync(run.briefPath, brief, "utf8");
   writeFileSync(run.eventsPath, "", "utf8");
+  writeFileSync(run.stderrPath, "", "utf8");
   return run;
 }
 
@@ -433,6 +470,7 @@ function makeResultWriter(opts, version, run) {
       resumeLast: opts.resumeLast,
       session: opts.session,
       cleanEnv: opts.cleanEnv,
+      ignoreUserConfig: opts.ignoreUserConfig,
       keepEnv: opts.keepEnv,
       codexVersion: version,
       startedAt: run.startedAt,
@@ -440,6 +478,7 @@ function makeResultWriter(opts, version, run) {
       briefPath: run.briefPath,
       eventsPath: run.eventsPath,
       finalPath: existsSync(run.finalPath) ? run.finalPath : null,
+      stderrPath: run.stderrPath,
       ...extra,
     };
     // Publish atomically so a polling orchestrator never reads a half-written file
@@ -458,9 +497,43 @@ function reportUnavailable(writeResult, resultPath) {
   process.exit(127);
 }
 
+// ponytail: bound the summary to the final 64 KiB; read stderrPath for longer diagnostics.
+// Reading the whole log here can exhaust memory before publishing a failure or forwarding an abort.
+function stderrTail(stderrPath) {
+  let fd;
+  try {
+    fd = openSync(stderrPath, "r");
+    const size = fstatSync(fd).size;
+    const start = Math.max(0, size - MAX_STDERR_TAIL_BYTES);
+    const readStart = Math.max(0, start - 1);
+    const buffer = Buffer.alloc(size - readStart);
+    let bytesRead = 0;
+    while (bytesRead < buffer.length) {
+      const count = readSync(fd, buffer, bytesRead, buffer.length - bytesRead, readStart + bytesRead);
+      if (count === 0) break;
+      bytesRead += count;
+    }
+    let offset = start - readStart;
+    // The preceding byte distinguishes a cut line from a line starting at the window boundary.
+    const partialLine = offset > 0 && buffer[0] !== 0x0a;
+    while (partialLine && offset < bytesRead && (buffer[offset] & 0xc0) === 0x80) offset += 1;
+    const lines = buffer.subarray(offset, bytesRead).toString("utf8")
+      .split(/\r?\n/)
+      .map((line) => line.trimEnd());
+    if (partialLine && lines[0]?.trim()) lines[0] = `[truncated; read stderrPath] ${lines[0]}`;
+    return lines.filter((line) => line.trim()).slice(-20);
+  } catch {
+    // A missing or unreadable diagnostic must not prevent the run result from being published.
+    return [];
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
 function reportVersionFailure(opts, writeResult, run, error, probeTimeoutMs) {
   const timedOut = error?.code === "ETIMEDOUT";
   const stderr = String(error?.stderr || "").trim();
+  if (stderr) writeFileSync(run.stderrPath, `${stderr}\n`, "utf8");
   const message = timedOut
     ? `codex --version preflight timed out after ${probeTimeoutMs}ms; Codex was not dispatched`
     : `codex --version preflight failed${Number.isInteger(error?.status) ? ` with exit ${error.status}` : ""}; Codex was not dispatched`;
@@ -471,7 +544,7 @@ function reportVersionFailure(opts, writeResult, run, error, probeTimeoutMs) {
     threadId: null,
     finalMessage: "",
     touchedFiles: gitTouchedFiles(opts.cd),
-    stderrTail: stderr ? stderr.split("\n").slice(-20) : [],
+    stderrTail: stderrTail(run.stderrPath),
     error: message,
   });
   printSummary(result, run.resultPath);
@@ -489,12 +562,10 @@ function dispatchToCodex(opts, brief, run, writeResult, env) {
 
   let threadId = null;
   let stdoutBuf = "";
-  const stderrTail = [];
 
   // Decode across chunk boundaries: a multibyte UTF-8 character split between
   // two data events would otherwise decode as U+FFFD and corrupt the report.
   const stdoutDecoder = new StringDecoder("utf8");
-  const stderrDecoder = new StringDecoder("utf8");
 
   child.stdout.on("data", (chunk) => {
     stdoutBuf += stdoutDecoder.write(chunk);
@@ -510,11 +581,7 @@ function dispatchToCodex(opts, brief, run, writeResult, env) {
 
   child.stderr.on("data", (chunk) => {
     process.stderr.write(chunk); // surface Codex progress live for the orchestrator
-    const text = stderrDecoder.write(chunk);
-    for (const line of text.split("\n")) {
-      if (line.trim()) stderrTail.push(line.trimEnd());
-    }
-    while (stderrTail.length > 20) stderrTail.shift();
+    appendFileSync(run.stderrPath, chunk);
   });
 
   let settled = false;
@@ -558,7 +625,7 @@ function dispatchToCodex(opts, brief, run, writeResult, env) {
         threadId,
         finalMessage,
         touchedFiles: gitTouchedFiles(opts.cd),
-        stderrTail: stderrTail.slice(-20),
+        stderrTail: stderrTail(run.stderrPath),
         error: `the relay was killed by ${sig}; codex was terminated with it — inspect the working tree before re-dispatching`,
       };
       const result = writeResult(abortedFields);
@@ -573,6 +640,24 @@ function dispatchToCodex(opts, brief, run, writeResult, env) {
       }, 2000);
     });
   }
+
+  // A grandchild that outlives codex and inherited the pipes keeps stdout/stderr open, so
+  // "close" never fires and the relay waits forever, writing no result. Once codex itself is
+  // gone the pipes hold nothing we still need — finalMessage is read from the -o file, and the
+  // stderr log is appended synchronously as it arrives — so drop them after a short drain
+  // grace and let "close" run. This is the normal-exit twin of the stream teardown the
+  // watchdog already does on the timeout path.
+  child.once("exit", () => {
+    // The implementer already exited. Leaving the watchdog armed lets a drain that
+    // overlaps the remaining budget fire, set watchdogFired, and report timeout.
+    if (!watchdogFired) clearWatchdog();
+    const drain = setTimeout(() => {
+      if (settled) return;
+      child.stdout.destroy();
+      child.stderr.destroy();
+    }, 500);
+    if (typeof drain.unref === "function") drain.unref();
+  });
 
   child.on("error", (err) => {
     if (settled) return;
@@ -606,7 +691,7 @@ function dispatchToCodex(opts, brief, run, writeResult, env) {
       threadId,
       finalMessage,
       touchedFiles: gitTouchedFiles(opts.cd),
-      ...(succeeded ? {} : { stderrTail: stderrTail.slice(-20) }),
+      ...(succeeded ? {} : { stderrTail: stderrTail(run.stderrPath) }),
       ...(watchdogFired ? { error: `codex did not finish within --timeout ${opts.timeout}; killed by the relay watchdog` } : {}),
     });
     printSummary(result, run.resultPath);

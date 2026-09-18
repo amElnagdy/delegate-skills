@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 
 // ---- delegate-setup: discover + fleet (fleet lanes) ----
 export function runDelegateSetup(h) {
@@ -48,6 +48,32 @@ export function runDelegateSetup(h) {
       overrideReport.discovered.some(({ key, path, version }) =>
         key === "commandcode" && path === commandCodeOverride && version === "override-commandcode"),
     );
+
+    // An empty PATH component is the current directory in POSIX lookup, so a
+    // relay's spawn would find a binary there. Discovery must agree, or it
+    // reports a CLI as missing that dispatch can actually run.
+    const cwdProbe = join(h.scratch, "discover-cwd");
+    mkdirSync(cwdProbe);
+    writeFileSync(
+      join(cwdProbe, "codex"),
+      '#!/bin/sh\ncase "$1" in --version) echo "9.9.9"; exit 0;; esac\nexit 0\n',
+    );
+    chmodSync(join(cwdProbe, "codex"), 0o755);
+    for (const [label, pathValue] of [
+      ["an empty PATH component", delimiter],
+      ["a set-but-empty PATH", ""],
+    ]) {
+      const cwdDiscover = spawnSync(process.execPath, [join(setupDir, "discover.mjs")], {
+        encoding: "utf8",
+        cwd: cwdProbe,
+        env: { ...process.env, PATH: pathValue },
+      });
+      const cwdReport = cwdDiscover.status === 0 ? JSON.parse(cwdDiscover.stdout) : null;
+      h.check(
+        `discover honours ${label} as the current directory`,
+        cwdReport?.discovered.find((d) => d.key === "codex")?.version === "9.9.9",
+      );
+    }
   }
 
   if (h.WIN) {
@@ -57,9 +83,9 @@ export function runDelegateSetup(h) {
     });
     const commandCode = JSON.parse(withoutConfiguredCommandCode.stdout);
     h.check(
-      "discover does not mistake Windows cmd.exe for Command Code",
-      commandCode.missing.some(({ key }) => key === "commandcode") &&
-        !commandCode.discovered.some(({ key }) => key === "commandcode"),
+      "discover uses the Windows cmdc shim instead of cmd.exe",
+      commandCode.discovered.some(({ key, path }) =>
+        key === "commandcode" && /cmdc\.cmd$/i.test(path)),
     );
     const comspec = h.baseEnv.ComSpec || h.baseEnv.COMSPEC;
     for (const [name, commandCodeBin] of [
@@ -77,27 +103,17 @@ export function runDelegateSetup(h) {
           !rejectedReport.discovered.some(({ key }) => key === "commandcode"),
       );
     }
-    const withConfiguredCommandCode = spawnSync(process.execPath, [join(setupDir, "discover.mjs")], {
-      encoding: "utf8",
-      env: h.baseEnv,
-    });
-    const configuredCommandCode = JSON.parse(withConfiguredCommandCode.stdout);
-    h.check(
-      "discover probes the configured Command Code executable on Windows",
-      configuredCommandCode.discovered.some(({ key, path }) =>
-        key === "commandcode" && path === h.baseEnv.COMMANDCODE_BIN),
-    );
     const commandCodeShim = join(h.scratch, "commandcode.cmd");
-    writeFileSync(commandCodeShim, "@exit /b 0\r\n");
+    writeFileSync(commandCodeShim, "@echo override-commandcode\r\n");
     const withCommandCodeShim = spawnSync(process.execPath, [join(setupDir, "discover.mjs")], {
       encoding: "utf8",
       env: { ...h.baseEnv, COMMANDCODE_BIN: commandCodeShim },
     });
     const shimmedCommandCode = JSON.parse(withCommandCodeShim.stdout);
     h.check(
-      "discover rejects a Command Code .cmd shim that the relay cannot launch",
-      shimmedCommandCode.missing.some(({ key }) => key === "commandcode") &&
-        !shimmedCommandCode.discovered.some(({ key }) => key === "commandcode"),
+      "discover probes a configured Command Code .cmd shim",
+      shimmedCommandCode.discovered.some(({ key, path, version }) =>
+        key === "commandcode" && path === commandCodeShim && version === "override-commandcode"),
     );
   }
 
