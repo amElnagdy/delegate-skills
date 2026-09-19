@@ -449,6 +449,23 @@ if (["omp-success", "omp-error"].includes(process.env.SMOKE_MODE)) {
       console.log(JSON.stringify(resultEvent));
     }
   });
+} else if (process.env.SMOKE_MODE === "opencode-success") {
+  let brief = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (chunk) => { brief += chunk; });
+  process.stdin.on("end", () => {
+    fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify({ args, brief }));
+    const sid = "ses_smoke_opencode";
+    const emit = (value) => fs.writeSync(1, `${JSON.stringify(value)}\n`);
+    emit({ type: "step_start", sessionID: sid, part: { type: "step-start" } });
+    // Streamed updates to one part must replace, not duplicate: the relay keys text by part.id.
+    emit({ type: "text", sessionID: sid, part: { id: "prt_1", type: "text", text: "fake opencode" } });
+    emit({ type: "text", sessionID: sid, part: { id: "prt_1", type: "text", text: "fake opencode completed" } });
+    emit({ type: "text", sessionID: sid, part: { id: "prt_2", type: "text", text: " — second segment" } });
+    emit({ type: "step_finish", sessionID: sid, part: { type: "step-finish", cost: 0.001 } });
+    emit({ type: "step_finish", sessionID: sid, part: { type: "step-finish", cost: 0.0025 } });
+    process.exit(0);
+  });
 } else {
   process.stdin.resume();
   const grandProgram = process.env.SMOKE_GRAND_IGNORES_SIGTERM
