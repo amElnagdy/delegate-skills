@@ -708,10 +708,11 @@ if (observation === "models") {
       },
     );
     const laneArgs = existsSync(laneArgsFile) ? JSON.parse(readFileSync(laneArgsFile, "utf8")) : [];
+    // opencode run has no --variant flag: the relay joins the dials as --model provider/model#variant.
     h.check("relay --lane: opencode applies model+variant from lane",
       laneDispatch.status === 0 &&
-        h.pair(laneArgs, "--model", "opencode/grok") &&
-        h.pair(laneArgs, "--variant", "high"));
+        h.pair(laneArgs, "--model", "opencode/grok#high") &&
+        !laneArgs.includes("--variant"));
     h.check("relay --lane: result records lane provenance",
       existsSync(join(laneOut, "result.json")) &&
         h.result(laneOut).lane === "feature" &&
@@ -808,8 +809,8 @@ if (observation === "models") {
     const overrideArgs = existsSync(overrideArgsFile) ? JSON.parse(readFileSync(overrideArgsFile, "utf8")) : [];
     h.check("relay --lane: explicit flags win over lane dials",
       overrideRun.status === 0 &&
-        h.pair(overrideArgs, "--model", "openai/gpt-test") &&
-        h.pair(overrideArgs, "--variant", "low"));
+        h.pair(overrideArgs, "--model", "openai/gpt-test#low") &&
+        !overrideArgs.includes("--variant"));
 
     const projectOnly = {
       version: "delegate-fleet.v1",

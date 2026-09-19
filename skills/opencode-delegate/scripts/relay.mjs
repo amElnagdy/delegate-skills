@@ -385,8 +385,11 @@ function buildArgv(opts) {
     argv.push("--continue");
   }
   argv.push("--agent", opts.agent);
-  if (opts.model) argv.push("--model", opts.model);
-  if (opts.variant) argv.push("--variant", opts.variant);
+  
+  if (opts.model) {
+    if (opts.variant) argv.push("--model", opts.model + '#' + opts.variant);
+    else argv.push("--model", opts.model)
+    };
   // --auto (on by default) auto-approves permissions so a headless build run doesn't
   // block on a prompt no one can answer; --no-auto honors the agent's own config.
   // Never on a plan (read-only) run: --auto would approve the plan agent's ask-gated
