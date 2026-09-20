@@ -831,9 +831,9 @@ function reportVersionFailure(opts, writeResult, run, error, probeTimeoutMs) {
 }
 
 function dispatchToGrok(opts, run, writeResult) {
-  // grok cannot be prevented from writing headlessly (the read-only sandbox and
-  // plan mode are advisory), so a --read-only run snapshots the tree up front
-  // and flags a violation in the result instead of pretending to enforce.
+  // enforcement is the kernel sandbox, but it is not total (/tmp, /var/tmp and
+  // ~/.grok stay writable), so a --read-only run snapshots the tree up front
+  // and flags a violation in the result instead of relying on the flag alone.
   const relayArtifacts = [run.briefPath, run.eventsPath, run.finalPath, run.resultPath];
   const beforeTree = opts.autonomy === "read-only" ? gitTripwireState(opts.cd, relayArtifacts) : null;
   // Working-tree and index state for paths that are ALREADY dirty. Their porcelain lines will not

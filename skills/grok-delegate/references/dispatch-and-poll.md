@@ -38,7 +38,7 @@ Options:
 | `--model <name>` | Grok model (default: Grok's own configured default). |
 | `--effort <level>` | Reasoning effort for this run (`--effort`). |
 | `--max-turns <n>` | Maximum number of agent turns for this run (`--max-turns`). |
-| `--read-only` | Review/diagnosis intent (`--sandbox read-only --permission-mode plan`). **Best-effort, not enforced** — grok can still edit the tree headlessly. The relay reports a tri-state Git-visible change tripwire. |
+| `--read-only` | Review/diagnosis intent (`--sandbox read-only --always-approve`). Kernel-enforced on grok 1.0.25 — write/search_replace and shell redirects fail with EPERM; `/tmp`, `/var/tmp` and `~/.grok/` stay writable. The relay reports a tri-state Git-visible change tripwire. |
 | `--full-access` | Unrestricted auto-approve (`--always-approve --sandbox off`); opt-in. |
 | `--resume-last` | Continue the most recent Grok session for this cwd; send only the delta brief. |
 | `--session <id>` | Continue a specific session id; mutually exclusive with `--resume-last`. |
