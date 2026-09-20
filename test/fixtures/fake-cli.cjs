@@ -1,5 +1,8 @@
 const fs = require("node:fs");
 const args = process.argv.slice(2);
+// A relay whose behavior gates on the probed CLI version (opencode 1.x --variant vs
+// 2.x model#variant) drives the gate by overriding the version string here.
+const fakeVersion = process.env.SMOKE_VERSION || "fake-cli 0.0.0-smoke";
 const capturedEnv = () => Object.fromEntries(
   ["PATH", "HOME", "SMOKE_PROVIDER_TOKEN", "SMOKE_SECRET_TOKEN"]
     .filter((key) => process.env[key] !== undefined)
@@ -24,7 +27,7 @@ if (versionProbe && process.env.SMOKE_PREFLIGHT_PID_FILE) {
 }
 if (versionProbe && process.env.SMOKE_MODE === "grok-spawn-error" && process.platform !== "win32") {
   fs.renameSync(require("node:path").join(__dirname, "grok"), require("node:path").join(__dirname, "grok.removed"));
-  console.log("fake-cli 0.0.0-smoke");
+  console.log(fakeVersion);
   process.exit(0);
 } else if (versionProbe && process.env.SMOKE_MODE === "grok-version-fallback-budget") {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 700);
@@ -32,7 +35,7 @@ if (versionProbe && process.env.SMOKE_MODE === "grok-spawn-error" && process.pla
     console.error("fake documented version failure");
     process.exit(7);
   }
-  console.log("fake-cli 0.0.0-smoke");
+  console.log(fakeVersion);
   process.exit(0);
 } else if (versionProbe && /-version-hang$/.test(process.env.SMOKE_MODE || "")) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
@@ -42,7 +45,7 @@ if (versionProbe && process.env.SMOKE_MODE === "grok-spawn-error" && process.pla
   console.error("fake version failure");
   process.exit(7);
 } else if (versionProbe) {
-  console.log("fake-cli 0.0.0-smoke");
+  console.log(fakeVersion);
   process.exit(0);
 }
 if (process.env.SMOKE_MODE === "capture") {

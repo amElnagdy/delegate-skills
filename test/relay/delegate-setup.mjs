@@ -704,11 +704,16 @@ if (observation === "models") {
       ],
       {
         encoding: "utf8",
-        env: { ...fleetEnv, SMOKE_MODE: "capture", SMOKE_ARGS_FILE: laneArgsFile },
+        env: {
+          ...fleetEnv,
+          SMOKE_MODE: "capture",
+          SMOKE_ARGS_FILE: laneArgsFile,
+          SMOKE_VERSION: "opencode v2.0.11",
+        },
       },
     );
     const laneArgs = existsSync(laneArgsFile) ? JSON.parse(readFileSync(laneArgsFile, "utf8")) : [];
-    // opencode run has no --variant flag: the relay joins the dials as --model provider/model#variant.
+    // opencode 2.x has no --variant flag: the relay joins the dials as --model provider/model#variant.
     h.check("relay --lane: opencode applies model+variant from lane",
       laneDispatch.status === 0 &&
         h.pair(laneArgs, "--model", "opencode/grok#high") &&
@@ -803,7 +808,12 @@ if (observation === "models") {
       ],
       {
         encoding: "utf8",
-        env: { ...fleetEnv, SMOKE_MODE: "capture", SMOKE_ARGS_FILE: overrideArgsFile },
+        env: {
+          ...fleetEnv,
+          SMOKE_MODE: "capture",
+          SMOKE_ARGS_FILE: overrideArgsFile,
+          SMOKE_VERSION: "opencode v2.0.11",
+        },
       },
     );
     const overrideArgs = existsSync(overrideArgsFile) ? JSON.parse(readFileSync(overrideArgsFile, "utf8")) : [];
