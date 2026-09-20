@@ -106,10 +106,16 @@ export async function runAgy(h) {
     });
     const value = existsSync(join(workDir, "result.json")) ? h.result(workDir) : {};
     const args = readArgs(argsFile);
-    h.check(`agy read-only ${name}: effort and plan mode reach agy and result metadata`,
+    // read-only is the sandbox plus auto-approve inside it, NOT `--mode plan`:
+    // plan mode auto-denies the first tool needing a permission prompt, which
+    // headless --print cannot answer, so the run returned nothing at all.
+    // Assert both flags reach agy and that plan mode is gone.
+    h.check(`agy read-only ${name}: effort and sandboxed auto-approve reach agy and result metadata`,
       result.status === 0 &&
       h.pair(args, "--effort", "high") &&
-      h.pair(args, "--mode", "plan") &&
+      args.includes("--sandbox") &&
+      args.includes("--dangerously-skip-permissions") &&
+      !args.includes("--mode") &&
       value.effort === "high" &&
       value.readOnly === true);
     h.check(`agy read-only ${name}: relay artifacts are excluded from the verdict (got ${String(value.readOnlyViolation)})`,

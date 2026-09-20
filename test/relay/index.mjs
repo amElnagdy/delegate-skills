@@ -5,6 +5,7 @@ import { runCline } from "./cline.mjs";
 import { runAgy } from "./agy.mjs";
 import { runCursor } from "./cursor.mjs";
 import { runVibe } from "./vibe.mjs";
+import { runOpencode } from "./opencode.mjs";
 import { runAtomic } from "./atomic.mjs";
 import { runPreflight } from "./preflight.mjs";
 import { runTimeoutBounds } from "./timeout-bounds.mjs";
@@ -31,6 +32,7 @@ export const runners = [
   ["agy", runAgy],
   ["cursor", runCursor],
   ["vibe", runVibe],
+  ["opencode", runOpencode],
   ["atomic", runAtomic],
   ["preflight", runPreflight],
   ["timeout-bounds", runTimeoutBounds],
