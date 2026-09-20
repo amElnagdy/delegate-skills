@@ -656,11 +656,16 @@ if (observation === "models") {
         ? readFileSync(agyLaneArgsFile, "utf8").split(/\r?\n/).filter(Boolean)
         : JSON.parse(readFileSync(agyLaneArgsFile, "utf8"))
       : [];
+    // A readOnly lane dial reaches agy as the sandbox plus auto-approve inside
+    // it, not `--mode plan`: plan mode auto-denies the first tool needing a
+    // permission prompt, which headless --print cannot answer.
     h.check("relay --lane: Agy applies effort and readOnly dials",
       writeAgyLane.status === 0 &&
       agyLane.status === 0 &&
       h.pair(agyLaneArgs, "--effort", "high") &&
-      h.pair(agyLaneArgs, "--mode", "plan") &&
+      agyLaneArgs.includes("--sandbox") &&
+      agyLaneArgs.includes("--dangerously-skip-permissions") &&
+      !agyLaneArgs.includes("--mode") &&
       h.result(agyLaneOut).effort === "high" &&
       h.result(agyLaneOut).readOnly === true);
 

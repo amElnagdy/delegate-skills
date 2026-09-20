@@ -38,7 +38,7 @@ Options:
 | `--resume-last` | Continue the most recent Antigravity conversation; send only the delta brief. |
 | `--conversation <id>` | Continue a specific Antigravity conversation; send only the delta brief. |
 | `--sandbox` | Enable Antigravity's terminal sandbox for the run. |
-| `--read-only` | Run in plan mode (`--mode plan`), removing write and edit paths; mutually exclusive with `--dangerously-skip-permissions`. |
+| `--read-only` | Run under agy's sandbox with tool approval auto-granted inside it (`--sandbox --dangerously-skip-permissions`); reads and writes are both confined to the workspace — a write appears to succeed to the agent but is overlaid and discarded. Mutually exclusive with `--dangerously-skip-permissions` as a flag (that flag alone, without the sandbox, is full access). |
 | `--dangerously-skip-permissions` | Pass Antigravity's permission-bypass flag; mutually exclusive with `--read-only`. Never use this unless the human explicitly accepts it. |
 | `--print-timeout <duration>` | Timeout agy itself applies to print mode (default: `30m`). |
 | `--timeout <dur>` | Relay-side watchdog (e.g. `30m`); overrides the default of `--print-timeout` plus a 60s grace. On expiry the agy process tree is killed and `result.json` gets `status: "timeout"`. Set it explicitly when agy may hang past its own print timeout. Malformed, zero, and out-of-range durations are rejected; the maximum is `596h31m23s`. |
