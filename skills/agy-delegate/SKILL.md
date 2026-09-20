@@ -70,7 +70,7 @@ below is this skill's installed directory - the folder containing this `SKILL.md
 node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 # choose a model label:                 add --model "<label from agy models>"
 # reasoning effort (low, medium, high): add --effort high
-# read-only (plan mode — no edits):     add --read-only
+# read-only (sandbox — no edits):       add --read-only
 # enable Antigravity terminal sandbox:  add --sandbox
 # resume the most recent conversation:  add --resume-last  (delta brief only)
 # see all options:                      node .../relay.mjs --help
@@ -118,12 +118,12 @@ diff holds:
 
 Antigravity owns its own permission policy. The relay does not bypass it by default. Use
 `--dangerously-skip-permissions` only when the human explicitly accepts that Antigravity may
-auto-approve tool permission requests. `--read-only` runs `agy` in plan mode (`--mode plan`),
-removing write and edit paths, and is mutually exclusive with `--dangerously-skip-permissions`.
-Use `--sandbox` when you want Antigravity's terminal sandbox enabled for the run.
-Antigravity's own help says `--dangerously-skip-permissions` auto-approves all tool permission
-requests without prompting, including a request to act outside the sandbox. Do not treat
-`--sandbox` as an enforced boundary when the flags are combined; treat the run as full access.
+auto-approve tool permission requests. `--read-only` composes `--sandbox` with
+`--dangerously-skip-permissions`: the sandbox is the enforcement — writes inside the workspace
+are overlaid and discarded, and paths outside it fail with EPERM — while the auto-approve only
+lets tools run inside it. As a user-facing flag it stays mutually exclusive with
+`--dangerously-skip-permissions`, which alone (without the sandbox) is full access. Use
+`--sandbox` on its own when you want the terminal sandbox enabled for a write run.
 If headless `--print` auto-denies a write, the relay reports `status: "failed"` and exits non-zero.
 The relay fingerprints the working tree before and after a `--read-only` run to report
 `readOnlyViolation` in `result.json`. Settings allow-rules are not documented here as a fix
