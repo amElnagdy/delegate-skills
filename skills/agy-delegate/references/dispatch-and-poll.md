@@ -108,9 +108,10 @@ process has exited and `result.json` is written.
 - **`status: failed`:** read `result.json`'s `stderrTail`, `stderrPath`, and `logPath` for the cause.
   Common causes: auth lapse, an unknown model label, timeout, or a permission the run needed.
 - **Headless write permission denied:** the relay detects Antigravity's `no output produced ...
-  auto-denied` stderr sentinel, reports `status: failed`, preserves `stderrTail`, and exits 1. A
-  bare `command(<name>)` allow-rule is rarely enough to prevent this — see
-  [Permission engine traps](#permission-engine-traps) below before re-dispatching or asking to use
+  auto-denied` stderr sentinel, reports `status: failed`, preserves `stderrTail`, and exits 1.
+  Allow-rule matching and location vary by `agy` version and platform — a bare `command(<name>)` rule
+  was insufficient on Windows/agy 1.2.5 but did work on macOS/agy 1.2.0 — so measure before assuming;
+  see [Permission engine traps](#permission-engine-traps) below before re-dispatching or asking to use
   `--dangerously-skip-permissions`.
 - **Empty `finalMessage`:** a run with edits may still be correct - check `touchedFiles`, the diff, and
   the preserved `stderrTail`. With no observable edits, the relay reports `status: failed` rather than
@@ -143,17 +144,23 @@ working tree, the orchestrator reviews and commits. See [review-and-land.md](rev
 
 When a headless `--print` run needs a permission `agy` cannot prompt for, it is auto-denied. `agy`'s own
 error message advises adding an allow-rule under `permissions.allow` in
-`~/.gemini/antigravity-cli/settings.json`, e.g. `command(<target>)`. That instruction is incomplete in
-two independent ways - one applies everywhere, one is Windows-only - and following it literally still
-fails on a plain, spaceless command like `git status` on a brand-new workspace with no existing rules.
+`~/.gemini/antigravity-cli/settings.json`, e.g. `command(<target>)`. That instruction is incomplete
+in measured ways, and what breaks varies by version and platform: following it literally still failed
+on a plain, spaceless command like `git status` on the machine that documented these traps (Windows,
+agy 1.2.5), while the same bare rule worked on macOS with agy 1.2.0.
 
-### Exact-match rules don't cover real commands (any platform)
+### Exact-match rules don't cover real commands (measured on Windows, agy 1.2.5)
 
 `command(<name>)` matches an exact command line, not a prefix. `command(git)` allows only a bare `git`
 invocation with zero arguments - not `git status`, not anything a real task actually runs. This is the
 first thing to check on *any* denial, before suspecting the Windows bug below: use
 `command(regex:git .+)` (or a narrower pattern for a specific subcommand) to match real invocations.
 Source: [issue #614 comment](https://github.com/google-antigravity/antigravity-cli/issues/614#issuecomment-5466617752).
+
+Measured on macOS with agy 1.2.0, the opposite held: `command(git)` alone in
+`~/.gemini/antigravity-cli/settings.json` allowed a real `git status` through a headless relay
+dispatch (the identical brief with no rule was auto-denied). Treat exact-match behavior as version-
+and platform-dependent, and test your own denial before assuming either way.
 
 ### Executable path splitting (Windows)
 
@@ -178,6 +185,12 @@ unblock the same call. This may be version- or platform-dependent; re-verify whi
 applies before relying on this if you're on a different `agy` version, but don't assume the file
 `agy` names in its own error is the one to edit.
 
+Measured on macOS with agy 1.2.0, both files' rules took effect in live relay runs:
+`command(regex:git .+)` unblocked a denied `git status` from either `antigravity-cli/settings.json`'s
+`permissions.allow` or `config.json`'s `userSettings.globalPermissionGrants.allow`. The divergence
+between installs is real, so the only reliable rule is the one above: verify which file your install
+actually reads before trusting `agy`'s own error text.
+
 ### Write file glob error
 
 Upstream issue #614 also reports that a glob in a `write_file` rule - `write_file(C:\path\*)` - raises "globs not supported"
@@ -186,7 +199,8 @@ and blocks the agent's actions entirely. Directory rules are recursive already, 
 ### Workarounds and caveats
 
 - **Command permissions:** combine the two fixes above - `command(regex:<name> .+)` in
-  `~/.gemini/config/config.json`'s `globalPermissionGrants.allow` (verified on agy 1.2.5) covers both
+  `~/.gemini/config/config.json`'s `globalPermissionGrants.allow` (verified on agy 1.2.5; on macOS
+  with agy 1.2.0 the same regex in `antigravity-cli/settings.json` also unblocked the call) covers both
   the exact-match trap and, since it doesn't depend on matching a resolved executable path, the
   Windows path-splitting bug too. `command(*)` (documented in issue #614) is the broader fallback if a
   targeted regex still doesn't match - it approves all command execution, so treat it the same as
