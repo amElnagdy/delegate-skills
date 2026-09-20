@@ -126,14 +126,26 @@ lets tools run inside it. As a user-facing flag it stays mutually exclusive with
 `--sandbox` on its own when you want the terminal sandbox enabled for a write run.
 If headless `--print` auto-denies a write, the relay reports `status: "failed"` and exits non-zero.
 The relay fingerprints the working tree before and after a `--read-only` run to report
-`readOnlyViolation` in `result.json`. Settings allow-rules under `permissions.allow` in
-`~/.gemini/antigravity-cli/settings.json` do apply to headless `--print` runs — a `write_file` rule
-naming the workspace is what allows a headless write. On Windows, however, an open upstream defect in
-Antigravity's permission engine
-([issue #614](https://github.com/google-antigravity/antigravity-cli/issues/614)) splits resolved paths on
-whitespace, preventing `command(<name>)` rules from matching binaries installed under paths with spaces
-such as `C:\Program Files\...`. See [references/dispatch-and-poll.md](references/dispatch-and-poll.md)
-for Windows workarounds. Do not add the bypass flag without explicit human approval.
+`readOnlyViolation` in `result.json`. Settings allow-rules do apply to headless `--print` runs, but
+their matching rules and config location vary by `agy` version and platform, so treat a denial as
+something to measure on your install rather than assume. Two traps have been measured. First,
+exact-match behavior: on Windows with agy 1.2.5, `command(<name>)` matched only a bare command with
+no arguments — `command(git)` never allowed a real `git status`, and `command(regex:git .+)` was
+required ([issue #614 comment](https://github.com/google-antigravity/antigravity-cli/issues/614#issuecomment-5466617752)).
+On macOS with agy 1.2.0, that same bare `command(git)` rule *did* allow `git status`, so the
+exact-match trap is not a constant across versions. Second, on Windows, an open
+upstream defect in Antigravity's permission engine
+([issue #614](https://github.com/google-antigravity/antigravity-cli/issues/614)) splits resolved paths
+on whitespace, so a binary under `C:\Program Files\...` — which is where `git` itself commonly lives,
+making this the single most common trigger for delegated coding tasks, not just node/npm — is matched
+as its first fragment and no `command(<name>)` rule can match it. On which file agy reads: verified
+live on Windows with agy 1.2.5, the effective rules were `userSettings.globalPermissionGrants.allow`
+in `~/.gemini/config/config.json`, not the `permissions.allow` in
+`~/.gemini/antigravity-cli/settings.json` that agy's own denial message points at; verified live on
+macOS with agy 1.2.0, rules in `antigravity-cli/settings.json` took effect. Recheck both on your
+version before relying on either file. See
+[references/dispatch-and-poll.md](references/dispatch-and-poll.md) for the full writeup. Do not add
+the bypass flag without explicit human approval.
 
 ## Authorization model
 
