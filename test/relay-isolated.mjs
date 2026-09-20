@@ -16,7 +16,14 @@ const check = (name, condition) => {
 for (const relay of RELAYS) {
   const temp = mkdtempSync(join(tmpdir(), `delegate-skills-${relay}-`));
   try {
-    cpSync(join(here, "..", "skills", `${relay}-delegate`), join(temp, `${relay}-delegate`), { recursive: true });
+    // The filter is not filtering. It forces cpSync down its JavaScript copy path
+    // instead of the native fsBinding.cpSyncCopyDir, which kills the process on Windows
+    // - exit 0xC0000409, nothing thrown, nothing printed - when the source path contains
+    // any non-ASCII character. The source here is the checkout path, so without this a
+    // contributor whose clone sits under an accented or non-Latin directory sees this
+    // suite exit non-zero having printed nothing at all. Measured on Node v22.23.2 and
+    // v24.14.1, Windows 10.
+    cpSync(join(here, "..", "skills", `${relay}-delegate`), join(temp, `${relay}-delegate`), { recursive: true, filter: () => true });
     const result = spawnSync(process.execPath, ["scripts/relay.mjs", "--help"], {
       cwd: join(temp, `${relay}-delegate`),
       encoding: "utf8",

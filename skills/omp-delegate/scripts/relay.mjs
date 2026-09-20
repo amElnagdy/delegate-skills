@@ -688,6 +688,23 @@ function dispatchToOmp(opts, brief, run, writeResult) {
     });
   }
 
+  // A grandchild that outlives omp and inherited the pipes keeps stdout/stderr open, so
+  // "close" never fires and the relay waits forever, writing no result. Once omp itself is
+  // gone the pipes hold nothing we still need, so drop them after a short drain grace and let
+  // "close" run. This is the normal-exit twin of the stream teardown the watchdog already
+  // does on the timeout path.
+  child.once("exit", () => {
+    // The implementer already exited. Leaving the watchdog armed lets a drain that
+    // overlaps the remaining budget fire, set watchdogFired, and report timeout.
+    if (!watchdogFired) clearWatchdog();
+    const drain = setTimeout(() => {
+      if (settled) return;
+      child.stdout.destroy();
+      child.stderr.destroy();
+    }, 500);
+    if (typeof drain.unref === "function") drain.unref();
+  });
+
   child.on("error", (err) => {
     if (settled) return;
     settled = true;

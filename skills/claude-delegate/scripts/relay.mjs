@@ -63,6 +63,8 @@
  *   --effort <level>                  low | medium | high | xhigh | max | ultracode
  *   --max-turns <n>                   Positive agentic-turn limit.
  *   --max-budget-usd <amount>         Positive decimal spend limit.
+ *   --autocompact <auto|tokens>       Set Claude's auto-compact window.
+ *                                     Requires claude 2.1.221 or newer.
  *   --resume-last                     Map to Claude's --continue.
  *   --session <id>                    Map to Claude's --resume <id>.
  *                                     Mutually exclusive with --resume-last.
@@ -268,6 +270,7 @@ function parseArgs(argv) {
     effort: null,
     maxTurns: null,
     maxBudgetUsd: null,
+    autocompact: null,
     resumeLast: false,
     session: null,
     readOnly: false,
@@ -298,6 +301,7 @@ function parseArgs(argv) {
       case "--effort": opts.effort = next(); flagged.add("effort"); break;
       case "--max-turns": opts.maxTurns = next(); break;
       case "--max-budget-usd": opts.maxBudgetUsd = next(); break;
+      case "--autocompact": opts.autocompact = next(); break;
       case "--resume-last": opts.resumeLast = true; break;
       case "--session": opts.session = next(); break;
       case "--read-only": opts.readOnly = true; flagged.add("readOnly"); break;
@@ -340,6 +344,9 @@ function parseArgs(argv) {
     if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(opts.maxBudgetUsd) || !Number.isFinite(budget) || budget <= 0) {
       fail("--max-budget-usd must be a positive decimal number");
     }
+  }
+  if (opts.autocompact !== null && !/^(?:auto|[1-9]\d*[km]?)$/i.test(opts.autocompact)) {
+    fail('--autocompact must be "auto" or a positive integer optionally followed by k or m');
   }
   try {
     if (!statSync(opts.cd).isDirectory()) fail(`--cd is not a directory: ${opts.cd}`);
@@ -604,6 +611,7 @@ function buildArgv(opts, run) {
   if (opts.effort) argv.push("--effort", opts.effort);
   if (opts.maxTurns) argv.push("--max-turns", opts.maxTurns);
   if (opts.maxBudgetUsd) argv.push("--max-budget-usd", opts.maxBudgetUsd);
+  if (opts.autocompact) argv.push("--autocompact", opts.autocompact);
   return argv;
 }
 
@@ -939,6 +947,7 @@ function makeResultWriter(opts, version, run, state, beforeTree, beforeFingerpri
       effort: opts.effort,
       maxTurns: opts.maxTurns === null ? null : Number(opts.maxTurns),
       maxBudgetUsd: opts.maxBudgetUsd === null ? null : Number(opts.maxBudgetUsd),
+      ...(opts.autocompact === null ? {} : { autocompact: opts.autocompact }),
       timeout: opts.timeout,
       readOnly: opts.readOnly,
       resumed: Boolean(opts.resumeLast || opts.session),
@@ -1107,6 +1116,23 @@ function dispatch(opts, brief, launcher, env, run, state, writeResult) {
       }, 2000);
     });
   }
+
+  // A grandchild that outlives claude and inherited the pipes keeps stdout/stderr open, so
+  // "close" never fires and the relay waits forever, writing no result. Once claude itself is
+  // gone the pipes hold nothing we still need, so drop them after a short drain grace and let
+  // "close" run. This is the normal-exit twin of the stream teardown the watchdog already
+  // does on the timeout path.
+  child.once("exit", () => {
+    // The implementer already exited. Leaving the watchdog armed lets a drain that
+    // overlaps the remaining budget fire, set watchdogFired, and report timeout.
+    if (!watchdogFired) clearWatchdog();
+    const drain = setTimeout(() => {
+      if (settled) return;
+      child.stdout.destroy();
+      child.stderr.destroy();
+    }, 500);
+    if (typeof drain.unref === "function") drain.unref();
+  });
 
   child.on("error", (error) => {
     if (settled) return;

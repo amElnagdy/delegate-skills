@@ -73,6 +73,37 @@ if (process.env.SMOKE_GIT_RENAME_FROM && process.env.SMOKE_GIT_RENAME_TO) {
     "mv", "-f", process.env.SMOKE_GIT_RENAME_FROM, process.env.SMOKE_GIT_RENAME_TO,
   ]);
 }
+if (process.env.SMOKE_MODE === "orphan-holds-stdio") {
+  // The normal-exit twin of the timeout-tree cases. codex spawns a shell per command, and on
+  // Windows a grandchild routinely outlives it; because that grandchild inherited the pipes,
+  // the relay's stdout/stderr stay open after codex itself is gone. "exit" fires, "close"
+  // never does, and a relay that only settles on "close" waits forever and writes no result.
+  // Unlike the timeout-tree fixture (stdio: "ignore") this grandchild inherits, which is the
+  // whole point: holding the pipes open is the failure, not merely outliving the parent.
+  const logAt = args.indexOf("--log-file");
+  if (logAt !== -1) fs.writeFileSync(args[logAt + 1], "fake agy log" + String.fromCharCode(10));
+  console.log("fake implementer completed");
+  const outAt = args.indexOf("-o");
+  if (outAt !== -1) {
+    // The relay quotes the path on Windows; strip that before writing.
+    fs.writeFileSync(args[outAt + 1].replace(/^"(.*)"$/, "$1"), "fake codex completed" + "\n");
+  }
+  // detached AND inheriting: it is the pair that holds the pipes. An attached grandchild
+  // that inherits still lets "close" fire (verified on Windows/Node 24), so a fixture
+  // without detached would pass against the unpatched relay and prove nothing.
+  const grand = require("node:child_process").spawn(
+    process.execPath, ["-e", "setTimeout(() => {}, 60000)"],
+    { stdio: "inherit", detached: true });
+  if (process.env.SMOKE_GRAND_PID_FILE) {
+    fs.writeFileSync(process.env.SMOKE_GRAND_PID_FILE, String(grand.pid));
+  }
+  grand.unref();
+  const delayMs = Number(process.env.SMOKE_ORPHAN_EXIT_DELAY_MS || 0);
+  if (Number.isFinite(delayMs) && delayMs > 0) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
+  }
+  process.exit(0);
+}
 if (process.env.SMOKE_MODE === "codex-stderr-long-line") {
   // The 64 KiB suffix starts inside a four-byte character.
   fs.writeSync(2, "🐎".repeat(20000) + "fin");

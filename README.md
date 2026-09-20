@@ -248,12 +248,20 @@ Per skill — platform, CLI version, and what the run exercised:
   `--session`/`--resume-last` resume; `claude_unavailable`/127 and usage errors exiting 2 without a
   result file; deny rules and the shell sandbox blocking `git commit`, `git push`, `git -C <dir> push`,
   a nested `claude`, and a `$HOME` write.
+  macOS, `claude` 2.1.271: `--autocompact` argument handling only. The installed CLI accepted `auto`, `400k`, `1M`, `200`, and `200000` and rejected `auto2`, `50k`, `2m`, `99`, `1000001`, and `0` with exit 1, each observed through `claude --autocompact <value> --help`, which validates the option and exits before any model call; `claude` 2.1.220 rejects the option itself with `unknown option '--autocompact'`, which is the documented 2.1.221 floor. The relay's pass-through, resume re-pass, and `result.json` record are contract-tested against the smoke matrix; no delegated run has been dispatched with `--autocompact` set.
 - `cursor-delegate` — Windows, `cursor-agent` 2026.07.23-e383d2b: write run under `--force`; plan-mode
   `--read-only` touching nothing; `--session <id>` resume applying a delta brief; usage errors exiting
   2. A maintainer-run native macOS plan-mode smoke against the same version captured model, session,
   and usage with no touched files.
 - `grok-delegate` — macOS, `grok` 0.2.101: streaming-json report capture, file-based brief delivery,
   resume; read-only is best-effort by measurement, hence the violation flag.
+  Contributor-run native Windows check with `grok` 1.0.13: a no-edit dispatch using
+  `--trust-git-root` on a drive rejected by Git's ownership check completed with the pre-existing
+  untracked file reported and `readOnlyViolation: false`; that run used a real drive path whose
+  spelling did not diverge, and the verdict is claimed for Windows paths whose spelling does not
+  diverge — exact-head CI evidence for spelling-divergent temp paths lands with this repair.
+  Ownership, nested-directory, linked-worktree,
+  dirty-path, submodule, and unavailable-Git cases are covered by the `grok-git-trust` smoke module.
 - `kimi-delegate` — macOS, `kimi` 0.24.0: headless `-p` edit run, stream-json parsing, and both
   resume paths — the relay's `--session`/`--resume-last`, which drive Kimi's own `--session` and
   `--continue`.
@@ -330,7 +338,18 @@ Per skill — platform, CLI version, and what the run exercised:
   picked a moment ago" — and it answered correctly, confirming the resumed turn saw prior context, not
   just that the id was accepted. Contract-tested: argument validation,
   bounded version preflight, missing binary, result parsing, and whole-process-tree timeout/abort
-  cleanup. No Windows or Linux run is recorded.
+  cleanup. Windows 11, `codex` codex-cli 0.153.4, native (Git Bash launch, no `pwsh` installed):
+  a `workspace-write` dispatch against a throwaway repo created the briefed file and reported it
+  in `touchedFiles` with `status: "completed"`, exit 0, and a `threadId`; the brief had Codex run
+  shell commands and report its shell, which came back as System32 `powershell.exe` 5.1 with zero
+  `WindowsApps` entries on its `PATH` while the parent process carried one — the relay's PATH
+  filter reaching the sandbox, not just the child's argv. The denial the filter exists for was
+  reproduced through the unpatched relay on the same machine: a `workspace-write` dispatch asked
+  Codex to run `winget`, which lives only under `WindowsApps`, and both the PATH lookup and the
+  absolute path failed inside the sandbox with "The file cannot be accessed by the system" while
+  the same binary ran normally outside it. No Store `pwsh` is installed here, so the shell-launch
+  form of that denial (`0xC0070005` on every command) rests on the report in issue #116. No Linux
+  run is recorded.
 - `opencode-delegate`, `vibe-delegate` — contract-tested only: argument validation, bounded version
   preflight, missing binary, result parsing, and whole-process-tree timeout/abort cleanup. No
   end-to-end run is recorded here.

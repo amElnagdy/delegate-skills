@@ -108,10 +108,11 @@ process has exited and `result.json` is written.
 - **`status: failed`:** read `result.json`'s `stderrTail`, `stderrPath`, and `logPath` for the cause.
   Common causes: auth lapse, an unknown model label, timeout, or a permission the run needed.
 - **Headless write permission denied:** the relay detects Antigravity's `no output produced ...
-  auto-denied` stderr sentinel, reports `status: failed`, preserves `stderrTail`, and exits 1. Settings
-  allow-rules are not recommended here because they have not been demonstrated to apply in
-  `--print` mode. Ask the human before re-dispatching with `--dangerously-skip-permissions`; that flag
-  auto-approves every tool permission request and the run must be treated as full access.
+  auto-denied` stderr sentinel, reports `status: failed`, preserves `stderrTail`, and exits 1.
+  Settings allow-rules under `permissions.allow` in `~/.gemini/antigravity-cli/settings.json` do
+  apply to `--print` runs, but on Windows a `command(<name>)` rule may be unable to match. See
+  [Windows permission engine traps](#windows-permission-engine-traps) below before re-dispatching
+  or asking to use `--dangerously-skip-permissions`.
 - **Empty `finalMessage`:** a run with edits may still be correct - check `touchedFiles`, the diff, and
   the preserved `stderrTail`. With no observable edits, the relay reports `status: failed` rather than
   claiming completion. To get a report next time, add a `<structured_output_contract>` block (see
@@ -138,3 +139,36 @@ caps a single argument), so have `agy` read large context from the workspace ins
 
 The helper never commits - by design, not omission. The robust contract is: Antigravity edits the
 working tree, the orchestrator reviews and commits. See [review-and-land.md](review-and-land.md).
+
+## Windows permission engine traps
+
+When a headless `--print` run needs a permission `agy` cannot prompt for, it is auto-denied. `agy`'s
+error message advises adding an allow-rule under `permissions.allow` in `~/.gemini/antigravity-cli/settings.json`,
+e.g. `command(<target>)`. Allow-rules do apply in `--print` mode (a `write_file` rule naming the workspace is
+what let a headless write run succeed here), but on Windows that instruction frequently cannot work due to an
+open upstream defect in Antigravity's permission engine ([issue #614](https://github.com/google-antigravity/antigravity-cli/issues/614)).
+
+### Executable path splitting
+
+The permission engine splits a resolved executable path on whitespace before matching, so a binary living under a path
+containing a space is evaluated as its first fragment. `node`, `git` and `npm` installed under `C:\Program Files\...`
+are all evaluated as `C:\Program`, and no `command(<name>)` rule matches any of them. Measured directly on Windows 10
+with agy 1.1.12: with `command(node)` present in the allow list, a brief whose verification loop ran `node --check`
+was auto-denied anyway.
+
+### Write file glob error
+
+Upstream issue #614 also reports that a glob in a `write_file` rule - `write_file(C:\path\*)` - raises "globs not supported"
+and blocks the agent's actions entirely. Directory rules are recursive already, so the glob is unnecessary as well as harmful.
+
+### Workarounds and caveats
+
+The workarounds documented in issue #614:
+
+- **Command permissions:** `command(*)` matches commands where the executable path contains spaces. A deny list still
+  applies over `command(*)`, because deny is evaluated above allow. Note that `command(*)` widens permission to
+  auto-approve all command execution.
+- **Directory permissions:** Write directory paths literally without a wildcard, e.g. `write_file(C:\path)`.
+
+If settings allow-rules cannot resolve the denial, ask the human before re-dispatching with `--dangerously-skip-permissions`;
+that flag auto-approves every tool permission request and the run must be treated as full access.

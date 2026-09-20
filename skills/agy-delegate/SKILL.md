@@ -126,9 +126,14 @@ lets tools run inside it. As a user-facing flag it stays mutually exclusive with
 `--sandbox` on its own when you want the terminal sandbox enabled for a write run.
 If headless `--print` auto-denies a write, the relay reports `status: "failed"` and exits non-zero.
 The relay fingerprints the working tree before and after a `--read-only` run to report
-`readOnlyViolation` in `result.json`. Settings allow-rules are not documented here as a fix
-because they have not been demonstrated to apply to this headless path. Do not add the bypass
-flag without explicit human approval.
+`readOnlyViolation` in `result.json`. Settings allow-rules under `permissions.allow` in
+`~/.gemini/antigravity-cli/settings.json` do apply to headless `--print` runs — a `write_file` rule
+naming the workspace is what allows a headless write. On Windows, however, an open upstream defect in
+Antigravity's permission engine
+([issue #614](https://github.com/google-antigravity/antigravity-cli/issues/614)) splits resolved paths on
+whitespace, preventing `command(<name>)` rules from matching binaries installed under paths with spaces
+such as `C:\Program Files\...`. See [references/dispatch-and-poll.md](references/dispatch-and-poll.md)
+for Windows workarounds. Do not add the bypass flag without explicit human approval.
 
 ## Authorization model
 
