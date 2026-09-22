@@ -42,6 +42,20 @@
  *                           delta brief. Scoped to the directory, not a global "last".
  *   --session <id>          Continue a specific ZCode session by its sess_... id (from a
  *                           prior result.json). Mutually exclusive with --resume-last.
+ *   --model <provider/model>  Pin one provider and model for this run, e.g.
+ *                           openrouter/z-ai/glm-5.2:free. Requires --model-base-url
+ *                           and --model-kind. ZCode has no --model flag, so the relay
+ *                           generates a config in a per-run home under the system temp
+ *                           dir and points the child there (a home fills with live
+ *                           ZCode state, so it must not land in the repo under
+ *                           review); the API key is NOT written, it must be in the
+ *                           environment (<PROVIDER>_API_KEY or ZCODE_API_KEY). Cannot
+ *                           be combined with --session or --resume-last, because that
+ *                           per-run home takes ZCode's session store with it.
+ *                           Without these flags ZCode uses the model its own config
+ *                           selects, which this relay never reads.
+ *   --model-base-url <url>  The provider's endpoint. Required with --model.
+ *   --model-kind <kind>     anthropic | openai | openai-compatible. Required with --model.
  *   --zcode-path <file>     Path to the ZCode CLI (a .cjs bundle or a binary/shim).
  *                           Overrides PATH and bundle discovery; ZCODE_CLI does the same.
  *   --timeout <dur>         Relay-side watchdog (default: off). Durations use h/m/s
@@ -76,7 +90,7 @@
  */
 
 import {spawn, execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync, renameSync, readFileSync, readdirSync, existsSync, appendFileSync, statSync, readlinkSync, lstatSync, openSync, readSync, closeSync, realpathSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, renameSync, readFileSync, readdirSync, existsSync, appendFileSync, statSync, readlinkSync, lstatSync, openSync, readSync, closeSync, realpathSync } from "node:fs";
 import {join, resolve, basename, dirname, sep, isAbsolute, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { constants, tmpdir, homedir } from "node:os";
@@ -99,6 +113,27 @@ const SAFE_SESSION = /^sess_[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 // Reaches cmd.exe on win32 under a .cmd shim; ZCode accepts comma- or
 // space-separated tool names, optionally with a parenthesised pattern.
 const SAFE_TOOLS = /^[A-Za-z0-9][A-Za-z0-9 ,.:*()_/-]*$/;
+
+// --- model selection -------------------------------------------------------
+// ZCode has no --model flag: the model is read from the CLI's own config file,
+// whose path is derived from the process home directory. So a per-run model is
+// expressed by generating a config in an isolated home under the run dir and
+// pointing the CHILD's home at it. The generated config carries the provider's
+// routing only — never a key. ZCode resolves the key from the environment, so
+// the relay keeps the repo's trust line: it reads and writes no credentials.
+// Verified against zcode 0.16.5; this rides undocumented behaviour and an app
+// update could change it, which is why the flags are explicit rather than
+// discovered from the user's own config.
+const ZCODE_PROVIDER_KINDS = new Set(["anthropic", "openai", "openai-compatible"]);
+// The provider segment keys the generated config and derives an environment
+// variable name, so keep it to the shape ZCode's own name-to-env mapping folds
+// cleanly (it uppercases and replaces every non-alphanumeric run with "_").
+const SAFE_PROVIDER = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+// Model ids may themselves contain slashes and a colon suffix — openrouter's
+// "nvidia/nemotron-3-ultra-550b-a55b:free", baseten's "moonshotai/Kimi-K3" —
+// so only the FIRST slash separates provider from model.
+const SAFE_MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
+const SAFE_BASE_URL = /^https?:\/\/[A-Za-z0-9._~:/?#[\]@!$&'()*+,;=%-]+$/;
 
 // ZCode reads no stdin, so the brief travels as an attached file and the prompt
 // is this fixed instruction. Keep the two in lockstep with writing-the-brief.md.
@@ -164,6 +199,9 @@ function parseArgs(argv) {
     zcodePath: null,
     timeout: null,
     outDir: null,
+    model: null,
+    modelBaseUrl: null,
+    modelKind: null,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -190,6 +228,9 @@ function parseArgs(argv) {
       case "--zcode-path": opts.zcodePath = resolve(next()); break;
       case "--timeout": opts.timeout = next(); flagged.add("timeout"); break;
       case "--out-dir": opts.outDir = resolve(next()); break;
+      case "--model": opts.model = next(); break;
+      case "--model-base-url": opts.modelBaseUrl = next(); break;
+      case "--model-kind": opts.modelKind = next(); break;
       default:
         fail(`unknown option: ${arg}`);
     }
@@ -225,7 +266,64 @@ function parseArgs(argv) {
   if (opts.session !== null && !SAFE_SESSION.test(opts.session)) {
     fail("--session must be a ZCode session id of the form sess_... (letters, digits, . _ : -)");
   }
+  validateModelSelection(opts);
   return opts;
+}
+
+/**
+ * The three model flags are one unit: the generated config needs the endpoint
+ * and the kind as much as the id, and ZCode gives the relay no way to discover
+ * either (the user's own config is off limits — it holds an API key). So a
+ * partial set is a usage error rather than a half-configured provider.
+ */
+function validateModelSelection(opts) {
+  const given = ["model", "modelBaseUrl", "modelKind"].filter((key) => opts[key] !== null);
+  if (given.length === 0) return;
+  if (given.length !== 3) {
+    fail("--model, --model-base-url, and --model-kind must be passed together; the generated provider config needs all three");
+  }
+  const slash = opts.model.indexOf("/");
+  if (slash <= 0 || slash === opts.model.length - 1) {
+    fail(`--model "${opts.model}" must be provider/model, e.g. openrouter/z-ai/glm-5.2:free`);
+  }
+  opts.modelProvider = opts.model.slice(0, slash);
+  opts.modelId = opts.model.slice(slash + 1);
+  if (!SAFE_PROVIDER.test(opts.modelProvider) || !SAFE_MODEL_ID.test(opts.modelId)) {
+    fail("--model contains unsupported characters (allowed: letters, digits, and . _ : / -)");
+  }
+  if (!ZCODE_PROVIDER_KINDS.has(opts.modelKind)) {
+    fail(`invalid --model-kind "${opts.modelKind}" (expected: ${[...ZCODE_PROVIDER_KINDS].join(", ")})`);
+  }
+  if (!SAFE_BASE_URL.test(opts.modelBaseUrl)) {
+    fail("--model-base-url must be an http(s) URL with no whitespace");
+  }
+  // The generated config lives in a throwaway home, and ZCode keeps its session
+  // store under that same home. A resumed run would look for the session beside
+  // a config that no longer exists, so refuse the combination rather than
+  // silently start a fresh session under a resume flag.
+  if (opts.session !== null || opts.resumeLast) {
+    fail("--model cannot be combined with --session or --resume-last: the generated config lives in a per-run home, so ZCode's session store does not survive the run");
+  }
+  const candidates = modelKeyEnvNames(opts.modelProvider, opts.modelKind);
+  // Presence only — the relay must never read a key's value.
+  if (!candidates.some((name) => process.env[name] !== undefined)) {
+    fail(`no API key in the environment for provider "${opts.modelProvider}": set one of ${candidates.join(", ")} (the relay never reads or writes credentials, so the key must come from the environment)`);
+  }
+}
+
+/**
+ * The environment variable names ZCode itself consults for a provider's key,
+ * in its own order: the kind's canonical name, then the provider name folded
+ * to upper snake case, then the global fallback.
+ */
+function modelKeyEnvNames(provider, kind) {
+  const names = [];
+  if (kind === "openai") names.push("OPENAI_API_KEY");
+  if (kind === "anthropic") names.push("ANTHROPIC_API_KEY");
+  const folded = provider.replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_+|_+$/g, "").toUpperCase();
+  if (folded) names.push(`${folded}_API_KEY`);
+  names.push("ZCODE_API_KEY");
+  return [...new Set(names)];
 }
 
 function parseDuration(duration) {
@@ -738,7 +836,55 @@ function prepareRunDir(opts, brief) {
     resultPath: join(outDir, "result.json"),
   };
   writeFileSync(run.briefPath, brief, "utf8");
+  if (opts.model) run.modelHome = writeModelHome(opts);
   return run;
+}
+
+/**
+ * Generate the config that pins one provider and model, in a home directory of
+ * this run's own. Returns the directory to hand the child as its home.
+ *
+ * The provider block carries `kind`, `baseURL`, and `apiKeyRequired` and NOTHING
+ * else: no `apiKey` field is written. ZCode falls back to the environment for
+ * the key.
+ *
+ * Deliberately NOT under --out-dir. A home is live ZCode state, not an artifact:
+ * the run fills it with a session database, logs, and a plugin cache. --out-dir
+ * can point into the repository under review, and the read-only tripwire cannot
+ * exclude a tree whose contents are unknown until the run creates them — git
+ * collapses the whole directory into one untracked entry, and the relay's
+ * exclusion list matches whole paths. Writing outside the repository keeps that
+ * state where no tripwire, diff, or `touchedFiles` report can see it.
+ */
+function writeModelHome(opts) {
+  const home = mkdtempSync(join(tmpdir(), "delegate-zcode-home-"));
+  const configDir = join(home, ".zcode", "cli");
+  mkdirSync(configDir, { recursive: true });
+  const config = {
+    provider: {
+      [opts.modelProvider]: {
+        kind: opts.modelKind,
+        options: { baseURL: opts.modelBaseUrl, apiKeyRequired: true },
+        // ZCode requires the model to be declared before it can be selected.
+        models: { [opts.modelId]: { name: opts.modelId } },
+      },
+    },
+    // `main` alone satisfies ZCode's model-role schema; it demands main or lite.
+    model: { main: `${opts.modelProvider}/${opts.modelId}` },
+  };
+  writeFileSync(join(configDir, "config.json"), `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  return home;
+}
+
+/**
+ * The child's environment. Unchanged unless --model was passed, in which case
+ * both home variables point at the generated config — `HOME` for POSIX and
+ * `USERPROFILE` for win32, since Node's os.homedir() reads a different one per
+ * platform and the relay cannot know which the CLI will consult.
+ */
+function childEnv(run) {
+  if (!run.modelHome) return process.env;
+  return { ...process.env, HOME: run.modelHome, USERPROFILE: run.modelHome };
 }
 
 function makeResultWriter(opts, version, run, target) {
@@ -756,6 +902,10 @@ function makeResultWriter(opts, version, run, target) {
       disallowedTools: opts.disallowedTools,
       resumeLast: opts.resumeLast,
       session: opts.session,
+      // null unless --model pinned one: without it ZCode uses whatever the
+      // user's own config selects, which the relay does not read.
+      model: opts.model,
+      modelHome: run.modelHome ?? null,
       zcodeVersion: version,
       zcodeSource: target ? target.source : null,
       zcodePath: target ? target.display : null,
@@ -819,7 +969,7 @@ function dispatchToZcode(opts, run, target, writeResult, beforeTree, beforeFinge
     stdio: ["ignore", "pipe", "pipe"],
     shell: needsShell(target),
     detached: process.platform !== "win32",
-    env: process.env,
+    env: childEnv(run),
   });
 
   let stdoutBuf = "";

@@ -41,6 +41,13 @@ authenticated is true | false | null (null = unknown / no probe).
 models.status is reported | aliases | unsupported | failed
 (aliases = curated aliases from the registry, not a live listing).
 
+For zcode, models.values are qualified "provider/model" ids read from ZCode's own CLI
+config — the only offline listing, since ZCode has no models subcommand — and models
+carries an extra "providers": [ { name, kind, baseURL } ]. That routing is what
+zcode-delegate's --model needs alongside the id. Be aware that this file also holds API
+keys: reading it loads them into this process, and only the fields above leave the
+parser. A malformed file reports "failed" rather than any of its bytes.
+
 --usage adds "usage" to each discovered entry:
   { "sessions": <int>, "lastUsed": <ISO-8601 | null> }, or null when no usage probe
   is wired or the CLI has no local state directory (null = unknown, not zero).
@@ -315,9 +322,56 @@ function parseModelCache(raw) {
   );
 }
 
+/**
+ * Parses the "zcode-config" file shape: ZCode's own CLI config, which is the
+ * only offline listing of the models it can reach.
+ *
+ * That file also holds API keys. Say the cost plainly rather than around it:
+ * reading it loads those keys into this process, and the containment is in what
+ * leaves the parser, not in what enters it. Two things leave — the
+ * `provider/model` identifiers, and each provider's routing (`kind` and
+ * `baseURL`), which is what zcode-delegate's --model needs alongside the id.
+ * `options.apiKey` is never dereferenced, so no code path can carry a key into a
+ * result, and a parse failure returns the same empty "failed" result as a
+ * missing file, so no bytes of it reach a caller either.
+ *
+ * There is no credential-free alternative: ZCode has no `models` subcommand, and
+ * `zcode doctor` reports only runtime and packaging facts. If the utility trust
+ * line is read to forbid opening the file at all, the answer is to drop this
+ * probe rather than to soften the wording.
+ */
+function parseZcodeConfig(raw) {
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return failedModels();
+  }
+  const table = parsed?.provider;
+  if (!table || typeof table !== "object" || Array.isArray(table)) return failedModels();
+  const identifiers = [];
+  const providers = [];
+  // Prototype-free iteration: a provider literally named "constructor" must not
+  // resolve to an inherited function (the fleet lane lookup hit exactly this).
+  for (const name of Object.keys(table)) {
+    const entry = table[name];
+    const kind = entry?.kind;
+    const baseURL = entry?.options?.baseURL;
+    const models = entry?.models;
+    // Both are required to build a --model dispatch, so a provider missing
+    // either is listed by neither: offering it would produce a run that fails.
+    if (typeof kind !== "string" || typeof baseURL !== "string") continue;
+    if (!models || typeof models !== "object" || Array.isArray(models)) continue;
+    providers.push({ name, kind, baseURL });
+    for (const model of Object.keys(models)) identifiers.push(`${name}/${model}`);
+  }
+  if (providers.length === 0) return failedModels();
+  return { ...modelResult(identifiers), providers };
+}
+
 /** $CODEX_HOME-style override, else the subdirectory under the user's home. */
 function modelFilePath(probe) {
-  const base = process.env[probe.envDir] || join(homedir(), probe.homeSubdir);
+  const base = (probe.envDir && process.env[probe.envDir]) || join(homedir(), probe.homeSubdir);
   return join(base, probe.file);
 }
 
@@ -331,7 +385,8 @@ function probeModels(impl, launch, captured = null) {
   }
   if (probe.file) {
     try {
-      return parseModelCache(readFileSync(modelFilePath(probe), "utf8"));
+      const raw = readFileSync(modelFilePath(probe), "utf8");
+      return probe.format === "zcode-config" ? parseZcodeConfig(raw) : parseModelCache(raw);
     } catch {
       // No cache until the CLI has run once; that is not a discovery failure worth throwing on.
       return failedModels();

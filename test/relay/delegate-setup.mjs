@@ -208,6 +208,81 @@ if (observation === "models") {
     );
   }
 
+  // --- zcode model probe reads the CLI config, and only its non-secret parts ---
+  // ZCode has no `models` command; the catalogue lives in its own config file,
+  // which also holds API keys. Discovery must lift routing and ids and nothing
+  // else, and must not surface file bytes when the file is malformed.
+  const zcodeProbeDir = join(h.scratch, "discover-zcode");
+  mkdirSync(zcodeProbeDir);
+  const zcodeProbeSource = 'console.log("zcode 0.16.5");\n';
+  if (h.WIN) {
+    writeFileSync(join(zcodeProbeDir, "fake-zcode.cjs"), zcodeProbeSource);
+    writeFileSync(join(zcodeProbeDir, "zcode.cmd"), `@"${process.execPath}" "%~dp0fake-zcode.cjs" %*\r\n`);
+  } else {
+    const zcodeProbePath = join(zcodeProbeDir, "zcode");
+    writeFileSync(zcodeProbePath, `#!${process.execPath}\n${zcodeProbeSource}`);
+    chmodSync(zcodeProbePath, 0o755);
+  }
+
+  const SECRET = "sk-zcode-smoke-secret-never-print";
+  const CANARY = "canary-bytes-of-a-malformed-config";
+  const zcodeHome = join(h.scratch, "zcode-home");
+  const zcodeConfigDir = join(zcodeHome, ".zcode", "cli");
+  mkdirSync(zcodeConfigDir, { recursive: true });
+
+  const runZcodeDiscover = () => {
+    const probe = spawnSync(process.execPath, [join(setupDir, "discover.mjs")], {
+      encoding: "utf8",
+      // os.homedir() reads USERPROFILE on win32 and HOME elsewhere, so set both.
+      env: { ...process.env, PATH: zcodeProbeDir, HOME: zcodeHome, USERPROFILE: zcodeHome },
+    });
+    let report = null;
+    try {
+      if (probe.status === 0) report = JSON.parse(probe.stdout);
+    } catch { report = null; }
+    return { stdout: probe.stdout ?? "", entry: report?.discovered.find(({ key }) => key === "zcode") };
+  };
+
+  writeFileSync(join(zcodeConfigDir, "config.json"), JSON.stringify({
+    provider: {
+      zai: {
+        kind: "anthropic",
+        options: { baseURL: "https://api.z.ai/api/anthropic", apiKey: SECRET },
+        models: { "glm-5.1": { name: "GLM-5.1" } },
+      },
+      openrouter: {
+        kind: "openai-compatible",
+        options: { baseURL: "https://openrouter.ai/api/v1", apiKey: SECRET },
+        // The id keeps its own slashes and : suffix; only the provider prefix is added.
+        models: { "z-ai/glm-5.2:free": { name: "GLM 5.2" } },
+      },
+      // No baseURL: --model could not dispatch to it, so it must not be offered.
+      broken: { kind: "openai-compatible", options: {}, models: { "ghost-1": {} } },
+    },
+    model: { main: "zai/glm-5.1" },
+  }, null, 2));
+
+  const populated = runZcodeDiscover();
+  h.check("zcode models: providers and qualified ids are reported from the CLI config",
+    populated.entry?.models?.status === "reported" &&
+    populated.entry.models.values.includes("zai/glm-5.1") &&
+    populated.entry.models.values.includes("openrouter/z-ai/glm-5.2:free"));
+  h.check("zcode models: provider routing travels with the ids so --model can be built",
+    populated.entry?.models?.providers?.some(
+      (p) => p.name === "openrouter" && p.kind === "openai-compatible" && p.baseURL === "https://openrouter.ai/api/v1") === true);
+  h.check("zcode models: a provider without a baseURL is not offered",
+    !populated.entry?.models?.values?.some((value) => value.startsWith("broken/")) &&
+    !populated.entry?.models?.providers?.some((p) => p.name === "broken"));
+  h.check("zcode models: no API key reaches the discovery report",
+    !populated.stdout.includes(SECRET));
+
+  writeFileSync(join(zcodeConfigDir, "config.json"), `{ not json at all ${CANARY}`);
+  const malformed = runZcodeDiscover();
+  h.check("zcode models: a malformed config reports failed and leaks none of its bytes",
+    malformed.entry?.models?.status === "failed" &&
+    malformed.entry.models.values.length === 0 &&
+    !malformed.stdout.includes(CANARY));
+
   // Keep fixtures inside the repo tree so sandboxed CI/dev runs can write; seed a
   // minimal .git without `git init` (hooks/config writes are often blocked).
   const fleetRoot = mkdtempSync(join(h.testDir, "..", ".tmp-fleet-smoke-"));
