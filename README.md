@@ -212,6 +212,9 @@ This package is intentionally inspectable:
 - Those scripts make no network calls of their own, read or write no credentials, send no telemetry, and
   have no dependencies (Node built-ins only). Relays launch an implementer CLI and `git`, plus the
   platform process launcher/termination utility where a Windows shim or process-tree kill requires one.
+  The one opt-in exception is agy-delegate's `--account`, which runs a launcher script *you* supply
+  (`AGY_ACCOUNT_LAUNCHER`) in place of `agy`; anything that launcher does with credentials is yours,
+  not the relay's.
   Discover may invoke installed CLIs for `--version` / model list probes (those CLIs may contact their
   own services). Read the script before you run it.
 - None of the relays ever commit — committing is always the orchestrator's job, after review.

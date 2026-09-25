@@ -48,6 +48,29 @@ Options:
 Artifacts default to the system temp dir on purpose: the repo under review stays clean, so the
 touched-files report shows only Antigravity's edits and nothing of the helper's own.
 
+## Several Antigravity accounts (`--account`)
+
+`agy` keeps one login per OS user, in a fixed OS-credential entry, so pointing `HOME` or
+`USERPROFILE` elsewhere does not give it a second account. To dispatch under a different account,
+pass `--account <name>` (or set `account` on the fleet lane) and point `AGY_ACCOUNT_LAUNCHER` at a
+launcher script you own:
+
+```bash
+AGY_ACCOUNT_LAUNCHER=/abs/path/agy-launcher.mjs node <skill-dir>/scripts/relay.mjs --account work2 --brief brief.txt
+```
+
+The relay then runs `node $AGY_ACCOUNT_LAUNCHER <the usual agy argv>` with `AGY_ACCOUNT=<name>`,
+in the same working directory and with no shell. The launcher must behave like `agy`: print
+the final report on stdout and diagnostics on stderr, write the log to the `--log-file` path it
+was given, and exit with agy's exit code. How it runs that account (for example as a separate
+local OS user that signed in once) is up to the launcher. The relay reads and passes no
+credentials; whatever the launcher needs stays on your machine. `result.json` records the
+`account`.
+
+The relay's watchdog kills the launcher's process tree. A launcher that starts agy under
+another OS user may put agy outside that tree, so keep agy's own `--print-timeout` as the bound
+on such runs.
+
 ## The result
 
 `<out-dir>/result.json` is the contract. Fields:

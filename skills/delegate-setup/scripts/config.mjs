@@ -263,6 +263,9 @@ function validateDialValue(implementer, field, value, laneName, label) {
     }
     return null;
   }
+  if (field === "account" && !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$/.test(value)) {
+    return `${label}: lane ${laneName}.account must be letters, digits, . _ - (at most 32 characters)`;
+  }
   if (field === "model" || field === "provider") {
     const modelError = validateModelOrProvider(implementer, field, value, laneName, label);
     if (modelError) return modelError;
