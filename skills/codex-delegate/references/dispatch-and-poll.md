@@ -58,6 +58,17 @@ OS-backed auth and normal configuration still load, but direct environment-backe
 MCP settings that reference any stripped variable likewise need it named with `--keep-env`. The same
 filtered environment is used for preflight and dispatch.
 
+On Windows, a sandboxed run (`read-only` or `workspace-write`) receives a `PATH` with every
+`WindowsApps` entry removed, again for both preflight and dispatch. The Microsoft Store installs
+apps — PowerShell 7 included — under a folder whose ACLs deny execution to the restricted token
+Codex's sandbox runs commands with. Codex prefers a `pwsh` found on `PATH`, so a Store-installed
+`pwsh` makes every sandboxed command fail with `0xC0070005` while the model keeps working blind:
+it cannot run a single gate and either gives up or reports work it never verified. Without those
+entries Codex falls back to System32 `powershell.exe`, which the sandbox can launch.
+`--sandbox danger-full-access` runs without the restricted token and gets `PATH` unchanged. To
+see whether a machine is affected: `(Get-Command pwsh -All).Source` — any result under a
+`WindowsApps` folder would hit this.
+
 ## The result
 
 `<out-dir>/result.json` is the contract. Fields:

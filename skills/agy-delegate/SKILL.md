@@ -70,7 +70,7 @@ below is this skill's installed directory - the folder containing this `SKILL.md
 node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 # choose a model label:                 add --model "<label from agy models>"
 # reasoning effort (low, medium, high): add --effort high
-# read-only (plan mode — no edits):     add --read-only
+# read-only (sandbox — no edits):       add --read-only
 # enable Antigravity terminal sandbox:  add --sandbox
 # resume the most recent conversation:  add --resume-last  (delta brief only)
 # see all options:                      node .../relay.mjs --help
@@ -118,17 +118,34 @@ diff holds:
 
 Antigravity owns its own permission policy. The relay does not bypass it by default. Use
 `--dangerously-skip-permissions` only when the human explicitly accepts that Antigravity may
-auto-approve tool permission requests. `--read-only` runs `agy` in plan mode (`--mode plan`),
-removing write and edit paths, and is mutually exclusive with `--dangerously-skip-permissions`.
-Use `--sandbox` when you want Antigravity's terminal sandbox enabled for the run.
-Antigravity's own help says `--dangerously-skip-permissions` auto-approves all tool permission
-requests without prompting, including a request to act outside the sandbox. Do not treat
-`--sandbox` as an enforced boundary when the flags are combined; treat the run as full access.
+auto-approve tool permission requests. `--read-only` composes `--sandbox` with
+`--dangerously-skip-permissions`: the sandbox is the enforcement — writes inside the workspace
+are overlaid and discarded, and paths outside it fail with EPERM — while the auto-approve only
+lets tools run inside it. As a user-facing flag it stays mutually exclusive with
+`--dangerously-skip-permissions`, which alone (without the sandbox) is full access. Use
+`--sandbox` on its own when you want the terminal sandbox enabled for a write run.
 If headless `--print` auto-denies a write, the relay reports `status: "failed"` and exits non-zero.
 The relay fingerprints the working tree before and after a `--read-only` run to report
-`readOnlyViolation` in `result.json`. Settings allow-rules are not documented here as a fix
-because they have not been demonstrated to apply to this headless path. Do not add the bypass
-flag without explicit human approval.
+`readOnlyViolation` in `result.json`. Settings allow-rules do apply to headless `--print` runs, but
+their matching rules and config location vary by `agy` version and platform, so treat a denial as
+something to measure on your install rather than assume. Two traps have been measured. First,
+exact-match behavior: on Windows with agy 1.2.5, `command(<name>)` matched only a bare command with
+no arguments — `command(git)` never allowed a real `git status`, and `command(regex:git .+)` was
+required ([issue #614 comment](https://github.com/google-antigravity/antigravity-cli/issues/614#issuecomment-5466617752)).
+On macOS with agy 1.2.0, that same bare `command(git)` rule *did* allow `git status`, so the
+exact-match trap is not a constant across versions. Second, on Windows, an open
+upstream defect in Antigravity's permission engine
+([issue #614](https://github.com/google-antigravity/antigravity-cli/issues/614)) splits resolved paths
+on whitespace, so a binary under `C:\Program Files\...` — which is where `git` itself commonly lives,
+making this the single most common trigger for delegated coding tasks, not just node/npm — is matched
+as its first fragment and no `command(<name>)` rule can match it. On which file agy reads: verified
+live on Windows with agy 1.2.5, the effective rules were `userSettings.globalPermissionGrants.allow`
+in `~/.gemini/config/config.json`, not the `permissions.allow` in
+`~/.gemini/antigravity-cli/settings.json` that agy's own denial message points at; verified live on
+macOS with agy 1.2.0, rules in `antigravity-cli/settings.json` took effect. Recheck both on your
+version before relying on either file. See
+[references/dispatch-and-poll.md](references/dispatch-and-poll.md) for the full writeup. Do not add
+the bypass flag without explicit human approval.
 
 ## Authorization model
 

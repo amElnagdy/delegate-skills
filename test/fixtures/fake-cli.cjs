@@ -1,5 +1,8 @@
 const fs = require("node:fs");
 const args = process.argv.slice(2);
+// A relay whose behavior gates on the probed CLI version (opencode 1.x --variant vs
+// 2.x model#variant) drives the gate by overriding the version string here.
+const fakeVersion = process.env.SMOKE_VERSION || "fake-cli 0.0.0-smoke";
 const capturedEnv = () => Object.fromEntries(
   ["PATH", "HOME", "SMOKE_PROVIDER_TOKEN", "SMOKE_SECRET_TOKEN"]
     .filter((key) => process.env[key] !== undefined)
@@ -24,7 +27,7 @@ if (versionProbe && process.env.SMOKE_PREFLIGHT_PID_FILE) {
 }
 if (versionProbe && process.env.SMOKE_MODE === "grok-spawn-error" && process.platform !== "win32") {
   fs.renameSync(require("node:path").join(__dirname, "grok"), require("node:path").join(__dirname, "grok.removed"));
-  console.log("fake-cli 0.0.0-smoke");
+  console.log(fakeVersion);
   process.exit(0);
 } else if (versionProbe && process.env.SMOKE_MODE === "grok-version-fallback-budget") {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 700);
@@ -32,7 +35,7 @@ if (versionProbe && process.env.SMOKE_MODE === "grok-spawn-error" && process.pla
     console.error("fake documented version failure");
     process.exit(7);
   }
-  console.log("fake-cli 0.0.0-smoke");
+  console.log(fakeVersion);
   process.exit(0);
 } else if (versionProbe && /-version-hang$/.test(process.env.SMOKE_MODE || "")) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
@@ -42,7 +45,7 @@ if (versionProbe && process.env.SMOKE_MODE === "grok-spawn-error" && process.pla
   console.error("fake version failure");
   process.exit(7);
 } else if (versionProbe) {
-  console.log("fake-cli 0.0.0-smoke");
+  console.log(fakeVersion);
   process.exit(0);
 }
 if (process.env.SMOKE_MODE === "capture") {
@@ -72,6 +75,37 @@ if (process.env.SMOKE_GIT_RENAME_FROM && process.env.SMOKE_GIT_RENAME_TO) {
   require("node:child_process").execFileSync("git", [
     "mv", "-f", process.env.SMOKE_GIT_RENAME_FROM, process.env.SMOKE_GIT_RENAME_TO,
   ]);
+}
+if (process.env.SMOKE_MODE === "orphan-holds-stdio") {
+  // The normal-exit twin of the timeout-tree cases. codex spawns a shell per command, and on
+  // Windows a grandchild routinely outlives it; because that grandchild inherited the pipes,
+  // the relay's stdout/stderr stay open after codex itself is gone. "exit" fires, "close"
+  // never does, and a relay that only settles on "close" waits forever and writes no result.
+  // Unlike the timeout-tree fixture (stdio: "ignore") this grandchild inherits, which is the
+  // whole point: holding the pipes open is the failure, not merely outliving the parent.
+  const logAt = args.indexOf("--log-file");
+  if (logAt !== -1) fs.writeFileSync(args[logAt + 1], "fake agy log" + String.fromCharCode(10));
+  console.log("fake implementer completed");
+  const outAt = args.indexOf("-o");
+  if (outAt !== -1) {
+    // The relay quotes the path on Windows; strip that before writing.
+    fs.writeFileSync(args[outAt + 1].replace(/^"(.*)"$/, "$1"), "fake codex completed" + "\n");
+  }
+  // detached AND inheriting: it is the pair that holds the pipes. An attached grandchild
+  // that inherits still lets "close" fire (verified on Windows/Node 24), so a fixture
+  // without detached would pass against the unpatched relay and prove nothing.
+  const grand = require("node:child_process").spawn(
+    process.execPath, ["-e", "setTimeout(() => {}, 60000)"],
+    { stdio: "inherit", detached: true });
+  if (process.env.SMOKE_GRAND_PID_FILE) {
+    fs.writeFileSync(process.env.SMOKE_GRAND_PID_FILE, String(grand.pid));
+  }
+  grand.unref();
+  const delayMs = Number(process.env.SMOKE_ORPHAN_EXIT_DELAY_MS || 0);
+  if (Number.isFinite(delayMs) && delayMs > 0) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
+  }
+  process.exit(0);
 }
 if (process.env.SMOKE_MODE === "codex-stderr-long-line") {
   // The 64 KiB suffix starts inside a four-byte character.
@@ -417,6 +451,23 @@ if (["omp-success", "omp-error"].includes(process.env.SMOKE_MODE)) {
     } else {
       console.log(JSON.stringify(resultEvent));
     }
+  });
+} else if (process.env.SMOKE_MODE === "opencode-success") {
+  let brief = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (chunk) => { brief += chunk; });
+  process.stdin.on("end", () => {
+    fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify({ args, brief }));
+    const sid = "ses_smoke_opencode";
+    const emit = (value) => fs.writeSync(1, `${JSON.stringify(value)}\n`);
+    emit({ type: "step_start", sessionID: sid, part: { type: "step-start" } });
+    // Streamed updates to one part must replace, not duplicate: the relay keys text by part.id.
+    emit({ type: "text", sessionID: sid, part: { id: "prt_1", type: "text", text: "fake opencode" } });
+    emit({ type: "text", sessionID: sid, part: { id: "prt_1", type: "text", text: "fake opencode completed" } });
+    emit({ type: "text", sessionID: sid, part: { id: "prt_2", type: "text", text: " — second segment" } });
+    emit({ type: "step_finish", sessionID: sid, part: { type: "step-finish", cost: 0.001 } });
+    emit({ type: "step_finish", sessionID: sid, part: { type: "step-finish", cost: 0.0025 } });
+    process.exit(0);
   });
 } else {
   process.stdin.resume();

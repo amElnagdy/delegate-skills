@@ -656,11 +656,16 @@ if (observation === "models") {
         ? readFileSync(agyLaneArgsFile, "utf8").split(/\r?\n/).filter(Boolean)
         : JSON.parse(readFileSync(agyLaneArgsFile, "utf8"))
       : [];
+    // A readOnly lane dial reaches agy as the sandbox plus auto-approve inside
+    // it, not `--mode plan`: plan mode auto-denies the first tool needing a
+    // permission prompt, which headless --print cannot answer.
     h.check("relay --lane: Agy applies effort and readOnly dials",
       writeAgyLane.status === 0 &&
       agyLane.status === 0 &&
       h.pair(agyLaneArgs, "--effort", "high") &&
-      h.pair(agyLaneArgs, "--mode", "plan") &&
+      agyLaneArgs.includes("--sandbox") &&
+      agyLaneArgs.includes("--dangerously-skip-permissions") &&
+      !agyLaneArgs.includes("--mode") &&
       h.result(agyLaneOut).effort === "high" &&
       h.result(agyLaneOut).readOnly === true);
 
@@ -704,14 +709,20 @@ if (observation === "models") {
       ],
       {
         encoding: "utf8",
-        env: { ...fleetEnv, SMOKE_MODE: "capture", SMOKE_ARGS_FILE: laneArgsFile },
+        env: {
+          ...fleetEnv,
+          SMOKE_MODE: "capture",
+          SMOKE_ARGS_FILE: laneArgsFile,
+          SMOKE_VERSION: "opencode v2.0.11",
+        },
       },
     );
     const laneArgs = existsSync(laneArgsFile) ? JSON.parse(readFileSync(laneArgsFile, "utf8")) : [];
+    // opencode 2.x has no --variant flag: the relay joins the dials as --model provider/model#variant.
     h.check("relay --lane: opencode applies model+variant from lane",
       laneDispatch.status === 0 &&
-        h.pair(laneArgs, "--model", "opencode/grok") &&
-        h.pair(laneArgs, "--variant", "high"));
+        h.pair(laneArgs, "--model", "opencode/grok#high") &&
+        !laneArgs.includes("--variant"));
     h.check("relay --lane: result records lane provenance",
       existsSync(join(laneOut, "result.json")) &&
         h.result(laneOut).lane === "feature" &&
@@ -802,14 +813,19 @@ if (observation === "models") {
       ],
       {
         encoding: "utf8",
-        env: { ...fleetEnv, SMOKE_MODE: "capture", SMOKE_ARGS_FILE: overrideArgsFile },
+        env: {
+          ...fleetEnv,
+          SMOKE_MODE: "capture",
+          SMOKE_ARGS_FILE: overrideArgsFile,
+          SMOKE_VERSION: "opencode v2.0.11",
+        },
       },
     );
     const overrideArgs = existsSync(overrideArgsFile) ? JSON.parse(readFileSync(overrideArgsFile, "utf8")) : [];
     h.check("relay --lane: explicit flags win over lane dials",
       overrideRun.status === 0 &&
-        h.pair(overrideArgs, "--model", "openai/gpt-test") &&
-        h.pair(overrideArgs, "--variant", "low"));
+        h.pair(overrideArgs, "--model", "openai/gpt-test#low") &&
+        !overrideArgs.includes("--variant"));
 
     const projectOnly = {
       version: "delegate-fleet.v1",

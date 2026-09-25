@@ -38,7 +38,7 @@ Options:
 | `--resume-last` | Continue the most recent Antigravity conversation; send only the delta brief. |
 | `--conversation <id>` | Continue a specific Antigravity conversation; send only the delta brief. |
 | `--sandbox` | Enable Antigravity's terminal sandbox for the run. |
-| `--read-only` | Run in plan mode (`--mode plan`), removing write and edit paths; mutually exclusive with `--dangerously-skip-permissions`. |
+| `--read-only` | Run under agy's sandbox with tool approval auto-granted inside it (`--sandbox --dangerously-skip-permissions`); reads and writes are both confined to the workspace — a write appears to succeed to the agent but is overlaid and discarded. Mutually exclusive with `--dangerously-skip-permissions` as a flag (that flag alone, without the sandbox, is full access). |
 | `--dangerously-skip-permissions` | Pass Antigravity's permission-bypass flag; mutually exclusive with `--read-only`. Never use this unless the human explicitly accepts it. |
 | `--print-timeout <duration>` | Timeout agy itself applies to print mode (default: `30m`). |
 | `--timeout <dur>` | Relay-side watchdog (e.g. `30m`); overrides the default of `--print-timeout` plus a 60s grace. On expiry the agy process tree is killed and `result.json` gets `status: "timeout"`. Set it explicitly when agy may hang past its own print timeout. Malformed, zero, and out-of-range durations are rejected; the maximum is `596h31m23s`. |
@@ -108,10 +108,11 @@ process has exited and `result.json` is written.
 - **`status: failed`:** read `result.json`'s `stderrTail`, `stderrPath`, and `logPath` for the cause.
   Common causes: auth lapse, an unknown model label, timeout, or a permission the run needed.
 - **Headless write permission denied:** the relay detects Antigravity's `no output produced ...
-  auto-denied` stderr sentinel, reports `status: failed`, preserves `stderrTail`, and exits 1. Settings
-  allow-rules are not recommended here because they have not been demonstrated to apply in
-  `--print` mode. Ask the human before re-dispatching with `--dangerously-skip-permissions`; that flag
-  auto-approves every tool permission request and the run must be treated as full access.
+  auto-denied` stderr sentinel, reports `status: failed`, preserves `stderrTail`, and exits 1.
+  Allow-rule matching and location vary by `agy` version and platform — a bare `command(<name>)` rule
+  was insufficient on Windows/agy 1.2.5 but did work on macOS/agy 1.2.0 — so measure before assuming;
+  see [Permission engine traps](#permission-engine-traps) below before re-dispatching or asking to use
+  `--dangerously-skip-permissions`.
 - **Empty `finalMessage`:** a run with edits may still be correct - check `touchedFiles`, the diff, and
   the preserved `stderrTail`. With no observable edits, the relay reports `status: failed` rather than
   claiming completion. To get a report next time, add a `<structured_output_contract>` block (see
@@ -138,3 +139,73 @@ caps a single argument), so have `agy` read large context from the workspace ins
 
 The helper never commits - by design, not omission. The robust contract is: Antigravity edits the
 working tree, the orchestrator reviews and commits. See [review-and-land.md](review-and-land.md).
+
+## Permission engine traps
+
+When a headless `--print` run needs a permission `agy` cannot prompt for, it is auto-denied. `agy`'s own
+error message advises adding an allow-rule under `permissions.allow` in
+`~/.gemini/antigravity-cli/settings.json`, e.g. `command(<target>)`. That instruction is incomplete
+in measured ways, and what breaks varies by version and platform: following it literally still failed
+on a plain, spaceless command like `git status` on the machine that documented these traps (Windows,
+agy 1.2.5), while the same bare rule worked on macOS with agy 1.2.0.
+
+### Exact-match rules don't cover real commands (measured on Windows, agy 1.2.5)
+
+`command(<name>)` matches an exact command line, not a prefix. `command(git)` allows only a bare `git`
+invocation with zero arguments - not `git status`, not anything a real task actually runs. This is the
+first thing to check on *any* denial, before suspecting the Windows bug below: use
+`command(regex:git .+)` (or a narrower pattern for a specific subcommand) to match real invocations.
+Source: [issue #614 comment](https://github.com/google-antigravity/antigravity-cli/issues/614#issuecomment-5466617752).
+
+Measured on macOS with agy 1.2.0, the opposite held: `command(git)` alone in
+`~/.gemini/antigravity-cli/settings.json` allowed a real `git status` through a headless relay
+dispatch (the identical brief with no rule was auto-denied). Treat exact-match behavior as version-
+and platform-dependent, and test your own denial before assuming either way.
+
+### Executable path splitting (Windows)
+
+The permission engine splits a resolved executable path on whitespace before matching, so a binary
+living under a path containing a space is evaluated as its first fragment. `node`, `git` and `npm`
+installed under `C:\Program Files\...` are all evaluated as `C:\Program`, and no `command(<name>)` rule
+- regex or not - matches any of them this way. This makes `git` the single most common trigger in
+practice: it ships under `C:\Program Files\Git\...` by default on Windows, and nearly every delegated
+coding brief runs `git status` at least once to check its own work. Measured directly on Windows 10 with
+agy 1.1.12: with `command(node)` present in the allow list, a brief whose verification loop ran
+`node --check` was auto-denied anyway.
+
+### Which config file agy actually reads
+
+`agy`'s denial message points at `permissions.allow` in `~/.gemini/antigravity-cli/settings.json`.
+Verified live on agy 1.2.5 on Windows: that file's `permissions` key was not what took effect - the
+CLI's own log reported it as `permissions=<nil>` for that file, while a separate rule added under
+`userSettings.globalPermissionGrants.allow` in **`~/.gemini/config/config.json`** was the one that
+unblocked a denied `git status` call once written as `command(regex:git .+)`. A rule added to
+`antigravity-cli/settings.json` in the exact form `agy`'s own message and error text describe did not
+unblock the same call. This may be version- or platform-dependent; re-verify which file actually
+applies before relying on this if you're on a different `agy` version, but don't assume the file
+`agy` names in its own error is the one to edit.
+
+Measured on macOS with agy 1.2.0, both files' rules took effect in live relay runs:
+`command(regex:git .+)` unblocked a denied `git status` from either `antigravity-cli/settings.json`'s
+`permissions.allow` or `config.json`'s `userSettings.globalPermissionGrants.allow`. The divergence
+between installs is real, so the only reliable rule is the one above: verify which file your install
+actually reads before trusting `agy`'s own error text.
+
+### Write file glob error
+
+Upstream issue #614 also reports that a glob in a `write_file` rule - `write_file(C:\path\*)` - raises "globs not supported"
+and blocks the agent's actions entirely. Directory rules are recursive already, so the glob is unnecessary as well as harmful.
+
+### Workarounds and caveats
+
+- **Command permissions:** combine the two fixes above - `command(regex:<name> .+)` in
+  `~/.gemini/config/config.json`'s `globalPermissionGrants.allow` (verified on agy 1.2.5; on macOS
+  with agy 1.2.0 the same regex in `antigravity-cli/settings.json` also unblocked the call) covers both
+  the exact-match trap and, since it doesn't depend on matching a resolved executable path, the
+  Windows path-splitting bug too. `command(*)` (documented in issue #614) is the broader fallback if a
+  targeted regex still doesn't match - it approves all command execution, so treat it the same as
+  `--dangerously-skip-permissions` for that run.
+- **Directory permissions:** Write directory paths literally without a wildcard, e.g. `write_file(C:\path)`.
+
+If settings allow-rules cannot resolve the denial, ask the human before re-dispatching with `--dangerously-skip-permissions`;
+that flag auto-approves every tool permission request and the run must be treated as full access.

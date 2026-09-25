@@ -100,6 +100,25 @@ class FakeCli {
       Console.WriteLine("{\"type\":\"agent_end\",\"messages\":[]}");
       return 0;
     }
+    if (mode == "orphan-holds-stdio") {
+      var logAt = Array.IndexOf(args, "--log-file");
+      if (logAt >= 0) File.WriteAllText(args[logAt + 1], "fake agy log\n");
+      Console.WriteLine("fake implementer completed");
+      var outAt = Array.IndexOf(args, "-o");
+      if (outAt >= 0) File.WriteAllText(args[outAt + 1].Trim('"'), "fake codex completed\n");
+      var delayMs = 0;
+      int.TryParse(Environment.GetEnvironmentVariable("SMOKE_ORPHAN_EXIT_DELAY_MS") ?? "0", out delayMs);
+      var orphanPsi = new ProcessStartInfo {
+        FileName = Environment.GetEnvironmentVariable("SMOKE_NODE") ?? "node",
+        Arguments = "-e setTimeout(()=>{},60000)",
+        UseShellExecute = false,
+      };
+      var orphan = Process.Start(orphanPsi);
+      var orphanPidFile = Environment.GetEnvironmentVariable("SMOKE_GRAND_PID_FILE");
+      if (!String.IsNullOrEmpty(orphanPidFile) && orphan != null) File.WriteAllText(orphanPidFile, orphan.Id.ToString());
+      if (delayMs > 0) Thread.Sleep(delayMs);
+      return 0;
+    }
     var psi = new ProcessStartInfo {
       FileName = Environment.GetEnvironmentVariable("SMOKE_NODE"),
       Arguments = "-e setInterval(()=>{},1000)",

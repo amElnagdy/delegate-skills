@@ -441,8 +441,10 @@ export const MODEL_TOKEN = Object.freeze({
   claude: /^[A-Za-z0-9][A-Za-z0-9._:@\/\[\]-]*$/,
   /** Keep in lockstep with cursor-delegate SAFE_MODEL. */
   cursor: /^[A-Za-z0-9][A-Za-z0-9._:@\/\[\]\,=-]*$/,
-  /** Keep in lockstep with grok/pi/codex/commandcode shell-safe tokens (also used for opencode). */
+  /** Keep in lockstep with grok/pi/codex/commandcode shell-safe tokens. */
   shellSafe: /^[A-Za-z0-9][A-Za-z0-9._:\/-]*$/,
+  /** Keep in lockstep with opencode-delegate MODEL_TOKEN: adds # for provider/model#variant (opencode 2.x). */
+  opencode: /^[A-Za-z0-9][A-Za-z0-9._:\/#-]*$/,
 });
 
 export const CONFIG_VERSION = "delegate-fleet.v1";

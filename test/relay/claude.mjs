@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { join } from "node:path";
 
 export async function runClaude(h) {
+  let baselineProfile = null;
   const outDir = join(h.scratch, "out success claude");
   const workDir = h.freshRepo("work success claude");
   const captureFile = join(h.scratch, "capture-success-claude.json");
@@ -35,6 +36,8 @@ export async function runClaude(h) {
     h.check("claude success: result subtype parsed", value.resultSubtype === "success");
     h.check("claude success: turns and cost parsed", value.numTurns === 3 && value.totalCostUsd === 0.0123);
     h.check("claude success: token usage parsed", value.usage?.input_tokens === 10 && value.usage?.output_tokens === 5);
+    h.check("claude success: omitted autocompact stays absent from result",
+      !Object.prototype.hasOwnProperty.call(value, "autocompact"));
   }
   if (existsSync(captureFile)) {
     const capture = JSON.parse(readFileSync(captureFile, "utf8"));
@@ -63,6 +66,7 @@ export async function runClaude(h) {
     const settingsPath = capture.args[capture.args.indexOf("--settings") + 1];
     h.check("claude success: generated profile exists", Boolean(settingsPath) && existsSync(settingsPath));
     if (settingsPath && existsSync(settingsPath)) {
+      baselineProfile = readFileSync(settingsPath, "utf8");
       const profile = JSON.parse(readFileSync(settingsPath, "utf8"));
       const shell = h.WIN ? "PowerShell" : "Bash";
       const expectedDeny = [
@@ -92,8 +96,94 @@ export async function runClaude(h) {
           profile.sandbox?.allowUnsandboxedCommands === false);
       }
     }
+    h.check("claude success: omitted autocompact stays absent from argv",
+      !capture.args.includes("--autocompact"));
   }
   if (exitCode !== 0) console.error(`claude success relay stderr:\n${stderr}`);
+
+  for (const scenario of [
+    { name: "new", value: "400k", relayArgs: [] },
+    { name: "session", value: "auto", relayArgs: ["--session", "22222222-2222-4222-8222-222222222222"] },
+    { name: "resume-last", value: "1m", relayArgs: ["--resume-last"] },
+    { name: "integer", value: "400000", relayArgs: [] },
+  ]) {
+    const compactOut = join(h.scratch, `out autocompact ${scenario.name} claude`);
+    const compactWork = h.freshRepo(`work autocompact ${scenario.name} claude`);
+    const compactCapture = join(h.scratch, `capture-autocompact-${scenario.name}-claude.json`);
+    const compactChild = h.runRelay("claude", compactWork, compactOut,
+      [...scenario.relayArgs, "--autocompact", scenario.value], {
+        SMOKE_CAPTURE_FILE: compactCapture,
+        SMOKE_MODE: "claude-success",
+      });
+    let compactExit = null;
+    const compactExited = await new Promise((resolveExit) => {
+      const timer = setTimeout(() => resolveExit(false), 15_000);
+      compactChild.on("close", (code) => {
+        clearTimeout(timer);
+        compactExit = code;
+        resolveExit(true);
+      });
+    });
+    h.check(`claude autocompact ${scenario.name}: relay close wait did not time out`, compactExited);
+    h.check(`claude autocompact ${scenario.name}: relay exits zero`, compactExit === 0);
+    h.check(`claude autocompact ${scenario.name}: fake captured the launch`, existsSync(compactCapture));
+    if (existsSync(compactCapture)) {
+      const capture = JSON.parse(readFileSync(compactCapture, "utf8"));
+      h.check(`claude autocompact ${scenario.name}: requested value reaches argv`,
+        h.pair(capture.args, "--autocompact", scenario.value));
+      if (scenario.name === "session") {
+        h.check("claude autocompact session: exact resume is preserved",
+          h.pair(capture.args, "--resume", "22222222-2222-4222-8222-222222222222"));
+      }
+      if (scenario.name === "resume-last") {
+        h.check("claude autocompact resume-last: continue is preserved",
+          capture.args.includes("--continue"));
+      }
+    }
+    if (existsSync(join(compactOut, "result.json"))) {
+      h.check(`claude autocompact ${scenario.name}: requested value is durable run metadata`,
+        h.result(compactOut).autocompact === scenario.value);
+    }
+    if (existsSync(join(compactOut, "profile.json")) && baselineProfile !== null) {
+      h.check(`claude autocompact ${scenario.name}: provider settings profile is unchanged`,
+        readFileSync(join(compactOut, "profile.json"), "utf8") === baselineProfile);
+    }
+  }
+
+  for (const [index, invalid] of ["", "auto2", "abc", "400 k", "-400k", "400k;echo", "0"].entries()) {
+    const invalidOut = join(h.scratch, `out invalid autocompact ${index} claude`);
+    const invalidWork = h.freshRepo(`work invalid autocompact ${index} claude`);
+    const invalidCapture = join(h.scratch, `capture-invalid-autocompact-${index}-claude.json`);
+    const preflightPid = join(h.scratch, `preflight-invalid-autocompact-${index}-claude.pid`);
+    const invalidRun = spawnSync(process.execPath, [
+      h.relayPath("claude"), "--brief", h.briefPath, "--cd", invalidWork,
+      "--out-dir", invalidOut, "--autocompact", invalid,
+    ], {
+      env: {
+        ...h.baseEnv,
+        SMOKE_CAPTURE_FILE: invalidCapture,
+        SMOKE_PREFLIGHT_PID_FILE: preflightPid,
+        SMOKE_MODE: "claude-success",
+      },
+      encoding: "utf8",
+    });
+    h.check(`claude invalid autocompact ${JSON.stringify(invalid)}: exits with usage error`, invalidRun.status === 2);
+    h.check(`claude invalid autocompact ${JSON.stringify(invalid)}: provider preflight was not spawned`, !existsSync(preflightPid));
+    h.check(`claude invalid autocompact ${JSON.stringify(invalid)}: dispatch was not spawned`, !existsSync(invalidCapture));
+  }
+
+  {
+    const missingWork = h.freshRepo("work missing autocompact value claude");
+    const preflightPid = join(h.scratch, "preflight-missing-autocompact-value-claude.pid");
+    const missingRun = spawnSync(process.execPath, [
+      h.relayPath("claude"), "--brief", h.briefPath, "--cd", missingWork, "--autocompact",
+    ], {
+      env: { ...h.baseEnv, SMOKE_PREFLIGHT_PID_FILE: preflightPid, SMOKE_MODE: "claude-success" },
+      encoding: "utf8",
+    });
+    h.check("claude missing autocompact value: exits with usage error", missingRun.status === 2);
+    h.check("claude missing autocompact value: provider preflight was not spawned", !existsSync(preflightPid));
+  }
 
 for (const scenario of [
   { name: "violation", mode: "claude-read-only-write", expectedViolation: true },

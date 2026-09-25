@@ -73,6 +73,15 @@
  * itself was killed and forwarded the kill to codex), or codex_unavailable. An
  * orchestrator that polls for the file must therefore also treat a non-zero exit
  * with no file as a usage error.
+ *
+ * Windows: a sandboxed run (read-only or workspace-write) gets a PATH with every
+ * `WindowsApps` entry removed, for the preflight and the dispatch alike. The Microsoft
+ * Store installs apps — including PowerShell 7 — under a folder whose ACLs deny
+ * execution to the restricted token Codex's sandbox runs commands with, and Codex
+ * prefers a `pwsh` found on PATH, so a Store `pwsh` makes every sandboxed command
+ * fail with 0xC0070005. Without those entries Codex falls back to System32
+ * powershell.exe. `--sandbox danger-full-access` runs without the restricted token
+ * and gets PATH unchanged.
  */
 
 import {spawn, execFileSync, spawnSync } from "node:child_process";
@@ -301,11 +310,29 @@ function versionProbeTimeout(opts) {
 }
 
 function codexEnv(opts) {
-  if (!opts.cleanEnv) return process.env;
+  const env = opts.cleanEnv ? cleanEnvironment(opts) : { ...process.env };
+  if (process.platform === "win32" && opts.sandbox !== "danger-full-access") removeWindowsAppsFromPath(env);
+  return env;
+}
+
+function cleanEnvironment(opts) {
   const keep = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "LC_CTYPE", "TERM",
     "TMPDIR", "CODEX_HOME", "SystemRoot", "SystemDrive", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
     "TEMP", "TMP", "PATHEXT", "COMSPEC", ...opts.keepEnv];
   return Object.fromEntries(keep.filter((key) => process.env[key] !== undefined).map((key) => [key, process.env[key]]));
+}
+
+// Both Store roots: "C:\Program Files\WindowsApps\<package>" and the per-user alias
+// folder "%LOCALAPPDATA%\Microsoft\WindowsApps" (a symlink into the same protected tree).
+const WINDOWS_APPS_PATH_ENTRY = /(^|[\\/])WindowsApps([\\/]|$)/i;
+
+function removeWindowsAppsFromPath(env) {
+  // process.env is case-insensitive on win32, but a spread copy keeps the original key
+  // casing ("Path"), and a caller-built env may carry both spellings — rewrite every one.
+  for (const key of Object.keys(env)) {
+    if (key.toUpperCase() !== "PATH") continue;
+    env[key] = env[key].split(";").filter((entry) => !WINDOWS_APPS_PATH_ENTRY.test(entry)).join(";");
+  }
 }
 
 function codexVersion(probeTimeoutMs, env) {
@@ -613,6 +640,24 @@ function dispatchToCodex(opts, brief, run, writeResult, env) {
       }, 2000);
     });
   }
+
+  // A grandchild that outlives codex and inherited the pipes keeps stdout/stderr open, so
+  // "close" never fires and the relay waits forever, writing no result. Once codex itself is
+  // gone the pipes hold nothing we still need — finalMessage is read from the -o file, and the
+  // stderr log is appended synchronously as it arrives — so drop them after a short drain
+  // grace and let "close" run. This is the normal-exit twin of the stream teardown the
+  // watchdog already does on the timeout path.
+  child.once("exit", () => {
+    // The implementer already exited. Leaving the watchdog armed lets a drain that
+    // overlaps the remaining budget fire, set watchdogFired, and report timeout.
+    if (!watchdogFired) clearWatchdog();
+    const drain = setTimeout(() => {
+      if (settled) return;
+      child.stdout.destroy();
+      child.stderr.destroy();
+    }, 500);
+    if (typeof drain.unref === "function") drain.unref();
+  });
 
   child.on("error", (err) => {
     if (settled) return;

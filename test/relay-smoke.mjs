@@ -34,8 +34,8 @@
  * A shared matrix also drives all eighteen through the --timeout values no
  * watchdog can honour — malformed, zero, and past Node's timer ceiling — each of
  * which would otherwise fire on the next tick as a silent instant "timeout".
- * Quick Claude, Cline, Cursor, Qoder, Vibe, Pi, Oh My Pi, and ZCode success cases verify brief
- * delivery, launch arguments, environment handling, and result-event parsing. The
+ * Quick Claude, Cline, Cursor, OpenCode, Qoder, Vibe, Pi, Oh My Pi, and ZCode success cases verify
+ * brief delivery, launch arguments, environment handling, and result-event parsing. The
  * timeout/abort cases otherwise run until killed and spawn a subprocess of
  * their own; both assert that this grandchild dies with the implementer.
  * Node built-ins only.
