@@ -24,7 +24,7 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 | --- | --- |
 | `--brief <file>` | Path to the brief. Omit to read it from stdin. |
 | `--cd <dir>` | Working root for Aider. Default: current directory. |
-| `--lane <name>` | Apply a fleet lane's dials from delegate-setup. Explicit flags win. |
+| `--lane <name>` | Apply a fleet lane's dials from delegate-setup. Explicit flags win. Per-orchestrator global fleets: export `DELEGATE_ORCHESTRATOR=<identity>` with the dispatch — the relay passes its environment to the fleet resolver, never guessing the identity from the implementer key, and an invalid or unconfigured selector exits 2 before the implementer starts. See the delegate-setup fleet schema. |
 | `--model <name>` | Aider's `--model`. Default: Aider's own configured model. |
 | `--api-base <url>` | Aider's `--openai-api-base`, for an OpenAI-compatible server. |
 | `--edit-format <fmt>` | Aider's `--edit-format` (e.g. `diff`, `whole`, `udiff`). |

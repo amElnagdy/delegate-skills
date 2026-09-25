@@ -3,10 +3,14 @@
  * config.mjs — load, merge, validate, and write delegate-fleet.v1 lane maps.
  *
  * Usage:
- *   node config.mjs load [--cwd <dir>]
+ *   node config.mjs load [--cwd <dir>] [--agent <identity>]
  *   node config.mjs validate <file>
- *   node config.mjs write --scope global|project [--cwd <dir>] <file>
+ *   node config.mjs write --scope global|project [--cwd <dir>] [--allow-agent-removal] <file>
  *   node config.mjs --help
+ *
+ * An optional top-level `agents` object in the GLOBAL config holds per-orchestrator
+ * fleets keyed by orchestrator identity (e.g. claude, cursor). Project config defines
+ * lanes only; a project payload carrying `agents` is refused.
  *
  * Node built-ins only. No network, credentials, or telemetry.
  */
@@ -49,16 +53,27 @@ const MAX_TIMER_MS = 2_147_483_647;
 const HELP = `config.mjs — load / validate / write delegate-fleet.v1 lane maps
 
 Usage:
-  node config.mjs load [--cwd <dir>]
+  node config.mjs load [--cwd <dir>] [--agent <identity>]
   node config.mjs validate <file>
-  node config.mjs write --scope global|project [--cwd <dir>] <file>
+  node config.mjs write --scope global|project [--cwd <dir>] [--allow-agent-removal] <file>
   node config.mjs --help
 
 Paths:
   global   ~/.config/delegate-skills/config.json
   project  <git-root>/.delegate/config.json  (requires a git repo)
 
-load prints the effective lane map (project whole-lane replaces global) as JSON.
+Selector:
+  --agent <identity>   resolve per-orchestrator lanes from the global agents map
+                       (same shape as lane names: letters, digits, . _ -). Absent
+                       flag falls back to a non-empty DELEGATE_ORCHESTRATOR env var;
+                       with neither, only shared lanes apply. A selector naming an
+                       agent with no fleet fails closed.
+
+  --allow-agent-removal  Permit a global write to remove existing agent fleets;
+                         use only after explicit approval. Project writes reject it.
+
+load prints the effective lane map (agent lanes replace same-name shared global
+lanes, then project whole-lane replaces global) as JSON.
 `;
 
 export function globalConfigPath() {
@@ -126,7 +141,44 @@ export function parseConfigDocument(raw, label = "config") {
     const laneError = validateLane(name, lane, label);
     if (laneError) return { ok: false, error: laneError };
   }
+  if (document.agents !== undefined) {
+    const agentsError = validateAgentFleets(document.agents, label);
+    if (agentsError) return { ok: false, error: agentsError };
+  }
   return { ok: true, document };
+}
+
+/**
+ * Per-orchestrator fleets: `agents` keyed by an orchestrator identity (a free label
+ * for the seat that dispatches — e.g. claude, cursor — never an implementer key),
+ * each holding a `lanes` object of the same shape as the shared map. Only `lanes`
+ * is allowed inside an agent entry so future fields always fail loud.
+ */
+function validateAgentFleets(agents, label) {
+  if (!agents || typeof agents !== "object" || Array.isArray(agents)) {
+    return `${label}: agents must be an object keyed by orchestrator identity`;
+  }
+  for (const [identity, entry] of Object.entries(agents)) {
+    if (!LANE_NAME.test(identity)) {
+      return `${label}: invalid agent identity ${JSON.stringify(identity)} (letters, digits, . _ -; starts alphanumeric)`;
+    }
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      return `${label}: agent ${identity} must be an object`;
+    }
+    for (const field of Object.keys(entry)) {
+      if (field !== "lanes") {
+        return `${label}: agent ${identity} has unknown field ${JSON.stringify(field)} (allowed: lanes)`;
+      }
+    }
+    if (!entry.lanes || typeof entry.lanes !== "object" || Array.isArray(entry.lanes)) {
+      return `${label}: agent ${identity} must define a lanes object`;
+    }
+    for (const [name, lane] of Object.entries(entry.lanes)) {
+      const laneError = validateLane(name, lane, `${label}: agent ${identity}`);
+      if (laneError) return laneError;
+    }
+  }
+  return null;
 }
 
 function validateLane(name, lane, label) {
@@ -356,31 +408,128 @@ function trustProjectConfig(cwd, digest) {
 }
 
 /**
- * Effective lanes: start from global, whole-lane replace from project.
+ * Effective lanes: start from shared global lanes, whole-lane replace same-name
+ * lanes from the selected agent's global fleet (`agents[identity].lanes`), then
+ * whole-lane replace from project. `origin` records which layer a global lane came
+ * from — "shared" or "agent" — without disturbing the project trust semantics.
  */
-export function effectiveLanes(globalDoc, projectDoc) {
-  /** @type {Record<string, { lane: object, source: "global"|"project" }>} */
-  const out = {};
+export function effectiveLanes(globalDoc, projectDoc, agentIdentity = null) {
+  /** @type {Record<string, { lane: object, source: "global"|"project", origin: "shared"|"agent"|"project" }>} */
+  const out = Object.create(null);
   if (globalDoc?.lanes) {
     for (const [name, lane] of Object.entries(globalDoc.lanes)) {
-      out[name] = { lane: { ...lane }, source: "global" };
+      out[name] = { lane: { ...lane }, source: "global", origin: "shared" };
+    }
+  }
+  if (agentIdentity) {
+    const agentLanes = globalDoc?.agents?.[agentIdentity]?.lanes;
+    if (agentLanes) {
+      for (const [name, lane] of Object.entries(agentLanes)) {
+        out[name] = { lane: { ...lane }, source: "global", origin: "agent" };
+      }
     }
   }
   if (projectDoc?.lanes) {
     for (const [name, lane] of Object.entries(projectDoc.lanes)) {
-      out[name] = { lane: { ...lane }, source: "project" };
+      out[name] = { lane: { ...lane }, source: "project", origin: "project" };
     }
   }
   return out;
 }
 
-export function loadEffective(cwd = process.cwd()) {
+/** Agent keys configured under the global `agents` map (sorted; [] when none). */
+export function agentFleetKeys(globalDoc) {
+  const agents = globalDoc?.agents;
+  if (!agents || typeof agents !== "object" || Array.isArray(agents)) return [];
+  return Object.keys(agents).sort();
+}
+
+function agentIdentityInvalid(identity) {
+  return !LANE_NAME.test(identity);
+}
+
+/**
+ * Resolve and validate the agent selector: explicit `--agent` wins over a
+ * non-empty `DELEGATE_ORCHESTRATOR` env value; an empty env value means "no
+ * selection". Any provided selector must be a valid identity name (fail closed).
+ */
+export function selectAgentIdentity(flagValue, envValue) {
+  const envLabel = "DELEGATE_ORCHESTRATOR";
+  const trimmedEnv = typeof envValue === "string" ? envValue.trim() : "";
+  if (flagValue === undefined || flagValue === null) {
+    if (trimmedEnv === "") return { ok: true, agent: null, chosenBy: null };
+    if (trimmedEnv === "__shared__") return { ok: true, agent: null, chosenBy: envLabel, explicitShared: true };
+    if (!LANE_NAME.test(trimmedEnv)) {
+      return {
+        ok: false,
+        error: `invalid agent selector ${envLabel}=${JSON.stringify(envValue)} (letters, digits, . _ -; starts alphanumeric)`,
+      };
+    }
+    return { ok: true, agent: trimmedEnv, chosenBy: envLabel };
+  }
+  const flagValueTrimmed = String(flagValue).trim();
+  if (!LANE_NAME.test(flagValueTrimmed)) {
+    return {
+      ok: false,
+      error: `invalid agent selector --agent ${JSON.stringify(flagValue)} (letters, digits, . _ -; starts alphanumeric)`,
+    };
+  }
+  return { ok: true, agent: flagValueTrimmed, chosenBy: "--agent" };
+}
+
+/** True when the global config has a fleet for this identity. */
+export function agentFleetPresent(globalDoc, identity) {
+  if (!identity) return false;
+  const agents = globalDoc?.agents;
+  if (!agents || typeof agents !== "object" || Array.isArray(agents)) return false;
+  return Object.hasOwn(agents, identity);
+}
+
+/**
+ * Effective lanes for an explicit orchestrator identity. Fail closed when the
+ * selector names an identity with no configured fleet: dispatching shared lanes
+ * because of a typo'd selector would silently hand the work to the wrong fleet.
+ */
+export function loadEffective(cwd = process.cwd(), agentIdentity = null) {
+  if (agentIdentity !== null && agentIdentityInvalid(agentIdentity)) {
+    throw new Error(
+      `invalid agent selector ${JSON.stringify(agentIdentity)} (letters, digits, . _ -; starts alphanumeric)`,
+    );
+  }
   const globalPath = globalConfigPath();
   const projectPath = projectConfigPath(cwd);
   const globalFile = readConfigFile(globalPath);
   const projectFile = projectPath ? readConfigFile(projectPath) : null;
+  if (projectFile?.document.agents !== undefined) {
+    throw new Error("project fleet config cannot define agents; agent fleets belong in the global config");
+  }
   const projectTrusted = Boolean(projectFile && projectConfigTrusted(cwd, projectFile.digest));
-  const effective = effectiveLanes(globalFile?.document, projectFile?.document);
+  if (agentIdentity !== null) {
+    if (!globalFile || !agentFleetPresent(globalFile.document, agentIdentity)) {
+      const keys = globalFile ? agentFleetKeys(globalFile.document) : [];
+      throw new Error(
+        keys.length > 0
+          ? `agent ${JSON.stringify(agentIdentity)} has no fleet (configured: ${keys.join(", ")}); an agent selector must name a configured fleet, so unset the selector to use the shared lanes`
+          : "no agent fleets are configured (add agents.<identity>.lanes to the global config with delegate-setup, or unset the agent selector to use the shared lanes)",
+      );
+    }
+  }
+  const effective = effectiveLanes(globalFile?.document, projectFile?.document, agentIdentity);
+  // Lanes reachable only through some agent's fleet (not in the shared map) —
+  // used to explain "fleet lane not found" when a selector was not supplied.
+  const sharedNames = new Set(Object.keys(globalFile?.document?.lanes ?? {}));
+  const agentOnlyLanes = Object.create(null);
+  const agentLaneOwners = Object.create(null);
+  if (globalFile?.document?.agents && typeof globalFile.document.agents === "object" && !Array.isArray(globalFile.document.agents)) {
+    for (const [identity, entry] of Object.entries(globalFile.document.agents)) {
+      for (const name of Object.keys(entry?.lanes ?? {})) {
+        (agentLaneOwners[name] ??= []).push(identity);
+        if (!sharedNames.has(name)) {
+          (agentOnlyLanes[name] ??= []).push(identity);
+        }
+      }
+    }
+  }
   return {
     version: CONFIG_VERSION,
     globalPath,
@@ -388,6 +537,10 @@ export function loadEffective(cwd = process.cwd()) {
     globalPresent: Boolean(globalFile),
     projectPresent: Boolean(projectFile),
     projectTrusted,
+    agent: agentIdentity,
+    agentFleets: globalFile ? agentFleetKeys(globalFile.document) : [],
+    agentOnlyLanes,
+    agentLaneOwners,
     lanes: Object.fromEntries(
       Object.entries(effective).map(([name, { lane, source }]) => [
         name,
@@ -437,7 +590,18 @@ function main(argv) {
     }
 
     if (cmd === "load") {
-      process.stdout.write(`${JSON.stringify(loadEffective(cwd), null, 2)}\n`);
+      const agentIdx = argv.indexOf("--agent");
+      let flagAgent = null;
+      if (agentIdx !== -1) {
+        if (!argv[agentIdx + 1]) fail("--agent needs an identity");
+        flagAgent = argv[agentIdx + 1];
+      }
+      const selected = selectAgentIdentity(flagAgent, process.env.DELEGATE_ORCHESTRATOR);
+      if (!selected.ok) fail(selected.error);
+      const loaded = loadEffective(cwd, selected.agent);
+      process.stdout.write(
+        `${JSON.stringify({ ...loaded, chosenBy: selected.chosenBy }, null, 2)}\n`,
+      );
       return;
     }
 
@@ -464,8 +628,22 @@ function main(argv) {
       if (!file) fail("write needs a JSON file path");
       const parsed = parseConfigDocument(readFileSync(resolve(file), "utf8"), file);
       if (!parsed.ok) fail(parsed.error);
+      if (scope === "project" && parsed.document.agents !== undefined) {
+        fail("agents (per-orchestrator fleets) are a global-scope feature; project config defines lanes only");
+      }
       const target =
         scope === "global" ? globalConfigPath() : assertSafeProjectConfigPath(cwd);
+      if (scope === "global") {
+        const previous = readConfigFile(target)?.document;
+        const removed = agentFleetKeys(previous).filter(
+          (identity) => !Object.hasOwn(parsed.document.agents ?? {}, identity),
+        );
+        if (removed.length && !argv.includes("--allow-agent-removal")) {
+          fail(`global write would remove agent fleets: ${removed.join(", ")} (pass --allow-agent-removal after explicit approval)`);
+        }
+      } else if (argv.includes("--allow-agent-removal")) {
+        fail("--allow-agent-removal is only valid for global writes");
+      }
       const writtenDigest = writeAtomic(target, parsed.document);
       if (scope === "project") trustProjectConfig(cwd, writtenDigest);
       process.stdout.write(`${JSON.stringify({
