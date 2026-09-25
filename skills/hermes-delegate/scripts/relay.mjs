@@ -592,6 +592,11 @@ function dispatchToHermes(opts, run, writeResult) {
     }, 10_000);
   }, timeoutMs);
 
+  const clearWatchdog = () => {
+    clearTimeout(watchdogTimer);
+    if (sigkillTimer) clearTimeout(sigkillTimer);
+  };
+
   // Decode across chunk boundaries: a multibyte UTF-8 character split between
   // two data events would otherwise decode as U+FFFD and corrupt the report.
   const stdoutDecoder = new StringDecoder("utf8");
@@ -655,8 +660,7 @@ function dispatchToHermes(opts, run, writeResult) {
     process.on(sig, () => {
       if (settled) return;
       settled = true;
-      clearTimeout(watchdogTimer);
-      if (sigkillTimer) clearTimeout(sigkillTimer);
+      clearWatchdog();
       flushStreams();
       const abortedFields = {
         status: "aborted",
@@ -685,11 +689,27 @@ function dispatchToHermes(opts, run, writeResult) {
     });
   }
 
+  // A grandchild that outlives hermes and inherited the pipes keeps stdout/stderr open, so
+  // "close" never fires and the relay waits forever, writing no result. Once hermes itself is
+  // gone the pipes hold nothing we still need, so drop them after a short drain grace and let
+  // "close" run. This is the normal-exit twin of the stream teardown the watchdog already
+  // does on the timeout path.
+  child.once("exit", () => {
+    // The implementer already exited. Leaving the watchdog armed lets a drain that
+    // overlaps the remaining budget fire, set watchdogFired, and report timeout.
+    if (!watchdogFired) clearWatchdog();
+    const drain = setTimeout(() => {
+      if (settled) return;
+      child.stdout.destroy();
+      child.stderr.destroy();
+    }, 500);
+    if (typeof drain.unref === "function") drain.unref();
+  });
+
   child.on("error", (err) => {
     if (settled) return;
     settled = true;
-    clearTimeout(watchdogTimer);
-    if (sigkillTimer) clearTimeout(sigkillTimer);
+    clearWatchdog();
     flushStreams();
     const result = writeResult({
       status: "failed",
@@ -707,8 +727,7 @@ function dispatchToHermes(opts, run, writeResult) {
   child.on("close", (code, signal) => {
     if (settled) return;
     settled = true;
-    clearTimeout(watchdogTimer);
-    if (sigkillTimer) clearTimeout(sigkillTimer);
+    clearWatchdog();
     // a descendant that ignored SIGTERM must not outlive the timeout report: once the
     // parent is down, sweep the group (no-op where taskkill already felled the tree)
     if (watchdogFired) killChild(child, "SIGKILL");
