@@ -34,7 +34,10 @@ export function installShim(h) {
         copyFileSync(join(shimDir, "kimi.exe"), join(shimDir, "vibe.exe"));
         // aider's pip install puts a native aider.exe in Scripts, and the relay spawns it
         // without a shell, so a .cmd shim would never be found the way the real one is.
+        // Same for hermes: the installer puts a native executable on PATH and its relay
+        // spawns it directly on every platform.
         copyFileSync(join(shimDir, "kimi.exe"), join(shimDir, "aider.exe"));
+        copyFileSync(join(shimDir, "kimi.exe"), join(shimDir, "hermes.exe"));
         copyFileSync(join(shimDir, "kimi.exe"), join(shimDir, "oz.exe"));
         copyFileSync(join(shimDir, "kimi.exe"), join(shimDir, "omp.exe"));
       } else {

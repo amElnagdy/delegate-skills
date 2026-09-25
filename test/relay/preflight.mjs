@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { join } from "node:path";
 
 export async function runPreflight(h) {
-for (const skill of ["codex", "opencode", "grok", "kimi", "warp"]) {
+for (const skill of ["codex", "opencode", "grok", "hermes", "kimi", "warp"]) {
   const workDir = h.freshRepo(`work-preflight-${skill}`);
   for (const [suffix, expectedStatus, expectedExit] of [
     ["version-hang", "timeout", 124],

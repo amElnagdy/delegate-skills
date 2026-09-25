@@ -188,6 +188,24 @@ export const IMPLEMENTERS = Object.freeze([
     winShell: true,
   },
   {
+    key: "hermes",
+    skill: "hermes-delegate",
+    binary: "hermes",
+    versionArgs: ["--version"],
+    // `auth status` requires a provider argument (the bare form exits 2) and no
+    // provider-agnostic form exists, so any single-provider probe would misread the
+    // other auth class as logged out — Portal-OAuth users probed via one provider,
+    // API-key users via another. null beats guessing; see hermes-relay design notes.
+    authProbe: null,
+    modelProbe: null,
+    // Sessions live in ~/.hermes/profiles/<profile>/sessions/ as SQLite-backed
+    // storage, not one file per session — nothing here matches the per-entry
+    // shape usageProbe walks, so there is nothing honest to count.
+    usageProbe: null,
+    supports: ["model", "timeout", "readOnly"],
+    winShell: false,
+  },
+  {
     key: "kimi",
     skill: "kimi-delegate",
     binary: "kimi",
