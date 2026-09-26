@@ -68,13 +68,24 @@ export async function runPreflight(h) {
       encoding: "utf8",
       timeout: 60_000,
     });
-   const windowsShellFailure = process.platform === "win32" && ["codex", "opencode", "grok"].includes(skill);
-   const missingStatus = windowsShellFailure ? "failed" : `${skill}_unavailable`;
-   const missingExit = windowsShellFailure ? 1 : 127;
+    const windowsShellRelay = process.platform === "win32" && ["codex", "opencode", "grok"].includes(skill);
+    const missingResult = existsSync(join(missingOutDir, "result.json")) ? h.result(missingOutDir) : {};
+    // shell:true routes a missing binary through cmd.exe, whose "'x' is not
+    // recognized" report reaches the relay's stderr on some Windows builds (the
+    // relay then reports its explicit unavailable/127) and matches nothing on
+    // others (the relay reports failed/1 instead). Both outcomes are explicit
+    // and distinct from a broken install; accept either, but require the
+    // reported message to match the outcome so a silent misclassification
+    // cannot hide behind the other branch.
+    const missingFailed = missing.status === 1 && missingResult.status === "failed" &&
+      missingResult.error?.includes("preflight failed");
+    const missingUnavailable = missing.status === 127 && missingResult.status === `${skill}_unavailable` &&
+      String(missing.stderr || "").includes("not found on PATH");
+    const missingOk = windowsShellRelay
+      ? (missingFailed || missingUnavailable)
+      : (missing.status === 127 && missingResult.status === `${skill}_unavailable`);
     h.check(`${skill} unavailable: missing binary classification is explicit`,
-      missing.status === missingExit &&
-      existsSync(join(missingOutDir, "result.json")) &&
-      h.result(missingOutDir).status === missingStatus);
+      existsSync(join(missingOutDir, "result.json")) && missingOk);
     const missingVersionPid = existsSync(missingVersionPidFile) ? Number(readFileSync(missingVersionPidFile, "utf8")) : null;
     h.check(`${skill} unavailable: no version descendants leaked`,
       missingVersionPid === null || (Number.isInteger(missingVersionPid) && await h.until(() => !h.alive(missingVersionPid), 20_000)));
