@@ -28,7 +28,7 @@ Example lane: **feature** → implementer `opencode`, model `opencode/grok`, var
 ## When NOT to use this
 
 - The user wants a task implemented — use the matching `*-delegate` skill instead.
-- A one-off model change on a single dispatch — pass `--model` / `--effort` / `--variant` on that relay.
+- A one-off model, effort, mode, or variant change on a single dispatch — pass the matching relay flag.
 
 ## Hard rules
 
@@ -190,7 +190,7 @@ before/after is enough.
 
 Stop after confirming. Tell the user the map is ready. For later work: read the lane’s
 `implementer`, load that `*-delegate` skill, and dispatch with `--lane <name>` (explicit
-`--model` / `--effort` / `--variant` still win when passed). Do not start a delegate task
+`--model` / `--effort` / `--mode` / `--variant` still win when passed). Do not start a delegate task
 unless they ask.
 
 ## Reconfigure

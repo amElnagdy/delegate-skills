@@ -23,6 +23,10 @@ import { runCopilot } from "./copilot.mjs";
 import { runCommandcode } from "./commandcode.mjs";
 import { runZcode } from "./zcode.mjs";
 import { runGrokGitTrust } from "./grok-git-trust.mjs";
+import { runKiro } from "./kiro.mjs";
+import { runKiroPreflight } from "./kiro-preflight.mjs";
+import { runKiroTimeout } from "./kiro-timeout.mjs";
+import { runKiroConsoleAbort } from "./kiro-console-abort.mjs";
 
 export const runners = [
   ["package-shape", runPackageShape],
@@ -50,4 +54,8 @@ export const runners = [
   ["orphan-stdio", runOrphanStdio],
   ["zcode", runZcode],
   ["delegate-setup", runDelegateSetup],
+  ["kiro", runKiro],
+  ["kiro-preflight", runKiroPreflight],
+  ["kiro-timeout", runKiroTimeout],
+  ["kiro-console-abort", runKiroConsoleAbort],
 ];

@@ -1,5 +1,7 @@
 const fs = require("node:fs");
-const args = process.argv.slice(2);
+const path = require("node:path");
+let args = process.argv.slice(2);
+const testContext = process.env.SMOKE_MODE || process.cwd();
 // A relay whose behavior gates on the probed CLI version (opencode 1.x --variant vs
 // 2.x model#variant) drives the gate by overriding the version string here.
 const fakeVersion = process.env.SMOKE_VERSION || "fake-cli 0.0.0-smoke";
@@ -16,6 +18,12 @@ if (!process.env.SMOKE_MODE) {
     Object.assign(process.env, JSON.parse(fs.readFileSync(require("node:path").join(__dirname, "smoke-fallback.json"), "utf8")));
   } catch { /* no environment-isolation fixture */ }
 }
+// The Kiro relay can run the CLI through WSL on Windows; the wrapper's own
+// flags precede --exec, so the fake answers on the inner Kiro argv instead.
+if (process.env.KIRO_WSL_WRAPPER_TEST === "1") {
+  const execIndex = args.indexOf("--exec");
+  if (execIndex >= 0 && args[execIndex + 1]) args = args.slice(execIndex + 2);
+}
 // Every probe form one relay or another uses: --version, grok's \`version\` subcommand, and
 // agy's \`changelog\`. Treating them alike lets any relay's hang/fail mode be driven by name.
 const versionProbe = args.includes("--version") || args[0] === "version" || args[0] === "changelog";
@@ -24,6 +32,23 @@ if (versionProbe && process.env.SMOKE_PREFLIGHT_ENV_FILE) {
 }
 if (versionProbe && process.env.SMOKE_PREFLIGHT_PID_FILE) {
   fs.writeFileSync(process.env.SMOKE_PREFLIGHT_PID_FILE, String(process.pid));
+}
+if (versionProbe && process.env.SMOKE_VERSION_PID_FILE) {
+  fs.writeFileSync(process.env.SMOKE_VERSION_PID_FILE, String(process.pid));
+}
+if (versionProbe && /-version-hang-tree$/.test(testContext)) {
+  const grand = require("node:child_process").spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+  const grandPidFile = process.env.SMOKE_VERSION_GRAND_PID_FILE || path.join(process.cwd(), "smoke-version-grand.pid");
+  fs.writeFileSync(grandPidFile, String(grand.pid));
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
+}
+if (args[0] === "chat" && args[1] === "--help") {
+  if (/-version-hang$/.test(testContext)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
+  if (/-version-fail(?:-silent)?$/.test(testContext)) process.exit(7);
+  console.log(/-help-missing$/.test(testContext)
+    ? "--no-interactive --trust-tools --resume-id --effort --v3 --mode"
+    : "--no-interactive --trust-tools --resume-id --wrap --effort --v3 --mode");
+  process.exit(0);
 }
 if (versionProbe && process.env.SMOKE_MODE === "grok-spawn-error" && process.platform !== "win32") {
   fs.renameSync(require("node:path").join(__dirname, "grok"), require("node:path").join(__dirname, "grok.removed"));
@@ -37,11 +62,11 @@ if (versionProbe && process.env.SMOKE_MODE === "grok-spawn-error" && process.pla
   }
   console.log(fakeVersion);
   process.exit(0);
-} else if (versionProbe && /-version-hang$/.test(process.env.SMOKE_MODE || "")) {
+} else if (versionProbe && /-version-hang$/.test(testContext)) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
-} else if (versionProbe && /-version-fail-silent$/.test(process.env.SMOKE_MODE || "")) {
+} else if (versionProbe && /-version-fail-silent$/.test(testContext)) {
   process.exit(7);
-} else if (versionProbe && /-version-fail$/.test(process.env.SMOKE_MODE || "")) {
+} else if (versionProbe && /-version-fail$/.test(testContext)) {
   console.error("fake version failure");
   process.exit(7);
 } else if (versionProbe) {
@@ -53,6 +78,9 @@ if (process.env.SMOKE_MODE === "capture") {
   if (process.env.SMOKE_ENV_FILE) fs.writeFileSync(process.env.SMOKE_ENV_FILE, JSON.stringify(capturedEnv()));
   process.exit(0);
 }
+// Kiro dispatch handlers live beside the other success modes below (after the
+// omp block): large-stdout, stderr-split redaction, and the --resume-id fast
+// path that records argv and reports the session id.
 if (process.env.SMOKE_WRITE_FILE) {
   fs.writeFileSync(process.env.SMOKE_WRITE_FILE, "written by fake cli\n");
 }
@@ -266,8 +294,28 @@ if (["omp-success", "omp-error"].includes(process.env.SMOKE_MODE)) {
       },
     }));
     console.log(JSON.stringify({ type: "agent_end", messages: [] }));
-    process.exit(0);
   });
+}
+if (process.env.KIRO_FAKE_MODE === "large-stdout") {
+  process.stdout.write(`START\n${"x".repeat(70_000)}\nSession: 11111111-1111-4111-8111-111111111111\n`);
+  process.exit(0);
+}
+// Kiro's dispatch passes the brief as argv (no stdin), reports on stdout, and
+// embeds the session id in that report. Only the kiro relay sends --resume-id,
+// so matching on it cannot hijack another skill's fake run. The split mode must
+// not fall through: its delayed exit is the whole point, and the fast path
+// below would exit first and drop the second chunk.
+if (process.env.KIRO_FAKE_MODE === "split") {
+  console.log("fake kiro completed");
+  process.stderr.write("partial-api-");
+  setTimeout(() => {
+    process.stderr.write("secret-value\n");
+    process.exit(0);
+  }, 200);
+} else if (args.includes("--resume-id")) {
+  fs.writeFileSync(process.env.SMOKE_ARGS_FILE || "smoke-args.json", JSON.stringify(args));
+  console.log("fake kiro completed\nSession: 11111111-1111-4111-8111-111111111111");
+  process.exit(0);
 } else if (["pi-success", "pi-error"].includes(process.env.SMOKE_MODE)) {
   let brief = "";
   process.stdin.setEncoding("utf8");
@@ -475,10 +523,21 @@ if (["omp-success", "omp-error"].includes(process.env.SMOKE_MODE)) {
     ? "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"
     : "setInterval(() => {}, 1000)";
   const grand = require("node:child_process").spawn(process.execPath, ["-e", grandProgram], { stdio: "ignore" });
-  fs.writeFileSync(process.env.SMOKE_GRAND_PID_FILE, String(grand.pid));
-  fs.writeFileSync(process.env.SMOKE_PID_FILE, String(process.pid)); // written last: its existence means both pid files are readable
-  if (process.env.SMOKE_MODE === "abort") {
-    process.on("SIGTERM", () => { fs.writeFileSync(process.env.SMOKE_LATE_FILE, "flushed during shutdown"); process.exit(0); });
+  // Kiro scrubs SMOKE_* from the implementer environment, so kiro's own tests
+  // point these files inside the committed worktree and the fake re-derives the
+  // same paths from its cwd when the variables are absent. Every other relay
+  // forwards the environment, so an explicit path always wins when present.
+  const grandPidFile = process.env.SMOKE_GRAND_PID_FILE || path.join(process.cwd(), "smoke-grand.pid");
+  const pidFile = process.env.SMOKE_PID_FILE || path.join(process.cwd(), "smoke.pid");
+  fs.writeFileSync(grandPidFile, String(grand.pid));
+  fs.writeFileSync(pidFile, String(process.pid)); // written last: its existence means both pid files are readable
+  // A scrubbed kiro run carries no SMOKE_MODE; the abort matrix names its
+  // workdir work-abort-<skill>, so that name is the fallback abort signal and
+  // the late file defaults beside the pid files in the worktree.
+  const lateFile = process.env.SMOKE_LATE_FILE
+    || (!process.env.SMOKE_MODE && /work-abort-/.test(process.cwd()) ? path.join(process.cwd(), "late-file.txt") : null);
+  if (process.env.SMOKE_MODE === "abort" || lateFile) {
+    process.on("SIGTERM", () => { fs.writeFileSync(lateFile, "flushed during shutdown"); process.exit(0); });
   } else if (process.env.SMOKE_MODE === "timeout-yield") {
     process.on("SIGTERM", () => process.exit(0)); // the parent complies while the grandchild ignores
   } else {

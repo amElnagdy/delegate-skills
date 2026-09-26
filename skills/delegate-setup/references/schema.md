@@ -63,6 +63,7 @@ later-edited project config fails closed until it is reviewed and written again 
 | `copilot` | copilot-delegate | `copilot` | model, effort, timeout, readOnly |
 | `warp` | warp-delegate | `oz` | model, timeout |
 | `zcode` | zcode-delegate | `zcode` | permissionMode, timeout, readOnly |
+| `kiro` | kiro-delegate | `kiro-cli` | model, effort, mode, timeout |
 
 ZCode carries its `--mode` as `permissionMode`, and only `plan` and `yolo` are accepted: ZCode also
 documents `build` and `edit`, but a headless run has no permission client, so those two block every
@@ -76,8 +77,11 @@ OpenCode lanes **require** `model` in `provider/model` form, with a non-empty pr
 `/` and at least one non-`/` character after it. Cline accepts `provider` and `model` as separate
 dials and does not impose that shape.
 
-Boolean dials: `readOnly`, `force`. All other dials are non-empty strings. Duration strings for
-`timeout` use `h`/`m`/`s` (e.g. `30m`) and must fit the relay watchdog ceiling (~24.8 days).
+Boolean dials: `readOnly`, `force`. All other dials are non-empty strings. Kiro `effort` is one of
+`low`, `medium`, `high`, `xhigh`, or `max`; Kiro `mode` is `default` or `spec`. The relay
+always selects Kiro's V3 agent; `mode` chooses optional V3 behavior rather than enabling V3 itself.
+Duration strings for `timeout` use `h`/`m`/`s` (e.g. `30m`) and must fit the relay watchdog
+ceiling (~24.8 days).
 Do not combine `readOnly: true` with a write-capable `sandbox` / `permissionMode` / `force`.
 `model` / `provider` / OpenCode `variant` must match the bound relay’s token rules (e.g. Claude
 rejects spaces; Grok/Pi/Oh My Pi/OpenCode/Codex/Command Code use a shell-safe token set — Windows `shell:true`

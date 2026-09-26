@@ -12,7 +12,7 @@
  * Node built-ins only. No network, credentials, or telemetry.
  */
 
-/** @typedef {"model"|"effort"|"variant"|"timeout"|"readOnly"|"sandbox"|"permissionMode"|"force"|"provider"} Dial */
+/** @typedef {"model"|"effort"|"mode"|"variant"|"timeout"|"readOnly"|"sandbox"|"permissionMode"|"force"|"provider"} Dial */
 
 /**
  * @type {readonly {
@@ -380,6 +380,17 @@ export const IMPLEMENTERS = Object.freeze([
     winShell: false,
 
   },
+  {
+    key: "kiro",
+    skill: "kiro-delegate",
+    binary: "kiro-cli",
+    versionArgs: ["--version"],
+    authProbe: null,
+    modelProbe: null,
+    usageProbe: null,
+    supports: ["model", "effort", "mode", "timeout"],
+    winShell: false,
+  },
 ]);
 
 /** Prototype-free map so names like "toString" cannot pass as implementers. */
@@ -396,6 +407,8 @@ export const COPILOT_EFFORT = Object.freeze(["low", "medium", "high", "xhigh", "
 export const OMP_THINKING = Object.freeze(["off", "auto", "minimal", "low", "medium", "high", "xhigh", "max"]);
 export const CODEX_SANDBOX = Object.freeze(["read-only", "workspace-write", "danger-full-access"]);
 export const GROK_SANDBOX = Object.freeze(["workspace", "read-only", "off"]);
+export const KIRO_EFFORT = Object.freeze(["low", "medium", "high", "xhigh", "max"]);
+export const KIRO_MODE = Object.freeze(["default", "spec"]);
 export const QODER_PERMISSION = Object.freeze([
   "default",
   "accept_edits",
@@ -434,6 +447,7 @@ export const LANE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 export const ALL_DIALS = Object.freeze([
   "model",
   "effort",
+  "mode",
   "variant",
   "timeout",
   "readOnly",

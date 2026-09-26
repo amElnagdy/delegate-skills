@@ -238,6 +238,7 @@ if (observation === "models") {
       lanes: {
         feature: { implementer: "opencode", model: "opencode/grok", variant: "high" },
         tests: { implementer: "grok", effort: "medium" },
+        "kiro-spec": { implementer: "kiro", model: "fake-model", effort: "high", mode: "spec" },
         "codex-review": { implementer: "codex", readOnly: true },
         "opencode-review": { implementer: "opencode", model: "opencode/grok", readOnly: true },
       },
@@ -459,6 +460,20 @@ if (observation === "models") {
     h.check("config validate rejects unknown omp thinking effort",
       rejectOmp.status === 2 && /off, auto, minimal, low, medium, high, xhigh, max/.test(rejectOmp.stderr));
 
+    for (const [field, value] of [["effort", "banana"], ["mode", "plan"]]) {
+      const badKiro = {
+        version: "delegate-fleet.v1",
+        lanes: { feature: { implementer: "kiro", [field]: value } },
+      };
+      const badKiroFile = join(cfgRepo, `bad-kiro-${field}.json`);
+      writeFileSync(badKiroFile, `${JSON.stringify(badKiro)}\n`);
+      const rejectKiro = spawnSync(process.execPath, [join(setupDir, "config.mjs"), "validate", badKiroFile], {
+        encoding: "utf8",
+        env: process.env,
+      });
+      h.check(`config validate rejects unknown kiro ${field}`, rejectKiro.status === 2);
+    }
+
     const badCursorSandbox = {
       version: "delegate-fleet.v1",
       lanes: { feature: { implementer: "cursor", sandbox: "workspace-write" } },
@@ -499,6 +514,23 @@ if (observation === "models") {
         laneJson?.dials?.model === "opencode/grok" &&
         laneJson?.dials?.variant === "high" &&
         laneJson?.source === "global",
+    );
+
+    const kiroResolve = spawnSync(
+      process.execPath,
+      [join(setupDir, "lane.mjs"), "resolve", "--cwd", cfgRepo, "--lane", "kiro-spec", "--implementer", "kiro"],
+      { encoding: "utf8", env: process.env },
+    );
+    let kiroJson = null;
+    try {
+      kiroJson = JSON.parse(kiroResolve.stdout);
+    } catch {
+      kiroJson = null;
+    }
+    h.check(
+      "lane resolve: kiro model, effort, and mode dials",
+      kiroResolve.status === 0 && kiroJson?.dials?.model === "fake-model" &&
+        kiroJson?.dials?.effort === "high" && kiroJson?.dials?.mode === "spec",
     );
 
     const grokReadOnly = {
