@@ -44,18 +44,4 @@ export async function runKiroPreflight(h) {
       h.check("kiro preflight: version timeout kills probe grandchild", grandPid !== null && await h.until(() => !h.alive(grandPid), 10_000));
     }
   }
-
-  const workDir = h.committedRepo("work-kiro-preflight-missing");
-  const outDir = join(h.scratch, "out-kiro-preflight-missing");
-  const missing = spawnSync(process.execPath, [
-    h.relayPath("kiro"),
-    "--brief", h.briefPath,
-    "--cd", workDir,
-    "--out-dir", outDir,
-    "--kiro-bin", join(h.scratch, "missing-kiro.exe"),
-  ], { env: { ...h.baseEnv, PATH: h.gitOnlyPath }, encoding: "utf8", timeout: 30_000 });
-  const resultPath = join(outDir, "result.json");
-  const result = existsSync(resultPath) ? JSON.parse(readFileSync(resultPath, "utf8")) : {};
-  h.check("kiro unavailable: missing binary exits 127", missing.status === 127);
-  h.check("kiro unavailable: result is distinguishable", result.status === "kiro_unavailable" && result.errorCode === "kiro_unavailable");
 }

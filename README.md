@@ -81,7 +81,7 @@ Skip setup when you want one implementer or one-off dials. Pick the skill for a 
 | [`copilot-delegate`](skills/copilot-delegate/SKILL.md) | [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-cli) (`copilot`) | `--allow-all-tools` opt-in; headless auto-deny otherwise | `--read-only` (`--mode plan`) | `--resume-last`, `--session <id>` |
 | [`warp-delegate`](skills/warp-delegate/SKILL.md) | [Warp Agent CLI](https://docs.warp.dev/cli/) (`oz`) | full local tools — no sandbox, no permission modes [^none] | — [^none] | `--conversation <id>` |
 | [`zcode-delegate`](skills/zcode-delegate/SKILL.md) | [Z.AI ZCode](https://zcode.z.ai) (`zcode`) [^zcode] | `--mode yolo` | `--read-only` (`plan` mode) | `--resume-last`, `--session <id>` |
-| [`kiro-delegate`](skills/kiro-delegate/SKILL.md) | Kiro CLI (`kiro-cli`) | `--trust-tools`; `--trust-all-tools` opt-in | — [^none] | `--resume`, `--resume-id <UUID>` |
+| [`kiro-delegate`](skills/kiro-delegate/SKILL.md) | Kiro CLI (`kiro-cli`, V3 agent) | `--trust-tools`; `--trust-all-tools` opt-in | — [^none] | `--resume`, `--resume-id <UUID>` |
 
 [^commandcode]: Command Code's headless mode has two states and nothing between them: a `-p` run
 withholds the write, edit, and shell tools, and `--yolo` (alias `--dangerously-skip-permissions`)

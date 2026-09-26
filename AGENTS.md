@@ -48,7 +48,7 @@ jargon. Use these terms; don't invent synonyms.
 | `--message-file`, `--yes-always`, `--suggest-shell-commands`, `--auto-commits`/`--dirty-commits`, `--dry-run`, `--edit-format`, `--architect`, `--file`/`--read`, `chat history` | Aider's own terms — use verbatim when discussing `aider` | Aider has no sandbox, no permission modes, and no session ids; don't imply any. `--file`/`--read` scope the chat context — never call them a boundary |
 | `session`, `-p`/`--prompt`, `--output-format json` (JSONL), `tools`, `--allow-all-tools`, `mode plan`, `--resume`/`--continue`, `--model`, `--effort`, `copilot login` / env tokens, `sandbox` (experimental, MXC) | GitHub Copilot CLI's own terms — use verbatim when discussing `copilot` | don't paraphrase them |
 | `mode` (`build`/`edit`/`plan`/`yolo`), `session` (`sess_…`), `goal` (`--target`), `--attach`, `app-server`, `plugins`, `skills` | ZCode's own terms — use verbatim when discussing `zcode` | don't call `mode` a sandbox or a permission mode; never present `build`/`edit` as usable headlessly |
-| `chat`, `--no-interactive`, `--trust-tools`, `--trust-all-tools`, `--resume`, `--resume-id`, `--wrap` | Kiro CLI's own terms — use verbatim when discussing `kiro-cli` | don't paraphrase them |
+| `chat`, `--no-interactive`, `--agent`, `--model`, `--effort`, `--v3`, `--mode` (`default`/`spec`), `--trust-tools`, `--trust-all-tools`, `--resume`, `--resume-id`, `--wrap` | Kiro CLI's own terms — use verbatim when discussing `kiro-cli` | don't paraphrase them |
 
 Banned on sight: coined umbrella terms in user-facing surfaces (README headings, `skills.sh.json`
 titles); any reference to the author's local machine or config; model/version pins (`GPT-5.x` →

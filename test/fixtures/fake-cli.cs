@@ -8,11 +8,20 @@ class FakeCli {
     // so a native-binary relay (agy, kimi, qoder, vibe, aider, oz, omp, kiro) enters the same preflight matrix.
     var mode = Environment.GetEnvironmentVariable("SMOKE_MODE") ?? "";
     var testContext = mode.Length > 0 ? mode : Environment.CurrentDirectory;
+    if (Environment.GetEnvironmentVariable("KIRO_WSL_WRAPPER_TEST") == "1") {
+      int execIndex = Array.IndexOf(args, "--exec");
+      if (execIndex >= 0 && execIndex + 1 < args.Length) {
+        var innerArgs = new string[args.Length - execIndex - 2];
+        Array.Copy(args, execIndex + 2, innerArgs, 0, innerArgs.Length);
+        args = innerArgs;
+      }
+    }
     if (args.Length > 1 && args[0] == "chat" && args[1] == "--help") {
+      if (testContext.EndsWith("-version-hang") || testContext.EndsWith("-version-hang-tree")) Thread.Sleep(Timeout.Infinite);
       if (testContext.EndsWith("-version-fail") || testContext.EndsWith("-version-fail-silent")) return 7;
       Console.WriteLine(testContext.EndsWith("-help-missing")
-        ? "--no-interactive --trust-tools --resume-id"
-        : "--no-interactive --trust-tools --resume-id --wrap");
+        ? "--no-interactive --trust-tools --resume-id --effort --v3 --mode"
+        : "--no-interactive --trust-tools --resume-id --wrap --effort --v3 --mode");
       return 0;
     }
     bool versionProbe = Array.IndexOf(args, "--version") >= 0
@@ -146,6 +155,10 @@ class FakeCli {
       var orphanPidFile = Environment.GetEnvironmentVariable("SMOKE_GRAND_PID_FILE");
       if (!String.IsNullOrEmpty(orphanPidFile) && orphan != null) File.WriteAllText(orphanPidFile, orphan.Id.ToString());
       if (delayMs > 0) Thread.Sleep(delayMs);
+      return 0;
+    }
+    if (Environment.GetEnvironmentVariable("KIRO_FAKE_MODE") == "large-stdout") {
+      Console.Write("START\n" + new String('x', 70000) + "\nSession: 11111111-1111-4111-8111-111111111111\n");
       return 0;
     }
     if (Environment.GetEnvironmentVariable("KIRO_FAKE_MODE") == "split") {

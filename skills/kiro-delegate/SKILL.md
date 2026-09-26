@@ -6,7 +6,7 @@ description: >-
   Kiro, Kiro CLI, or kiro-cli. Do not use for small inline edits, review-only work, or when Kiro
   authentication and the applicable Kiro/AWS terms have not been accepted.
 license: MIT
-compatibility: Requires Node.js 18+, git, and an authenticated Kiro CLI (`kiro-cli`) whose capabilities pass relay preflight; accepted Kiro/AWS terms are required for headless use.
+compatibility: Requires Node.js 18+, git, and an authenticated, V3-capable Kiro CLI (`kiro-cli`) whose capabilities pass relay preflight; accepted Kiro/AWS terms are required for headless use.
 metadata:
   version: 0.5.0
 ---
@@ -14,11 +14,15 @@ metadata:
 # Kiro CLI Delegate
 
 You are the **orchestrator**. This skill delegates one bounded implementation task to a separate
-Kiro CLI process. Kiro edits the working tree; you own the brief, judgment, verification, and Git
+Kiro CLI V3 process. Kiro edits the working tree; you own the brief, judgment, verification, and Git
 commit.
 
-Kiro's public guidance may restrict third-party harness use. Confirm that the intended Kiro/AWS
-account terms permit this automated use before dispatching.
+Kiro's public guidance permits native Kiro CLI and software-development automation, but also restricts
+subscription use through third-party automation harnesses. This skill's Node relay is an external
+orchestrator that launches and controls `kiro-cli`; the public guidance cited during PR review did
+not conclusively establish whether that architecture is permitted. **Do not dispatch** unless the
+applicable account terms or written Kiro/AWS guidance explicitly permit this use. Accepting the
+general terms alone is not sufficient evidence.
 
 ## When not to use
 
@@ -30,8 +34,9 @@ account terms permit this automated use before dispatching.
 
 1. `--cd` is an existing Git worktree with a verifiable, non-unborn `HEAD`.
 2. `kiro-cli --version` and `kiro-cli chat --help` pass relay capability preflight.
-3. Headless authentication is configured, preferably with `KIRO_API_KEY`; never put it in a brief,
-   command argument, repository file, or result artifact.
+3. Headless authentication is configured with `KIRO_API_KEY`, unless current Kiro documentation
+   explicitly supports another non-interactive method for the account. Never put a credential in a
+   brief, command argument, repository file, or result artifact.
 
 The child receives a sanitized environment by default. `--inherit-env` is an explicit unsafe opt-in;
 artifact redaction still applies. Redaction covers known environment values, not secrets read from
@@ -44,6 +49,12 @@ files, MCP, or external services.
 
    ```powershell
    node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd "C:\path\to\repo" --trust-tools=fs_read,fs_write,execute_bash,grep,glob,code
+   # Optional Kiro controls; omit them to keep the CLI's configured defaults:
+   #   --model <name>
+   #   --effort low|medium|high|xhigh|max
+   #   --mode default|spec   # optional V3 agent mode; V3 itself is always enabled
+   # Windows relay with Kiro installed only in WSL:
+   #   --wsl [--wsl-distro Ubuntu]
    ```
 
 3. Read `result.json`, inspect `git status --short`, `git diff`, and `git diff --cached`, then rerun
@@ -51,13 +62,18 @@ files, MCP, or external services.
 4. Resume only the same task with `--resume` or `--resume-id <UUID>` and a delta brief.
 
 Use the smallest explicit tool set needed. Do not use `--trust-all-tools` unless the user explicitly
-accepts unrestricted Kiro tool approval.
+accepts unrestricted Kiro tool approval. `--model`, `--effort`, and `--mode` are opt-in: when omitted,
+the relay passes none of them and Kiro uses its configured defaults; when supplied, the relay validates
+and forwards their values unchanged. Every dispatch includes Kiro's `--v3` switch, and preflight fails
+instead of falling back when the installed CLI lacks the V3 engine or the documented effort/mode
+controls. On Windows, `--wsl` runs the official CLI through `wsl.exe --exec`; optional
+`--wsl-distro <name>` selects a distribution, and `--kiro-bin` then names the executable inside WSL.
 
 ## Result contract
 
 The relay writes `delegate-relay.result.v1` with `status`, `exitCode`, `signal`, Kiro's final report,
 `touchedFiles` (`null` when Git cannot report, `[]` when clean), and a session id when exposed. It
-also records lane/permission/workspace metadata, preflight results, redaction metadata, and artifact
+also records `agentEngine: "v3"`, lane/permission/workspace metadata, preflight results, redaction metadata, and artifact
 paths. A changed HEAD or unknown Git state is a failed boundary requiring inspection.
 
 ## References

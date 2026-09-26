@@ -33,10 +33,12 @@ export async function runPreflight(h) {
       });
       const value = existsSync(join(outDir, "result.json")) ? h.result(outDir) : {};
       const versionPid = existsSync(versionPidFile) ? Number(readFileSync(versionPidFile, "utf8")) : null;
+      // Kiro names its two-step version/help gate "Kiro CLI preflight"; sibling relays use
+      // "version preflight". Both must still expose stderrTail and prevent dispatch.
       h.check(`${skill} preflight: ${skill}-${suffix} is explicit and prevents dispatch`,
        preflight.status === expectedExit &&
        value.status === expectedStatus &&
-        (Array.isArray(value.stderrTail) || typeof value.stderrTail === "string" || (skill === "kiro" && value.stderrTail === undefined)) &&
+        (Array.isArray(value.stderrTail) || typeof value.stderrTail === "string") &&
         (value.error?.includes("version preflight") || (skill === "kiro" && value.error?.includes("Kiro CLI preflight"))) &&
        value.error?.includes("was not dispatched"));
       h.check(`${skill} preflight: ${skill}-${suffix} version descendants are dead`,
@@ -50,7 +52,9 @@ export async function runPreflight(h) {
   // added above cannot quietly turn "not installed" into a generic failure.
    const missingWorkDir = skill === "kiro" ? h.committedRepo(`work-preflight-unavailable-${skill}`) : sharedWorkDir;
     const missingOutDir = join(h.scratch, `out-unavailable-${skill}`);
-    const missingVersionPidFile = join(h.scratch, `version-pid-unavailable-${skill}`);
+    const missingVersionPidFile = skill === "kiro"
+      ? join(missingWorkDir, "smoke-version.pid")
+      : join(h.scratch, `version-pid-unavailable-${skill}`);
    const missingArgs = skill === "kiro" ? ["--kiro-bin", join(h.scratch, "missing-kiro.exe")] : [];
    const missing = spawnSync(process.execPath, [
     h.relayPath(skill),

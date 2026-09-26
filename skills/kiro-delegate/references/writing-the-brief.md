@@ -22,5 +22,6 @@ Report: what changed and why; files touched; gate outcomes; deviations or open q
 </structured_output_contract>
 ```
 
-Keep secrets out of the brief. The relay stores a redacted artifact and passes the brief to Kiro;
-put large context in workspace files instead of the brief. A resumed session gets only a delta brief.
+Keep secrets out of the brief. The relay rejects briefs larger than 24,576 UTF-8 bytes, stores a
+redacted artifact, and passes the brief to Kiro; put large context in workspace files instead of the
+brief. A resumed session gets only a delta brief.
