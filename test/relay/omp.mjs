@@ -17,7 +17,7 @@ export async function runOmp(h) {
     "--read-only",
   ], {
     env: { ...h.baseEnv, SMOKE_MODE: "omp-success", SMOKE_ARGS_FILE: argsFile },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const capture = existsSync(argsFile) ? JSON.parse(readFileSync(argsFile, "utf8")) : {};
   h.check("omp success: relay exits zero", run.status === 0);
@@ -61,7 +61,7 @@ export async function runOmp(h) {
     "--out-dir", writeOutDir,
   ], {
     env: { ...h.baseEnv, SMOKE_MODE: "omp-success", SMOKE_ARGS_FILE: writeArgsFile },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const writeCapture = existsSync(writeArgsFile) ? JSON.parse(readFileSync(writeArgsFile, "utf8")) : {};
   h.check("omp write: --yolo and untrusted project resources",
@@ -85,7 +85,7 @@ export async function runOmp(h) {
     "--approve",
   ], {
     env: { ...h.baseEnv, SMOKE_MODE: "omp-success", SMOKE_ARGS_FILE: approveArgsFile },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const approveCapture = existsSync(approveArgsFile) ? JSON.parse(readFileSync(approveArgsFile, "utf8")) : {};
   h.check("omp project trust: --approve omits --no-extensions/--no-skills/--no-rules",
@@ -100,7 +100,7 @@ export async function runOmp(h) {
     "--brief", h.briefPath,
     "--cd", workDir,
     "--provider", "google & whoami",
-  ], { env: h.baseEnv, encoding: "utf8" });
+  ], { env: h.baseEnv, encoding: "utf8", timeout: 60_000, });
   h.check("omp provider: flag-unsafe value is rejected", unsafeProvider.status === 2);
 
   const badThinking = spawnSync(process.execPath, [
@@ -108,7 +108,7 @@ export async function runOmp(h) {
     "--brief", h.briefPath,
     "--cd", workDir,
     "--thinking", "inherit",
-  ], { env: h.baseEnv, encoding: "utf8" });
+  ], { env: h.baseEnv, encoding: "utf8", timeout: 60_000, });
   h.check("omp thinking: inherit is rejected before dispatch",
     badThinking.status === 2 && /invalid --thinking/.test(badThinking.stderr));
 
@@ -117,7 +117,7 @@ export async function runOmp(h) {
     "--brief", h.briefPath,
     "--cd", workDir,
     "--list-models",
-  ], { env: h.baseEnv, encoding: "utf8" });
+  ], { env: h.baseEnv, encoding: "utf8", timeout: 60_000, });
   h.check("omp: --list-models is not a relay flag",
     listModels.status === 2 && /unknown option: --list-models/.test(listModels.stderr));
 
@@ -130,7 +130,7 @@ export async function runOmp(h) {
     "--out-dir", errorOutDir,
   ], {
     env: { ...h.baseEnv, SMOKE_MODE: "omp-error", SMOKE_ARGS_FILE: errorArgsFile },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const errorResult = existsSync(join(errorOutDir, "result.json")) ? h.result(errorOutDir) : {};
   h.check("omp assistant error: exit-zero event is reported as failed",
@@ -150,7 +150,7 @@ export async function runOmp(h) {
     "--resume-last",
   ], {
     env: { ...h.baseEnv, SMOKE_MODE: "omp-success", SMOKE_ARGS_FILE: resumeArgsFile },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const resumeCapture = existsSync(resumeArgsFile) ? JSON.parse(readFileSync(resumeArgsFile, "utf8")) : {};
   h.check("omp resume-last: uses documented --continue",
@@ -171,7 +171,7 @@ export async function runOmp(h) {
     "--session", "omp-session-1",
   ], {
     env: { ...h.baseEnv, SMOKE_MODE: "omp-success", SMOKE_ARGS_FILE: sessionArgsFile },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const sessionCapture = existsSync(sessionArgsFile) ? JSON.parse(readFileSync(sessionArgsFile, "utf8")) : {};
   h.check("omp session: uses documented --session <id>",
@@ -191,7 +191,7 @@ export async function runOmp(h) {
     "--cd", workDir,
     "--resume-last",
     "--session", "omp-session-1",
-  ], { env: h.baseEnv, encoding: "utf8" });
+  ], { env: h.baseEnv, encoding: "utf8", timeout: 60_000, });
   h.check("omp resume: --resume-last and --session are mutually exclusive",
     bothResume.status === 2 && /mutually exclusive/.test(bothResume.stderr));
 
@@ -214,7 +214,7 @@ export async function runOmp(h) {
     const fleetEnv = { ...h.baseEnv, HOME: cfgHome, USERPROFILE: cfgHome };
     delete fleetEnv.XDG_CONFIG_HOME;
     const writeCfg = spawnSync(process.execPath, [join(setupDir, "config.mjs"), "write", "--scope", "global", laneFile], {
-      encoding: "utf8",
+      encoding: "utf8", timeout: 60_000,
       env: fleetEnv,
     });
     h.check("omp lane: global model/thinking lane is written", writeCfg.status === 0);
@@ -228,7 +228,7 @@ export async function runOmp(h) {
       "--lane", "feature",
     ], {
       env: { ...fleetEnv, SMOKE_MODE: "omp-success", SMOKE_ARGS_FILE: laneArgsFile },
-      encoding: "utf8",
+      encoding: "utf8", timeout: 60_000,
     });
     const laneCapture = existsSync(laneArgsFile) ? JSON.parse(readFileSync(laneArgsFile, "utf8")) : {};
     h.check("omp lane: provider/model/effort become --provider/--model/--thinking",
@@ -255,7 +255,7 @@ export async function runOmp(h) {
       "--thinking", "low",
     ], {
       env: { ...fleetEnv, SMOKE_MODE: "omp-success", SMOKE_ARGS_FILE: overrideArgsFile },
-      encoding: "utf8",
+      encoding: "utf8", timeout: 60_000,
     });
     const overrideCapture = existsSync(overrideArgsFile) ? JSON.parse(readFileSync(overrideArgsFile, "utf8")) : {};
     h.check("omp lane: explicit --thinking wins over lane effort",
@@ -271,7 +271,7 @@ export async function runOmp(h) {
     "--brief", h.briefPath,
     "--cd", workDir,
     "--out-dir", missingOutDir,
-  ], { env: { ...process.env, PATH: "" }, encoding: "utf8" });
+  ], { env: { ...process.env, PATH: "" }, encoding: "utf8", timeout: 60_000, });
   h.check("omp unavailable: missing binary writes the structured result",
     missing.status === 127 &&
     existsSync(join(missingOutDir, "result.json")) &&

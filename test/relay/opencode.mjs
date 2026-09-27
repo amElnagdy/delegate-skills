@@ -23,7 +23,7 @@ export async function runOpencode(h) {
       SMOKE_ARGS_FILE: variantArgsFile,
       SMOKE_VERSION: "opencode v2.0.11",
     },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const variantCapture = existsSync(variantArgsFile) ? JSON.parse(readFileSync(variantArgsFile, "utf8")) : {};
   h.check("opencode model+variant: relay exits zero", variantRun.status === 0);
@@ -66,7 +66,7 @@ export async function runOpencode(h) {
     "--model", "fake/model",
   ], {
     env: { ...h.baseEnv, SMOKE_MODE: "opencode-success", SMOKE_ARGS_FILE: modelArgsFile },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const modelCapture = existsSync(modelArgsFile) ? JSON.parse(readFileSync(modelArgsFile, "utf8")) : {};
   h.check("opencode model only: argv is exact",
@@ -99,7 +99,7 @@ export async function runOpencode(h) {
       SMOKE_ARGS_FILE: planArgsFile,
       SMOKE_VERSION: "opencode v2.0.11",
     },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const planCapture = existsSync(planArgsFile) ? JSON.parse(readFileSync(planArgsFile, "utf8")) : {};
   h.check("opencode plan: variant joins the model value and no --auto is passed",
@@ -118,7 +118,7 @@ export async function runOpencode(h) {
     "--brief", h.briefPath,
     "--cd", workDir,
     "--variant", "high",
-  ], { env: h.baseEnv, encoding: "utf8" });
+  ], { env: h.baseEnv, encoding: "utf8", timeout: 60_000, });
   h.check("opencode --variant without --model is a usage error",
     bareVariant.status === 2 && /--model/.test(bareVariant.stderr));
 
@@ -139,7 +139,7 @@ export async function runOpencode(h) {
       SMOKE_ARGS_FILE: v1ArgsFile,
       SMOKE_VERSION: "1.18.30",
     },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const v1Capture = existsSync(v1ArgsFile) ? JSON.parse(readFileSync(v1ArgsFile, "utf8")) : {};
   h.check("opencode 1.x model+variant: --variant is passed as its own flag",
@@ -172,7 +172,7 @@ export async function runOpencode(h) {
       SMOKE_ARGS_FILE: unknownArgsFile,
       SMOKE_VERSION: "unknown",
     },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const unknownCapture = existsSync(unknownArgsFile) ? JSON.parse(readFileSync(unknownArgsFile, "utf8")) : {};
   h.check("opencode unknown version: falls back to the 1.x --variant mapping",
@@ -196,7 +196,7 @@ export async function runOpencode(h) {
       SMOKE_ARGS_FILE: joinedArgsFile,
       SMOKE_VERSION: "opencode v2.0.11",
     },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const joinedCapture = existsSync(joinedArgsFile) ? JSON.parse(readFileSync(joinedArgsFile, "utf8")) : {};
   h.check("opencode joined model value: forwarded verbatim, no --variant",
@@ -211,7 +211,7 @@ export async function runOpencode(h) {
     "--cd", workDir,
     "--model", "fake/model#high",
     "--variant", "low",
-  ], { env: h.baseEnv, encoding: "utf8" });
+  ], { env: h.baseEnv, encoding: "utf8", timeout: 60_000, });
   h.check("opencode joined model plus --variant is a usage error",
     conflict.status === 2 && /already carries a variant/.test(conflict.stderr));
 }

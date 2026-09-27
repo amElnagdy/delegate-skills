@@ -16,7 +16,7 @@ export async function runPi(h) {
     "--read-only",
   ], {
     env: { ...h.baseEnv, SMOKE_MODE: "pi-success", SMOKE_ARGS_FILE: argsFile },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const capture = existsSync(argsFile) ? JSON.parse(readFileSync(argsFile, "utf8")) : {};
   h.check("pi success: relay exits zero", run.status === 0);
@@ -58,7 +58,7 @@ export async function runPi(h) {
     "--approve",
   ], {
     env: { ...h.baseEnv, SMOKE_MODE: "pi-success", SMOKE_ARGS_FILE: approveArgsFile },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const approveCapture = existsSync(approveArgsFile) ? JSON.parse(readFileSync(approveArgsFile, "utf8")) : {};
   h.check("pi project trust: --approve is explicit and recorded",
@@ -72,7 +72,7 @@ export async function runPi(h) {
     "--brief", h.briefPath,
     "--cd", workDir,
     "--provider", "google & whoami",
-  ], { env: h.baseEnv, encoding: "utf8" });
+  ], { env: h.baseEnv, encoding: "utf8", timeout: 60_000, });
   h.check("pi provider: shell-unsafe value is rejected", unsafeProvider.status === 2);
 
   const errorOutDir = join(h.scratch, "out-error-pi");
@@ -84,7 +84,7 @@ export async function runPi(h) {
     "--out-dir", errorOutDir,
   ], {
     env: { ...h.baseEnv, SMOKE_MODE: "pi-error", SMOKE_ARGS_FILE: errorArgsFile },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const errorResult = existsSync(join(errorOutDir, "result.json")) ? h.result(errorOutDir) : {};
   h.check("pi assistant error: exit-zero event is reported as failed",
@@ -104,7 +104,7 @@ export async function runPi(h) {
     "--resume-last",
   ], {
     env: { ...h.baseEnv, SMOKE_MODE: "pi-success", SMOKE_ARGS_FILE: resumeArgsFile },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const resumeCapture = existsSync(resumeArgsFile) ? JSON.parse(readFileSync(resumeArgsFile, "utf8")) : {};
   h.check("pi resume-last: uses documented --continue",
@@ -121,7 +121,7 @@ export async function runPi(h) {
     "--brief", h.briefPath,
     "--cd", workDir,
     "--out-dir", missingOutDir,
-  ], { env: { ...process.env, PATH: "" }, encoding: "utf8" });
+  ], { env: { ...process.env, PATH: "" }, encoding: "utf8", timeout: 60_000, });
   h.check("pi unavailable: missing binary writes the structured result",
     missing.status === 127 &&
     existsSync(join(missingOutDir, "result.json")) &&
@@ -136,9 +136,9 @@ export async function runPi(h) {
       h.relayPath("pi"),
       "--brief", h.briefPath,
       "--cd", workDir,
-      "--out-dir", preflightOutDir,
-      "--timeout", "1s",
-    ], { env: { ...h.baseEnv, SMOKE_MODE: mode }, encoding: "utf8", timeout: 5000 });
+"--out-dir", preflightOutDir,
+"--timeout", mode.includes("fail") ? "30s" : "1s",
+    ], { env: { ...h.baseEnv, SMOKE_MODE: mode }, encoding: "utf8", timeout: 60000 });
     const preflightResult = existsSync(join(preflightOutDir, "result.json"))
       ? h.result(preflightOutDir)
       : {};

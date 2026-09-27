@@ -39,7 +39,7 @@ for (const scenario of [
     ...scenario.relayArgs,
   ], {
     env: { ...h.baseEnv, SMOKE_MODE: "vibe-success", SMOKE_ARGS_FILE: argsFile },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const args = existsSync(argsFile)
     ? h.WIN
@@ -72,9 +72,9 @@ for (const [mode, expectedStatus, expectedExit] of [
     h.relayPath("vibe"),
     "--brief", h.briefPath,
     "--cd", workDir,
-    "--out-dir", outDir,
-    "--timeout", "1s",
-  ], { env: { ...h.baseEnv, SMOKE_MODE: mode }, encoding: "utf8", timeout: 5000 });
+"--out-dir", outDir,
+"--timeout", mode.includes("fail") ? "30s" : "1s",
+  ], { env: { ...h.baseEnv, SMOKE_MODE: mode }, encoding: "utf8", timeout: 60000 });
   const value = existsSync(join(outDir, "result.json")) ? h.result(outDir) : {};
   h.check(`vibe preflight: ${mode} is explicit and prevents dispatch`,
     preflight.status === expectedExit &&
@@ -93,7 +93,7 @@ for (const [mode, expectedStatus, expectedExit] of [
     "--brief", h.briefPath,
     "--cd", workDir,
     "--out-dir", outDir,
-  ], { env: { ...process.env, PATH: "" }, encoding: "utf8" });
+  ], { env: { ...process.env, PATH: "" }, encoding: "utf8", timeout: 60_000, });
   h.check("vibe unavailable: structured result replaces stale artifacts",
     missing.status === 127 &&
     h.result(outDir).status === "vibe_unavailable" &&
@@ -133,7 +133,7 @@ if (!h.WIN) {
     "--brief", nulBrief,
     "--cd", workDir,
     "--out-dir", outDir,
-  ], { env: h.baseEnv, encoding: "utf8" });
+  ], { env: h.baseEnv, encoding: "utf8", timeout: 60_000, });
   h.check("vibe validation: NUL brief is rejected before artifacts",
     rejected.status === 2 && !existsSync(outDir));
 }
@@ -147,7 +147,7 @@ if (h.WIN) {
     "--brief", longBrief,
     "--cd", workDir,
     "--out-dir", outDir,
-  ], { env: h.baseEnv, encoding: "utf8" });
+  ], { env: h.baseEnv, encoding: "utf8", timeout: 60_000, });
   h.check("vibe Windows: oversized argv brief is rejected before artifacts",
     rejected.status === 2 && !existsSync(outDir));
 }

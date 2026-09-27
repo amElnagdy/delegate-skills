@@ -22,7 +22,7 @@ export async function runZcode(h) {
     const run = spawnSync(process.execPath, [
       h.relayPath("zcode"), "--brief", h.briefPath, "--cd", workDir,
       "--out-dir", outDir, "--mode", value,
-    ], { env: h.baseEnv, encoding: "utf8" });
+    ], { env: h.baseEnv, encoding: "utf8", timeout: 60_000, });
     h.check(`zcode validation: --mode ${label} is rejected before artifacts`,
       run.status === 2 && !existsSync(outDir));
   }
@@ -31,7 +31,7 @@ export async function runZcode(h) {
   const conflict = spawnSync(process.execPath, [
     h.relayPath("zcode"), "--brief", h.briefPath, "--cd", workDir,
     "--out-dir", conflictOutDir, "--read-only", "--mode", "yolo",
-  ], { env: h.baseEnv, encoding: "utf8" });
+  ], { env: h.baseEnv, encoding: "utf8", timeout: 60_000, });
   h.check("zcode validation: --read-only conflicting with --mode yolo is rejected",
     conflict.status === 2 && !existsSync(conflictOutDir));
 
@@ -39,7 +39,7 @@ export async function runZcode(h) {
   const badSession = spawnSync(process.execPath, [
     h.relayPath("zcode"), "--brief", h.briefPath, "--cd", workDir,
     "--out-dir", badSessionOutDir, "--session", "not-a-zcode-session",
-  ], { env: h.baseEnv, encoding: "utf8" });
+  ], { env: h.baseEnv, encoding: "utf8", timeout: 60_000, });
   h.check("zcode validation: a session id without the sess_ prefix is rejected",
     badSession.status === 2 && !existsSync(badSessionOutDir));
 
@@ -52,7 +52,7 @@ export async function runZcode(h) {
     h.relayPath("zcode"), "--brief", h.briefPath, "--cd", workDir, "--out-dir", missingOutDir,
   ], {
     env: { ...h.baseEnv, ZCODE_CLI: join(h.scratch, "no-such-zcode.cjs") },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   h.check("zcode unavailable: an explicitly named missing CLI writes the structured result",
     missing.status === 127 &&
@@ -67,7 +67,7 @@ export async function runZcode(h) {
     "--out-dir", outDir, "--session", "sess_prior-0", "--disallowed-tools", "Write,Edit",
   ], {
     env: { ...h.baseEnv, SMOKE_MODE: "zcode-success", SMOKE_ARGS_FILE: argsFile },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const args = capturedArgs(argsFile);
   h.check("zcode success: relay exits zero", run.status === 0);
@@ -108,7 +108,7 @@ export async function runZcode(h) {
     "--out-dir", latestOutDir, "--resume-last",
   ], {
     env: { ...h.baseEnv, SMOKE_MODE: "zcode-success", SMOKE_ARGS_FILE: latestArgsFile },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const latestArgs = capturedArgs(latestArgsFile);
   h.check("zcode resume-last: uses documented -c, not --resume",
@@ -124,7 +124,7 @@ export async function runZcode(h) {
     "--out-dir", readOnlyOutDir, "--read-only",
   ], {
     env: { ...h.baseEnv, SMOKE_MODE: "zcode-success", SMOKE_ARGS_FILE: readOnlyArgsFile },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const readOnlyArgs = capturedArgs(readOnlyArgsFile);
   h.check("zcode read-only: maps to ZCode's plan mode and reports a clean tripwire",
@@ -138,7 +138,7 @@ export async function runZcode(h) {
   const garbledOutDir = join(h.scratch, "out-garbled-zcode");
   const garbled = spawnSync(process.execPath, [
     h.relayPath("zcode"), "--brief", h.briefPath, "--cd", workDir, "--out-dir", garbledOutDir,
-  ], { env: { ...h.baseEnv, SMOKE_MODE: "zcode-garbled" }, encoding: "utf8" });
+  ], { env: { ...h.baseEnv, SMOKE_MODE: "zcode-garbled" }, encoding: "utf8", timeout: 60_000, });
   const garbledResult = existsSync(join(garbledOutDir, "result.json")) ? h.result(garbledOutDir) : {};
   h.check("zcode garbled: an unparseable document still completes but says so",
     garbled.status === 0 &&

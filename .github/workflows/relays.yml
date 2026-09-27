@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   smoke:
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:

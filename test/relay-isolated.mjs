@@ -27,6 +27,7 @@ for (const relay of RELAYS) {
     const result = spawnSync(process.execPath, ["scripts/relay.mjs", "--help"], {
       cwd: join(temp, `${relay}-delegate`),
       encoding: "utf8",
+      timeout: 30_000,
     });
     check(`${relay}: isolated --help`, result.status === 0 && Boolean(result.stdout.trim()));
     if (result.status !== 0 || !result.stdout.trim()) {

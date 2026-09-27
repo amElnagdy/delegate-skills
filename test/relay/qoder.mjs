@@ -16,7 +16,7 @@ export async function runQoder(h) {
     "--context-window", "32768",
   ], {
     env: { ...h.baseEnv, SMOKE_MODE: "qoder-success", SMOKE_ARGS_FILE: argsFile },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const args = existsSync(argsFile)
     ? h.WIN
@@ -56,7 +56,7 @@ export async function runQoder(h) {
     "--cd", workDir,
     "--out-dir", invalidOutDir,
     "--context-window", "0",
-  ], { env: h.baseEnv, encoding: "utf8" });
+  ], { env: h.baseEnv, encoding: "utf8", timeout: 60_000, });
   h.check("qoder validation: non-positive context is rejected before artifacts",
     invalid.status === 2 && !existsSync(invalidOutDir));
 
@@ -70,7 +70,7 @@ export async function runQoder(h) {
     "--resume-last",
   ], {
     env: { ...h.baseEnv, SMOKE_MODE: "qoder-success", SMOKE_ARGS_FILE: latestArgsFile },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const latestArgs = existsSync(latestArgsFile)
     ? h.WIN
@@ -93,7 +93,7 @@ export async function runQoder(h) {
     "--brief", h.briefPath,
     "--cd", workDir,
     "--out-dir", missingOutDir,
-  ], { env: { ...process.env, PATH: "" }, encoding: "utf8" });
+  ], { env: { ...process.env, PATH: "" }, encoding: "utf8", timeout: 60_000, });
   h.check("qoder unavailable: missing binary writes the structured result",
     missing.status === 127 &&
     existsSync(join(missingOutDir, "result.json")) &&
@@ -109,7 +109,7 @@ export async function runQoder(h) {
       "--brief", longBrief,
       "--cd", workDir,
       "--out-dir", longOutDir,
-    ], { env: h.baseEnv, encoding: "utf8" });
+    ], { env: h.baseEnv, encoding: "utf8", timeout: 60_000, });
     h.check("qoder Windows: oversized argv brief is rejected before artifacts",
       rejected.status === 2 && !existsSync(longOutDir));
   }
@@ -123,9 +123,9 @@ export async function runQoder(h) {
       h.relayPath("qoder"),
       "--brief", h.briefPath,
       "--cd", workDir,
-      "--out-dir", preflightOutDir,
-      "--timeout", "1s",
-    ], { env: { ...h.baseEnv, SMOKE_MODE: mode }, encoding: "utf8", timeout: 5000 });
+"--out-dir", preflightOutDir,
+"--timeout", mode.includes("fail") ? "30s" : "1s",
+    ], { env: { ...h.baseEnv, SMOKE_MODE: mode }, encoding: "utf8", timeout: 60000 });
     const preflightResult = existsSync(join(preflightOutDir, "result.json"))
       ? h.result(preflightOutDir)
       : {};

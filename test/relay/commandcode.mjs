@@ -19,7 +19,7 @@ function dispatch(h, name, relayArgs, env = {}) {
     ...relayArgs,
   ], {
     env: { ...h.baseEnv, SMOKE_MODE: "commandcode-success", SMOKE_ARGS_FILE: argsFile, ...env },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const captured = existsSync(argsFile) ? JSON.parse(readFileSync(argsFile, "utf8")) : { args: [], brief: "" };
   return { run, outDir, workDir, captured };
@@ -85,7 +85,7 @@ if (h.WIN) {
   writeFileSync(finalPath, "user report\n");
   const rejected = spawnSync(process.execPath, [
     h.relayPath("commandcode"), "--brief", h.briefPath, "--cd", workDir, "--out-dir", outDir,
-  ], { env: h.baseEnv, encoding: "utf8" });
+  ], { env: h.baseEnv, encoding: "utf8", timeout: 60_000, });
   h.check("commandcode untrusted out-dir: existing artifacts are rejected untouched",
     rejected.status === 2 && readFileSync(finalPath, "utf8") === "user report\n");
 }
@@ -99,7 +99,7 @@ if (h.WIN) {
   symlinkSync(victimPath, resultPath);
   const rejected = spawnSync(process.execPath, [
     h.relayPath("commandcode"), "--brief", h.briefPath, "--cd", workDir, "--out-dir", outDir,
-  ], { env: h.baseEnv, encoding: "utf8" });
+  ], { env: h.baseEnv, encoding: "utf8", timeout: 60_000, });
   h.check("commandcode result symlink: rejects without replacing the link or target",
     rejected.status === 2 && lstatSync(resultPath).isSymbolicLink() && readFileSync(victimPath, "utf8") === "protected\n");
 }
@@ -112,7 +112,7 @@ if (h.WIN) {
   if (existsSync(join(outDir, "result.json"))) {
     const rejected = spawnSync(process.execPath, [
       h.relayPath("commandcode"), "--brief", h.briefPath, "--cd", workDir, "--out-dir", outDir,
-    ], { env: h.baseEnv, encoding: "utf8" });
+    ], { env: h.baseEnv, encoding: "utf8", timeout: 60_000, });
     h.check("commandcode result case alias: rejects before replacing the alias",
       rejected.status === 2 && readFileSync(aliasPath, "utf8") === "user result\n");
   }
@@ -129,7 +129,7 @@ if (h.WIN) {
     h.relayPath("commandcode"),
     "--brief", h.briefPath,
     "--cd", workDir,
-  ], { env: { ...h.baseEnv, SMOKE_MODE: "commandcode-success" }, encoding: "utf8" });
+  ], { env: { ...h.baseEnv, SMOKE_MODE: "commandcode-success" }, encoding: "utf8", timeout: 60_000, });
   const resultPath = /^result: (.+)$/m.exec(run.stdout)?.[1];
   const runResult = resultPath && existsSync(resultPath)
     ? JSON.parse(readFileSync(resultPath, "utf8"))
@@ -244,7 +244,7 @@ for (const [name, args, pattern] of [
     "--cd", workDir,
     "--out-dir", outDir,
     ...args,
-  ], { env: h.baseEnv, encoding: "utf8" });
+  ], { env: h.baseEnv, encoding: "utf8", timeout: 60_000, });
   h.check(`commandcode ${name}: exits 2 before dispatch`,
     bad.status === 2 && pattern.test(bad.stderr) && !existsSync(join(outDir, "result.json")));
 }
@@ -326,7 +326,7 @@ if (!h.WIN) {
   const shimDir = join(h.scratch, "slow-git-commandcode");
   const readyPath = join(h.scratch, "slow-git-ready-commandcode");
   mkdirSync(shimDir);
-  const realGit = spawnSync("which", ["git"], { env: h.baseEnv, encoding: "utf8" }).stdout.trim();
+  const realGit = spawnSync("which", ["git"], { env: h.baseEnv, encoding: "utf8", timeout: 30_000, }).stdout.trim();
   const gitShim = join(shimDir, "git");
   writeFileSync(gitShim, `#!/bin/sh
 if [ "$1" = status ]; then
@@ -382,8 +382,8 @@ if (!h.WIN) {
   const outDir = join(h.scratch, "out-unavailable-commandcode");
   const victimPath = join(workDir, "victim.txt");
   writeFileSync(victimPath, "tracked victim\n");
-  spawnSync("git", ["-C", workDir, "add", "victim.txt"]);
-  const victimCommitted = spawnSync("git", ["-C", workDir, "-c", "user.name=Smoke", "-c", "user.email=smoke@example.invalid", "commit", "-qm", "fixture"]).status === 0;
+  spawnSync("git", ["-C", workDir, "add", "victim.txt"], { encoding: "utf8", timeout: 30_000 });
+  const victimCommitted = spawnSync("git", ["-C", workDir, "-c", "user.name=Smoke", "-c", "user.email=smoke@example.invalid", "commit", "-qm", "fixture"], { encoding: "utf8", timeout: 30_000 }).status === 0;
   mkdirSync(outDir);
   writeFileSync(join(outDir, "result.json"), "{\"schema\":\"delegate-relay.result.v1\"}\n");
   symlinkSync(victimPath, join(outDir, "brief.txt"));
@@ -396,7 +396,7 @@ if (!h.WIN) {
   ], {
     // Keep git available for the read-only verdict while naming a missing CLI directly.
     env: { ...h.baseEnv, COMMANDCODE_BIN: join(h.scratch, "missing-commandcode") },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const value = h.result(outDir);
   h.check("commandcode unavailable: structured result replaces the stale one",

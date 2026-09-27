@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, symlinkSync, writeFile
 import { delimiter, join } from "node:path";
 
 function runGit(cwd, args) {
-  const command = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
+  const command = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8", timeout: 30_000, });
   if (command.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${command.stderr}`);
   return command.stdout.trim();
 }

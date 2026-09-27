@@ -166,6 +166,7 @@ export async function runClaude(h) {
         SMOKE_MODE: "claude-success",
       },
       encoding: "utf8",
+      timeout: 60_000,
     });
     h.check(`claude invalid autocompact ${JSON.stringify(invalid)}: exits with usage error`, invalidRun.status === 2);
     h.check(`claude invalid autocompact ${JSON.stringify(invalid)}: provider preflight was not spawned`, !existsSync(preflightPid));
@@ -180,6 +181,7 @@ export async function runClaude(h) {
     ], {
       env: { ...h.baseEnv, SMOKE_PREFLIGHT_PID_FILE: preflightPid, SMOKE_MODE: "claude-success" },
       encoding: "utf8",
+      timeout: 60_000,
     });
     h.check("claude missing autocompact value: exits with usage error", missingRun.status === 2);
     h.check("claude missing autocompact value: provider preflight was not spawned", !existsSync(preflightPid));

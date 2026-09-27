@@ -68,7 +68,7 @@ for (const scenario of [
     ...scenario.relayArgs,
   ], {
     env: { ...h.baseEnv, SMOKE_MODE: "copilot-success", SMOKE_ARGS_FILE: argsFile },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const args = existsSync(argsFile)
     ? JSON.parse(readFileSync(argsFile, "utf8"))
@@ -103,7 +103,7 @@ for (const scenario of [
     "--out-dir", outDir,
   ], {
     env: { ...h.baseEnv, SMOKE_MODE: "copilot-denied", SMOKE_ARGS_FILE: argsFile },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   h.check("copilot denied: relay exits non-zero despite copilot exit 0",
     run.status !== 0);
@@ -124,7 +124,7 @@ for (const scenario of [
     "--out-dir", outDir,
     "--read-only",
     "--allow-all-tools",
-  ], { env: h.baseEnv, encoding: "utf8" });
+  ], { env: h.baseEnv, encoding: "utf8", timeout: 60_000, });
   h.check("copilot conflict: --read-only + --allow-all-tools exits 2",
     conflict.status === 2);
 }
@@ -138,7 +138,7 @@ for (const scenario of [
     "--cd", workDir,
     "--out-dir", outDir,
     "--effort", "foo",
-  ], { env: h.baseEnv, encoding: "utf8" });
+  ], { env: h.baseEnv, encoding: "utf8", timeout: 60_000, });
   h.check("copilot invalid effort: exits 2 before dispatch",
     bad.status === 2 &&
     /invalid --effort "foo"/.test(bad.stderr) &&
@@ -158,7 +158,7 @@ for (const scenario of [
   const fleetEnv = { ...h.baseEnv, HOME: cfgHome, USERPROFILE: cfgHome };
   delete fleetEnv.XDG_CONFIG_HOME;
   const writeCfg = spawnSync(process.execPath, [join(setupDir, "config.mjs"), "write", "--scope", "global", laneFile], {
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
     env: fleetEnv,
   });
   h.check("copilot lane: global readOnly lane is written", writeCfg.status === 0);
@@ -173,7 +173,7 @@ for (const scenario of [
     "--lane", "review",
   ], {
     env: { ...fleetEnv, SMOKE_MODE: "copilot-success", SMOKE_ARGS_FILE: controlArgsFile },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const controlArgs = existsSync(controlArgsFile)
     ? JSON.parse(readFileSync(controlArgsFile, "utf8"))
@@ -195,7 +195,7 @@ for (const scenario of [
     "--allow-all-tools",
   ], {
     env: { ...fleetEnv, SMOKE_MODE: "copilot-success", SMOKE_ARGS_FILE: argsFile },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const args = existsSync(argsFile)
     ? JSON.parse(readFileSync(argsFile, "utf8"))
@@ -238,7 +238,7 @@ for (const [mode, expectedStatus, expectedExit] of [
     "--brief", h.briefPath,
     "--cd", workDir,
     "--out-dir", outDir,
-  ], { env: { ...process.env, PATH: "" }, encoding: "utf8" });
+  ], { env: { ...process.env, PATH: "" }, encoding: "utf8", timeout: 60_000, });
   h.check("copilot unavailable: structured result replaces stale artifacts",
     missing.status === 127 &&
     h.result(outDir).status === "copilot_unavailable" &&

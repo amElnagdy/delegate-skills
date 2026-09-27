@@ -9,7 +9,7 @@ export async function runAgy(h) {
       ? readFileSync(path, "utf8").split(/\r?\n/).filter(Boolean)
       : JSON.parse(readFileSync(path, "utf8"));
   const runGit = (cwd, args) => {
-    const result = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
+    const result = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8", timeout: 30_000, });
     if (result.status !== 0) throw new Error(result.stderr || `git ${args.join(" ")} failed`);
   };
   const dirtySubmoduleRepo = (name) => {
@@ -79,7 +79,7 @@ export async function runAgy(h) {
     "--out-dir", directConflictOut,
     "--read-only",
     "--dangerously-skip-permissions",
-  ], { env: h.baseEnv, encoding: "utf8" });
+  ], { env: h.baseEnv, encoding: "utf8", timeout: 60_000, });
   h.check("agy permissions: direct read-only and dangerous flags remain rejected",
     directConflict.status === 2 && !existsSync(join(directConflictOut, "result.json")));
 

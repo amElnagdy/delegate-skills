@@ -44,7 +44,7 @@ for (const skill of h.SKILLS) {
 for (const bad of ["NONSENSE", "0s", "", "10", "10s-junk", "1.5s", "1h30", "596h30m24s", "600h"]) {
   const badRun = spawnSync(process.execPath,
     [h.relayPath("agy"), "--brief", h.briefPath, "--print-timeout", bad],
-    { env: h.baseEnv, encoding: "utf8" });
+    { env: h.baseEnv, encoding: "utf8", timeout: 60_000, });
   h.check(`agy print timeout: "${bad}" is rejected`, badRun.status === 2);
 }
 {

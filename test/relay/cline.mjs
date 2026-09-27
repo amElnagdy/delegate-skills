@@ -15,7 +15,7 @@ export async function runCline(h) {
     "--model", "fake-model",
   ], {
     env: { ...h.baseEnv, SMOKE_MODE: "cline-success", SMOKE_ARGS_FILE: argsFile },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const capture = existsSync(argsFile) ? JSON.parse(readFileSync(argsFile, "utf8")) : {};
   h.check("cline success: relay exits zero", run.status === 0);
@@ -63,7 +63,7 @@ export async function runCline(h) {
     "--plan",
   ], {
     env: { ...h.baseEnv, SMOKE_MODE: "cline-success", SMOKE_ARGS_FILE: planArgsFile },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const planCapture = existsSync(planArgsFile) ? JSON.parse(readFileSync(planArgsFile, "utf8")) : {};
   h.check("cline plan: --plan forces auto-approve false in argv and result",
@@ -84,7 +84,7 @@ export async function runCline(h) {
     "--out-dir", unsafePlanOutDir,
     "--plan",
     "--auto-approve", "true",
-  ], { env: h.baseEnv, encoding: "utf8" });
+  ], { env: h.baseEnv, encoding: "utf8", timeout: 60_000, });
   h.check("cline plan: auto-approve true is rejected before dispatch",
     unsafePlan.status === 2 &&
     /requires auto-approve false/.test(unsafePlan.stderr) &&
@@ -95,7 +95,7 @@ export async function runCline(h) {
     "--brief", h.briefPath,
     "--cd", workDir,
     "--auto-approve", "yes",
-  ], { env: h.baseEnv, encoding: "utf8" });
+  ], { env: h.baseEnv, encoding: "utf8", timeout: 60_000, });
   h.check("cline auto-approve: non-boolean value is rejected before dispatch",
     invalidAutoApprove.status === 2 && /must be true or false/.test(invalidAutoApprove.stderr));
 
@@ -104,7 +104,7 @@ export async function runCline(h) {
     "--brief", h.briefPath,
     "--cd", workDir,
     "--session", "cline-session-9",
-  ], { env: h.baseEnv, encoding: "utf8" });
+  ], { env: h.baseEnv, encoding: "utf8", timeout: 60_000, });
   h.check("cline resume: unsupported relay flag is rejected before dispatch",
     unsupportedResume.status === 2 && /unknown option: --session/.test(unsupportedResume.stderr));
 
@@ -113,7 +113,7 @@ export async function runCline(h) {
     "--brief", h.briefPath,
     "--cd", workDir,
     "--provider", "fake & whoami",
-  ], { env: h.baseEnv, encoding: "utf8" });
+  ], { env: h.baseEnv, encoding: "utf8", timeout: 60_000, });
   h.check("cline provider: shell-unsafe value is rejected", unsafeProvider.status === 2);
 
   const bareModelOutDir = join(h.scratch, "out-bare-model-cline");
@@ -128,7 +128,7 @@ export async function runCline(h) {
     "--auto-approve", "false",
   ], {
     env: { ...h.baseEnv, SMOKE_MODE: "cline-success", SMOKE_ARGS_FILE: bareModelArgsFile },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const bareModelCapture = existsSync(bareModelArgsFile)
     ? JSON.parse(readFileSync(bareModelArgsFile, "utf8"))
@@ -153,7 +153,7 @@ export async function runCline(h) {
       "--out-dir", unsafeBriefOutDir,
     ], {
       env: { ...h.baseEnv, SMOKE_MODE: "cline-success", SMOKE_ARGS_FILE: unsafeBriefArgsFile },
-      encoding: "utf8",
+      encoding: "utf8", timeout: 60_000,
     });
     const unsafeBriefCapture = existsSync(unsafeBriefArgsFile)
       ? JSON.parse(readFileSync(unsafeBriefArgsFile, "utf8"))
@@ -172,7 +172,7 @@ export async function runCline(h) {
       "--out-dir", unsafeCdOutDir,
     ], {
       env: { ...h.baseEnv, SMOKE_MODE: "cline-success", SMOKE_ARGS_FILE: unsafeCdArgsFile },
-      encoding: "utf8",
+      encoding: "utf8", timeout: 60_000,
     });
     const unsafeCdCapture = existsSync(unsafeCdArgsFile)
       ? JSON.parse(readFileSync(unsafeCdArgsFile, "utf8"))
@@ -190,7 +190,7 @@ export async function runCline(h) {
     "--out-dir", errorOutDir,
   ], {
     env: { ...h.baseEnv, SMOKE_MODE: "cline-error", SMOKE_ARGS_FILE: errorArgsFile },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const errorResult = existsSync(join(errorOutDir, "result.json")) ? h.result(errorOutDir) : {};
   h.check("cline assistant error: exit-one run is reported as failed",
@@ -206,7 +206,7 @@ export async function runCline(h) {
     "--brief", h.briefPath,
     "--cd", workDir,
     "--out-dir", missingOutDir,
-  ], { env: { ...process.env, PATH: "" }, encoding: "utf8" });
+  ], { env: { ...process.env, PATH: "" }, encoding: "utf8", timeout: 60_000, });
   h.check("cline unavailable: missing binary writes the structured result",
     missing.status === 127 &&
     existsSync(join(missingOutDir, "result.json")) &&

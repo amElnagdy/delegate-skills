@@ -13,7 +13,7 @@ export async function runGrokGitTrust(h) {
   };
   const git = (cwd, args) => {
     const r = spawnSync("git", ["-c", `safe.directory=${cwd.replaceAll("\\", "/")}`, ...args],
-      { cwd, encoding: "utf8" });
+      { cwd, encoding: "utf8", timeout: 30_000, });
     if (r.status !== 0) throw new Error(`fixture Git failed: ${r.stderr}`);
     return r.stdout.trim();
   };

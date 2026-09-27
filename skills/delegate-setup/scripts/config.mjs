@@ -36,6 +36,8 @@ import {
   CONFIG_VERSION,
   GROK_SANDBOX,
   IMPLEMENTER_BY_KEY,
+  KIRO_EFFORT,
+  KIRO_MODE,
   LANE_NAME,
   MODEL_TOKEN,
   QODER_PERMISSION,
@@ -231,6 +233,9 @@ function validateDialValue(implementer, field, value, laneName, label) {
     if (implementer === "omp" && !OMP_THINKING.includes(value)) {
       return `${label}: lane ${laneName}.effort must be one of: ${OMP_THINKING.join(", ")}`;
     }
+    if (implementer === "kiro" && !KIRO_EFFORT.includes(value)) {
+      return `${label}: lane ${laneName}.effort must be one of: ${KIRO_EFFORT.join(", ")}`;
+    }
     if (
       (implementer === "codex" || implementer === "grok" || implementer === "commandcode") &&
       !/^[a-z][a-z0-9-]*$/i.test(value)
@@ -238,6 +243,9 @@ function validateDialValue(implementer, field, value, laneName, label) {
       return `${label}: lane ${laneName}.effort must be a bare token`;
     }
     return null;
+  }
+  if (field === "mode" && implementer === "kiro" && !KIRO_MODE.includes(value)) {
+    return `${label}: lane ${laneName}.mode must be one of: ${KIRO_MODE.join(", ")}`;
   }
   if (field === "sandbox") {
     if (implementer === "codex" && !CODEX_SANDBOX.includes(value)) {

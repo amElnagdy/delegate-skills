@@ -19,7 +19,7 @@ export async function runCursor(h) {
     "--no-force",
   ], {
     env: { ...h.baseEnv, SMOKE_MODE: "cursor-success", SMOKE_CAPTURE_FILE: captureFile },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const capture = existsSync(captureFile)
     ? JSON.parse(readFileSync(captureFile, "utf8"))
@@ -59,7 +59,7 @@ export async function runCursor(h) {
     "--resume-last",
   ], {
     env: { ...h.baseEnv, SMOKE_MODE: "cursor-success", SMOKE_CAPTURE_FILE: captureFile },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const capture = existsSync(captureFile)
     ? JSON.parse(readFileSync(captureFile, "utf8"))
@@ -92,7 +92,7 @@ export async function runCursor(h) {
     "--sandbox", "disabled",
   ], {
     env: { ...h.baseEnv, SMOKE_MODE: "cursor-success", SMOKE_CAPTURE_FILE: captureFile },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const capture = existsSync(captureFile)
     ? JSON.parse(readFileSync(captureFile, "utf8"))
@@ -189,7 +189,7 @@ if (!h.WIN) {
     "--brief", h.briefPath,
     "--cd", cursorNegativeWorkDir,
     "--out-dir", outDir,
-  ], { env: { ...process.env, PATH: "" }, encoding: "utf8" });
+  ], { env: { ...process.env, PATH: "" }, encoding: "utf8", timeout: 60_000, });
   h.check("cursor unavailable: structured result replaces stale artifacts",
     missing.status === 127 &&
     h.result(outDir).status === "cursor_agent_unavailable" &&

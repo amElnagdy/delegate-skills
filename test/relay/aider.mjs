@@ -44,7 +44,7 @@ export async function runAider(h) {
     "--api-base", "http://127.0.0.1:9/v1",
   ], {
     env: { ...h.baseEnv, SMOKE_MODE: "aider-success", SMOKE_ARGS_FILE: argsFile },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const args = readArgs(argsFile, h.WIN);
   const messageAt = args.indexOf("--message-file");
@@ -81,7 +81,7 @@ export async function runAider(h) {
     "--read-only",
   ], {
     env: { ...h.baseEnv, SMOKE_MODE: "aider-success", SMOKE_ARGS_FILE: dryArgsFile },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const dryArgs = readArgs(dryArgsFile, h.WIN);
   h.check("aider read-only: maps to --dry-run with pins intact",
@@ -101,7 +101,7 @@ export async function runAider(h) {
     "--resume-last",
   ], {
     env: { ...h.baseEnv, SMOKE_MODE: "aider-success", SMOKE_ARGS_FILE: resumeArgsFile },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const resumeArgs = readArgs(resumeArgsFile, h.WIN);
   h.check("aider resume-last: maps to --restore-chat-history",
@@ -119,7 +119,7 @@ export async function runAider(h) {
     "--out-dir", authOutDir,
   ], {
     env: { ...h.baseEnv, SMOKE_MODE: "aider-auth-fail" },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const authResult = existsSync(join(authOutDir, "result.json")) ? h.result(authOutDir) : {};
   h.check("aider auth failure: exit-zero diagnostic is reported as failed",
@@ -136,7 +136,7 @@ export async function runAider(h) {
     "--out-dir", exitOutDir,
   ], {
     env: { ...h.baseEnv, SMOKE_MODE: "aider-exit-nonzero" },
-    encoding: "utf8",
+    encoding: "utf8", timeout: 60_000,
   });
   const exitResult = existsSync(join(exitOutDir, "result.json")) ? h.result(exitOutDir) : {};
   h.check("aider nonzero exit: failed result carries an error",
@@ -152,7 +152,7 @@ export async function runAider(h) {
     "--brief", h.briefPath,
     "--cd", workDir,
     "--out-dir", missingOutDir,
-  ], { env: { ...process.env, PATH: "" }, encoding: "utf8" });
+  ], { env: { ...process.env, PATH: "" }, encoding: "utf8", timeout: 60_000, });
   h.check("aider unavailable: missing binary writes the structured result",
     missing.status === 127
     && existsSync(join(missingOutDir, "result.json"))

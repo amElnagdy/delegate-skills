@@ -8,7 +8,7 @@ const effortArgsFile = join(h.scratch, "args-effort-codex");
 const effortWorkDir = h.freshRepo("work-effort-codex");
 const effortRun = spawnSync(process.execPath,
   [h.relayPath("codex"), "--brief", h.briefPath, "--cd", effortWorkDir, "--out-dir", effortOutDir, "--effort", "low"],
-  { env: { ...h.baseEnv, SMOKE_MODE: "capture", SMOKE_ARGS_FILE: effortArgsFile }, encoding: "utf8" });
+  { env: { ...h.baseEnv, SMOKE_MODE: "capture", SMOKE_ARGS_FILE: effortArgsFile }, encoding: "utf8", timeout: 60_000, });
 const effortArgs = existsSync(effortArgsFile) ? JSON.parse(readFileSync(effortArgsFile, "utf8")) : [];
 h.check("codex effort: forwarded as a config override",
   effortRun.status === 0 && effortArgs.includes("-c") && effortArgs[effortArgs.indexOf("-c") + 1] === "model_reasoning_effort=low");
@@ -20,14 +20,14 @@ const isolatedArgsFile = join(h.scratch, "args-ignore-user-config-codex");
 const isolatedRun = spawnSync(process.execPath, [
   h.relayPath("codex"), "--brief", h.briefPath, "--cd", h.freshRepo("work-ignore-user-config-codex"),
   "--out-dir", isolatedOutDir, "--read-only", "--ignore-user-config",
-], { env: { ...h.baseEnv, SMOKE_MODE: "capture", SMOKE_ARGS_FILE: isolatedArgsFile }, encoding: "utf8" });
+], { env: { ...h.baseEnv, SMOKE_MODE: "capture", SMOKE_ARGS_FILE: isolatedArgsFile }, encoding: "utf8", timeout: 60_000, });
 const isolatedArgs = existsSync(isolatedArgsFile) ? JSON.parse(readFileSync(isolatedArgsFile, "utf8")) : [];
 h.check("codex ignore-user-config: forwarded before exec options",
   isolatedRun.status === 0 && isolatedArgs[0] === "exec" && isolatedArgs[1] === "--ignore-user-config");
 h.check("codex ignore-user-config: recorded in result.json",
   existsSync(join(isolatedOutDir, "result.json")) && h.result(isolatedOutDir).ignoreUserConfig === true);
 // ---- codex --clean-env isolates both preflight and dispatch ----
-const cleanEnvHelp = spawnSync(process.execPath, [h.relayPath("codex"), "--help"], { encoding: "utf8" });
+const cleanEnvHelp = spawnSync(process.execPath, [h.relayPath("codex"), "--help"], { encoding: "utf8", timeout: 30_000, });
 h.check("codex clean-env: help scopes the flag to inherited variables, not same-user secrets",
   cleanEnvHelp.status === 0 && cleanEnvHelp.stdout.includes("does not protect files or other")
     && cleanEnvHelp.stdout.includes("same-user secrets")
@@ -48,7 +48,7 @@ const cleanEnvRun = spawnSync(process.execPath, [
   "--out-dir", cleanEnvOutDir, "--clean-env", "--keep-env", "SMOKE_PROVIDER_TOKEN",
 ], {
   env: { ...h.baseEnv, HOME: h.scratch, SMOKE_PROVIDER_TOKEN: "required", SMOKE_SECRET_TOKEN: "must-not-leak" },
-  encoding: "utf8",
+  encoding: "utf8", timeout: 60_000,
 });
 rmSync(fallbackPath, { force: true });
 const cleanEnvCapture = existsSync(cleanEnvFile) ? JSON.parse(readFileSync(cleanEnvFile, "utf8")) : null;
@@ -69,7 +69,7 @@ h.check("codex clean-env: mode and kept names are recorded without values", (() 
 const inheritedEnvFile = join(h.scratch, "env-inherited-codex");
 spawnSync(process.execPath,
   [h.relayPath("codex"), "--brief", h.briefPath, "--cd", h.freshRepo("work-inherited-codex"), "--out-dir", join(h.scratch, "out-inherited-codex")],
-  { env: { ...h.baseEnv, SMOKE_MODE: "capture", SMOKE_ARGS_FILE: join(h.scratch, "args-inherited-codex"), SMOKE_ENV_FILE: inheritedEnvFile, SMOKE_SECRET_TOKEN: "inherited" }, encoding: "utf8" });
+  { env: { ...h.baseEnv, SMOKE_MODE: "capture", SMOKE_ARGS_FILE: join(h.scratch, "args-inherited-codex"), SMOKE_ENV_FILE: inheritedEnvFile, SMOKE_SECRET_TOKEN: "inherited" }, encoding: "utf8", timeout: 60_000, });
 const inheritedCapture = existsSync(inheritedEnvFile) ? JSON.parse(readFileSync(inheritedEnvFile, "utf8")) : null;
 h.check("codex clean-env: without the flag the environment is still inherited",
   inheritedCapture?.SMOKE_SECRET_TOKEN === "inherited");
@@ -90,7 +90,7 @@ const capturePath = (name, flags, extraEnv) => {
   const preflightFile = join(h.scratch, `env-preflight-${name}`);
   const run = spawnSync(process.execPath,
     [h.relayPath("codex"), "--brief", h.briefPath, "--cd", h.freshRepo(`work-${name}`), "--out-dir", join(h.scratch, `out-${name}`), ...flags],
-    { env: { ...windowsAppsEnv, SMOKE_MODE: "capture", SMOKE_ARGS_FILE: join(h.scratch, `args-${name}`), SMOKE_ENV_FILE: envFile, SMOKE_PREFLIGHT_ENV_FILE: preflightFile, ...extraEnv }, encoding: "utf8" });
+    { env: { ...windowsAppsEnv, SMOKE_MODE: "capture", SMOKE_ARGS_FILE: join(h.scratch, `args-${name}`), SMOKE_ENV_FILE: envFile, SMOKE_PREFLIGHT_ENV_FILE: preflightFile, ...extraEnv }, encoding: "utf8", timeout: 60_000, });
   const read = (file) => (existsSync(file) ? JSON.parse(readFileSync(file, "utf8")).PATH : null);
   return { status: run.status, dispatch: read(envFile), preflight: read(preflightFile) };
 };
@@ -114,13 +114,13 @@ writeFileSync(fallbackPath, JSON.stringify({
 }));
 const cleanEnvPath = spawnSync(process.execPath,
   [h.relayPath("codex"), "--brief", h.briefPath, "--cd", h.freshRepo("work-windowsapps-clean-env"), "--out-dir", join(h.scratch, "out-windowsapps-clean-env"), "--clean-env"],
-  { env: windowsAppsEnv, encoding: "utf8" });
+  { env: windowsAppsEnv, encoding: "utf8", timeout: 60_000, });
 rmSync(fallbackPath, { force: true });
 const cleanEnvPathCapture = existsSync(join(h.scratch, "env-windowsapps-clean-env"))
   ? JSON.parse(readFileSync(join(h.scratch, "env-windowsapps-clean-env"), "utf8")).PATH : null;
 h.check("codex PATH: --clean-env filters the kept PATH the same way",
   cleanEnvPath.status === 0 && cleanEnvPathCapture === pathWithoutWindowsApps);
-const windowsAppsHelp = spawnSync(process.execPath, [h.relayPath("codex"), "--help"], { encoding: "utf8" });
+const windowsAppsHelp = spawnSync(process.execPath, [h.relayPath("codex"), "--help"], { encoding: "utf8", timeout: 30_000, });
 h.check("codex PATH: help documents the WindowsApps filter and the full-access exemption",
   windowsAppsHelp.status === 0 && windowsAppsHelp.stdout.includes("WindowsApps") && windowsAppsHelp.stdout.includes("0xC0070005")
     && windowsAppsHelp.stdout.includes("danger-full-access") && windowsAppsHelp.stdout.includes("PATH unchanged"));
@@ -132,7 +132,7 @@ for (const [name, flags] of [
   const outDir = join(h.scratch, `out-keep-env-${name.replaceAll(" ", "-")}`);
   const run = spawnSync(process.execPath,
     [h.relayPath("codex"), "--brief", h.briefPath, "--out-dir", outDir, ...flags],
-    { env: h.baseEnv, encoding: "utf8" });
+    { env: h.baseEnv, encoding: "utf8", timeout: 60_000, });
   h.check(`codex keep-env: ${name} before artifacts`, run.status === 2 && !existsSync(outDir));
 }
 // ---- codex --session resumes one exact thread ----
@@ -141,7 +141,7 @@ const sessionArgsFile = join(h.scratch, "args-session-codex");
 const sessionWorkDir = h.freshRepo("work-session-codex");
 const sessionRun = spawnSync(process.execPath,
   [h.relayPath("codex"), "--brief", h.briefPath, "--cd", sessionWorkDir, "--out-dir", sessionOutDir, "--session", "thread-abc"],
-  { env: { ...h.baseEnv, SMOKE_MODE: "capture", SMOKE_ARGS_FILE: sessionArgsFile }, encoding: "utf8" });
+  { env: { ...h.baseEnv, SMOKE_MODE: "capture", SMOKE_ARGS_FILE: sessionArgsFile }, encoding: "utf8", timeout: 60_000, });
 const sessionArgs = existsSync(sessionArgsFile) ? JSON.parse(readFileSync(sessionArgsFile, "utf8")) : [];
 h.check("codex session: resumes the named thread",
   sessionRun.status === 0 && sessionArgs[0] === "exec" && sessionArgs[1] === "resume" && sessionArgs[2] === "thread-abc");
@@ -150,7 +150,7 @@ h.check("codex session: recorded in result.json",
   existsSync(join(sessionOutDir, "result.json")) && h.result(sessionOutDir).session === "thread-abc");
 const bothResumeRun = spawnSync(process.execPath,
   [h.relayPath("codex"), "--brief", h.briefPath, "--session", "thread-abc", "--resume-last"],
-  { env: h.baseEnv, encoding: "utf8" });
+  { env: h.baseEnv, encoding: "utf8", timeout: 60_000, });
 h.check("codex session: --session with --resume-last is rejected", bothResumeRun.status === 2);
 for (const [name, value] of [
   ["an empty id", ""],
@@ -159,19 +159,19 @@ for (const [name, value] of [
 ]) {
   const invalidSessionRun = spawnSync(process.execPath,
     [h.relayPath("codex"), "--brief", h.briefPath, "--session", value],
-    { env: h.baseEnv, encoding: "utf8" });
+    { env: h.baseEnv, encoding: "utf8", timeout: 60_000, });
   h.check(`codex session: ${name} is rejected`, invalidSessionRun.status === 2);
 }
 
 const emptyEffortRun = spawnSync(process.execPath,
   [h.relayPath("codex"), "--brief", h.briefPath, "--effort", ""],
-  { env: h.baseEnv, encoding: "utf8" });
+  { env: h.baseEnv, encoding: "utf8", timeout: 60_000, });
 h.check("codex effort: an empty value is rejected", emptyEffortRun.status === 2);
 // ---- codex stderr: the full log survives a transcript longer than the tail ----
 const floodOutDir = join(h.scratch, "out-stderr-flood-codex");
 const floodRun = spawnSync(process.execPath,
   [h.relayPath("codex"), "--brief", h.briefPath, "--cd", h.freshRepo("work-stderr-flood-codex"), "--out-dir", floodOutDir],
-  { env: { ...h.baseEnv, SMOKE_MODE: "codex-stderr-flood" }, encoding: "utf8" });
+  { env: { ...h.baseEnv, SMOKE_MODE: "codex-stderr-flood" }, encoding: "utf8", timeout: 60_000, });
 const floodResult = existsSync(join(floodOutDir, "result.json")) ? h.result(floodOutDir) : null;
 const floodTail = floodResult?.stderrTail ?? [];
 const floodLog = floodResult?.stderrPath && existsSync(floodResult.stderrPath)
