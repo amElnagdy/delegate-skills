@@ -32,10 +32,10 @@ Options:
 | `--brief <file>` | The brief. Omit it to read the brief from stdin (`node relay.mjs … < brief.txt`). |
 | `--cd <dir>` | Working root for OpenCode (default: current directory). |
 | `--lane <name>` | Fleet lane from `delegate-setup` config. Applies that lane's dials; fails if the lane's `implementer` is not this relay. Explicit dial flags win. |
-| `--model <name>` | Model as `provider/model`. **Required on a fresh run** — OpenCode has no safe default (a bare `opencode run` errors); a resumed run inherits its session's model. |
+| `--model <name>` | Model as `provider/model`, or `provider/model#variant` on opencode 2.x. **Required on a fresh run** — OpenCode has no safe default (a bare `opencode run` errors); a resumed run inherits its session's model. |
 | `--agent <name>` | OpenCode agent (default: `build`, write-capable). |
 | `--read-only` | Shortcut for `--agent plan` — review/diagnosis with no edits. |
-| `--variant <name>` | Provider reasoning effort (e.g. `high`, `max`, `minimal`). |
+| `--variant <name>` | Provider reasoning effort (e.g. `high`, `max`, `minimal`). Version-gated: opencode 2.x replaced the `--variant` flag with the `provider/model#variant` model value, so the relay joins the dials there (`2.0.11`'s `run --help` documents that format and ships no `--variant` flag); on 1.x the relay still passes `--variant`. The relay probes the version before every dispatch. |
 | `--no-auto` | The relay passes `opencode`'s `--auto` (auto-approve permissions) **by default** so a headless run doesn't hang on a prompt; `--no-auto` drops it and honors the agent's own permission config instead. A `--read-only`/`plan` run never gets `--auto`, so it can't be auto-approved into edits. |
 | `--resume-last` | Continue the most recent OpenCode session; send only the delta brief (see review-and-land). |
 | `--session <id>` | Continue a specific session id (`ses_…`); send only the delta brief. |
@@ -138,6 +138,8 @@ Under the hood the helper runs roughly:
 
 ```bash
 opencode run --format json --agent build -m provider/model < brief.txt             # fresh run (model required)
+opencode run --format json --agent build -m provider/model#high < brief.txt       # fresh run, variant dial on 2.x
+opencode run --format json --agent build -m provider/model --variant high < brief.txt  # variant dial on 1.x
 opencode run --format json --continue --agent build < delta-brief.txt               # resume most recent (inherits model)
 opencode run --format json --session ses_… --agent build < delta-brief.txt           # resume a specific session
 ```

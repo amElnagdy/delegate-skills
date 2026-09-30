@@ -36,6 +36,7 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 | `--effort <level>` | Claude effort: `low`, `medium`, `high`, `xhigh`, `max`, or `ultracode`; availability depends on the model. |
 | `--max-turns <n>` | Positive agentic-turn cap. |
 | `--max-budget-usd <amount>` | Positive decimal spend cap for print mode. |
+| `--autocompact <auto\|tokens>` | Set Claude Code's auto-compact window on Claude Code `2.1.221` or newer. The relay validates a shell-safe shape; the installed Claude CLI owns the supported range. |
 | `--resume-last` | Resume the latest session for this cwd with Claude's `--continue`; send a delta brief. |
 | `--session <id>` | Resume a specific session with Claude's `--resume <id>`; mutually exclusive with `--resume-last`. |
 | `--read-only` | Plan mode with only Read, Glob, and Grep, plus a Git-visible change tripwire. |
@@ -62,7 +63,9 @@ claude -p --output-format stream-json --verbose \
 On native Windows, `PowerShell` replaces `Bash` and is passed through `--allowedTools` because Claude's
 shell sandbox is unavailable there. Read-only uses `--tools Read,Glob,Grep --permission-mode plan`. A
 specific session adds `--resume <id>`; the latest session adds `--continue`. The permission and tool
-profile is re-passed on every resumed invocation.
+profile is re-passed on every resumed invocation. When requested, `--autocompact <value>` is also
+re-passed on every new, `--resume`, or `--continue` invocation rather than assumed to persist from an
+earlier launch.
 
 The relay never adds `--bg`: Claude documents background mode as incompatible with `-p`. It never adds
 `--bare`, because bare mode skips `CLAUDE.md` and OAuth/keychain authentication.
@@ -165,10 +168,14 @@ Core fields:
   while `[]` means git reported a clean tree. This is the whole final tree, not attribution.
 - `readOnlyViolation` — present only on `--read-only`, with the three-state meaning above.
 
-Run metadata includes `workdir`, `model`, `effort`, `maxTurns`, `maxBudgetUsd`, `timeout`, `readOnly`,
+Run metadata includes `workdir`, `model`, `effort`, `maxTurns`, `maxBudgetUsd`, optional
+`autocompact`, `timeout`, `readOnly`,
 `resumed`, `resumeLast`, `toolSurface`, `shellSandbox`, `dangerouslySkipPermissions`, timestamps, and
 all artifact paths. Failed, timed-out, and aborted runs include `stderrTail` when available;
 launch/watchdog/signal failures include `error`.
+
+`autocompact` records only the value the relay requested and passed in argv. It is absent when the
+flag was omitted and is not proof that Claude Code applied or enforced the setting. On Claude Code older than 2.1.221 the launch fails with `unknown option '--autocompact'`; if a newer CLI rejects the value's range it fails at argument parsing. Either way the non-zero exit and stderr are preserved and the relay does not retry without the flag.
 
 The relay prints a concise summary and the complete final report to stdout, then exits with
 `result.json`'s `exitCode`.

@@ -257,7 +257,7 @@ function validateDialValue(implementer, field, value, laneName, label) {
     return `${label}: lane ${laneName}.permissionMode must be one of: ${ZCODE_MODE.join(", ")}`;
   }
   if (field === "variant") {
-    // OpenCode appends --variant on win32 shell:true; reject cmd metacharacters.
+    // The variant may reach a win32 shell:true launch (opencode 1.x --variant); reject cmd metacharacters.
     if (!MODEL_TOKEN.shellSafe.test(value)) {
       return `${label}: lane ${laneName}.variant has unsupported characters (allowed: letters, digits, . _ : / -)`;
     }
@@ -282,11 +282,14 @@ function validateModelOrProvider(implementer, field, value, laneName, label) {
   } else if (implementer === "cursor") {
     pattern = MODEL_TOKEN.cursor;
     hint = "letters, digits, . _ : @ / [ ] , = -";
+  } else if (implementer === "opencode") {
+    // opencode 2.x carries the variant inside the model value as provider/model#variant.
+    pattern = MODEL_TOKEN.opencode;
+    hint = "letters, digits, . _ : / # -";
   } else if (
     implementer === "grok" ||
     implementer === "pi" ||
     implementer === "omp" ||
-    implementer === "opencode" ||
     implementer === "commandcode" ||
     // codex (and any other win32 shell:true relay) must not accept cmd metacharacters in -m.
     implementer === "codex" ||

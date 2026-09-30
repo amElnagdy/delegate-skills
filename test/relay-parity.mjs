@@ -31,6 +31,30 @@ const SYMBOLS = [
   ["makeLineScanner", "function", ["vibe", "copilot"]],
   ["makeEventScanner", "function", ["claude", "cline", "cursor", "grok", "kimi", "opencode", "pi", "omp", "qoder", "warp"]],
 ];
+
+// A symbol list that omits a relay which DEFINES that symbol is a silent hole:
+// parity stays green while that copy is free to drift. Every such omission is
+// recorded here with its reason, so a new relay can never quietly widen the
+// ungated surface.
+const UNGATED_DEFINITIONS = new Map([
+  // agy takes one sha256 over the whole worktree (gitWorktreeFingerprint:
+  // status, both raw diffs, then hash-object per dirty path) rather than the
+  // per-path fingerprints the other four share, so its readOnlyVerdict has a
+  // different signature and cannot be byte-compared with theirs.
+  ["readOnlyVerdict", ["agy"]],
+]);
+
+const sources = new Map();
+const relaySource = (relay) => {
+  if (!sources.has(relay)) {
+    sources.set(relay, readFileSync(join(here, "..", "skills", `${relay}-delegate`, "scripts", "relay.mjs"), "utf8"));
+  }
+  return sources.get(relay);
+};
+const anchorFor = (symbol, kind) => (kind === "const"
+  ? new RegExp(`^const ${symbol} =.*$`, "gm")
+  : new RegExp(`^function ${symbol}\\(`, "gm"));
+
 let failed = 0;
 const check = (name, condition) => {
   console.log(`${condition ? "  ok " : "  FAIL"}  ${name}`);
@@ -38,10 +62,7 @@ const check = (name, condition) => {
 };
 
 function extract(source, symbol, kind, relay) {
-  const anchor = kind === "const"
-    ? new RegExp(`^const ${symbol} =.*$`, "gm")
-    : new RegExp(`^function ${symbol}\\(`, "gm");
-  const matches = [...source.matchAll(anchor)];
+  const matches = [...source.matchAll(anchorFor(symbol, kind))];
   if (matches.length !== 1) {
     throw new Error(`${relay}: expected one top-level ${kind} ${symbol}, found ${matches.length}`);
   }
@@ -57,7 +78,7 @@ for (const [symbol, kind, relays] of SYMBOLS) {
   try {
     const copies = relays.map((relay) => [
       relay,
-      extract(readFileSync(join(here, "..", "skills", `${relay}-delegate`, "scripts", "relay.mjs"), "utf8"), symbol, kind, relay),
+      extract(relaySource(relay), symbol, kind, relay),
     ]);
     const groups = new Map();
     for (const [relay, source] of copies) groups.set(source, [...(groups.get(source) || []), relay]);
@@ -70,6 +91,16 @@ for (const [symbol, kind, relays] of SYMBOLS) {
   } catch (error) {
     check(`${symbol}: extract shared source`, false);
     console.log(`        ${error.message}`);
+  }
+}
+
+for (const [symbol, kind, relays] of SYMBOLS) {
+  const exempt = UNGATED_DEFINITIONS.get(symbol) ?? [];
+  const ungated = RELAYS.filter((relay) =>
+    !relays.includes(relay) && !exempt.includes(relay) && anchorFor(symbol, kind).test(relaySource(relay)));
+  check(`${symbol}: no ungated definition`, ungated.length === 0);
+  if (ungated.length) {
+    console.log(`        defines ${symbol} but is absent from its relay list: ${ungated.join(", ")}`);
   }
 }
 

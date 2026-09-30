@@ -24,8 +24,26 @@
  * Antigravity owns its own permission policy. This helper does not pass
  * --dangerously-skip-permissions by default; opt into that flag only when the
  * human explicitly accepts it. Pass --sandbox to enable Antigravity's terminal
- * sandbox for the run. Combining both flags must be treated as full access because
- * permission requests to act outside the sandbox may be auto-approved.
+ * sandbox for the run.
+ *
+ * `--read-only` composes both: `--sandbox --dangerously-skip-permissions`. That
+ * pairing looks alarming and is deliberate — the sandbox is the enforcement and
+ * the auto-approve only lets tools run *inside* it. Plan mode alone cannot do
+ * the job: headless `--print` has no way to answer a permission prompt, so agy
+ * auto-denies the first tool that needs one and the run returns nothing at all
+ * ("a tool required the \"command\" permission that headless mode cannot prompt
+ * for"). Verified on agy 1.1.28, macOS: under --sandbox, writes to the working
+ * tree are overlaid and discarded, and every path outside the workspace fails
+ * with EPERM for read *and* write.
+ *
+ * Two consequences worth knowing before choosing this lane:
+ *   - The sandbox confines READS to the workspace too. A brief that cites an
+ *     absolute path outside --cd cannot be followed; keep briefs self-contained
+ *     or add the path with agy's own --add-dir.
+ *   - Inside the workspace a write appears to succeed to the agent — it reads
+ *     its own overlay back — and is then discarded. The tree is safe, but a
+ *     confused run may report edits it did not make. Trust `touchedFiles`, not
+ *     the agent's account of itself.
  *
  * Usage:
  *   node relay.mjs --brief <file> [options]
@@ -42,8 +60,12 @@
  *   --resume-last           Continue the most recent Antigravity conversation; send only the delta brief.
  *   --conversation <id>     Continue a specific Antigravity conversation; send only the delta brief.
  *   --sandbox               Enable Antigravity's terminal sandbox for this run.
- *   --read-only             Run in plan mode (`--mode plan`), removing write and edit paths.
- *                           Mutually exclusive with --dangerously-skip-permissions.
+ *   --read-only             Review/diagnosis with no edits: runs under agy's sandbox with
+ *                           tool approval auto-granted inside it (`--sandbox
+ *                           --dangerously-skip-permissions`). Reads and writes are both
+ *                           confined to the workspace. Mutually exclusive with
+ *                           --dangerously-skip-permissions as a flag: that alone, without
+ *                           the sandbox, is full access.
  *   --dangerously-skip-permissions
  *                           Auto-approve Antigravity tool permission requests. Use only with human approval.
  *                           Mutually exclusive with --read-only.
@@ -440,9 +462,17 @@ function buildArgv(opts, brief, run) {
   }
   if (opts.model) argv.push("--model", opts.model);
   if (opts.effort) argv.push("--effort", opts.effort);
-  if (opts.readOnly) argv.push("--mode", "plan");
-  if (opts.sandbox) argv.push("--sandbox");
-  if (opts.dangerouslySkipPermissions) argv.push("--dangerously-skip-permissions");
+  if (opts.readOnly) {
+    // The sandbox is the enforcement; the auto-approve only lets tools run
+    // inside it. `--mode plan` was the old mapping and could not work headless:
+    // agy auto-denies any tool needing a permission prompt, so the first
+    // command ended the run with nothing returned. See the header for what the
+    // sandbox does and does not cover.
+    argv.push("--sandbox", "--dangerously-skip-permissions");
+  } else {
+    if (opts.sandbox) argv.push("--sandbox");
+    if (opts.dangerouslySkipPermissions) argv.push("--dangerously-skip-permissions");
+  }
   if (opts.printTimeout) argv.push("--print-timeout", opts.printTimeout);
   argv.push("--log-file", run.logPath);
   // Use the --print=<brief> form, not a separate ["--print", brief] pair: agy's flag
@@ -628,6 +658,26 @@ function dispatchToAgy(opts, brief, run, writeResult, watchdogMs) {
       if (line.trim()) stderrTail.push(line.trimEnd());
     }
     while (stderrTail.length > 20) stderrTail.shift();
+  });
+
+  // A grandchild that outlives agy and inherited the pipes keeps stdout/stderr open, so
+  // "close" never fires and the relay waits forever, writing no result. Once agy itself is
+  // gone the pipes hold nothing we still need, so drop them after a short drain grace and let
+  // "close" run. This is the normal-exit twin of the stream teardown the watchdog already
+  // does on the timeout path.
+  child.once("exit", () => {
+    // The implementer already exited. Leaving the watchdog armed lets a drain that
+    // overlaps the remaining budget fire, set watchdogFired, and report timeout.
+    if (!watchdogFired) {
+      clearTimeout(watchdogTimer);
+      if (sigkillTimer) clearTimeout(sigkillTimer);
+    }
+    const drain = setTimeout(() => {
+      if (settled) return;
+      child.stdout.destroy();
+      child.stderr.destroy();
+    }, 500);
+    if (typeof drain.unref === "function") drain.unref();
   });
 
   child.on("error", (err) => {

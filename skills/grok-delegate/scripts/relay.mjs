@@ -22,14 +22,16 @@
  * Grok's default permission mode is `ask`, which blocks on approval prompts in
  * a non-interactive pipe. The relay therefore sets autonomy explicitly:
  *   default        — `--always-approve --sandbox workspace` (write in CWD)
- *   --read-only    — `--sandbox read-only --permission-mode plan` (review intent)
+ *   --read-only    — `--always-approve --sandbox read-only` (review intent)
  *   --full-access  — `--always-approve --sandbox off` (unrestricted; opt-in)
  *
- * `--read-only` is best-effort, NOT a hard guarantee: on grok 0.2.101 the
- * read-only sandbox governs out-of-workspace filesystem/network access, not the
- * agent's own edit tool, and headless `plan` mode is advisory — a determined run
- * can still write the working tree. Always confirm `touchedFiles` after a
- * read-only run; don't rely on the flag alone.
+ * `--read-only` is kernel-enforced on grok 1.0.25 (Seatbelt on macOS, Landlock
+ * on Linux): grok's write/search_replace tools and shell redirects alike fail
+ * with EPERM. It is not total, though — the profile still permits writes to
+ * /tmp, /var/tmp and ~/.grok/, so a repo under one of those paths is NOT
+ * protected, and on macOS the profile does not restrict child-process network.
+ * Always confirm `touchedFiles` after a read-only run; don't rely on the flag
+ * alone.
  * The relay reports `readOnlyViolation` as true when git porcelain or an
  * already-dirty Git-visible path proves a change, false when coverage is
  * complete and detects none, and null when coverage is incomplete. It cannot
@@ -46,6 +48,15 @@
  * Options:
  *   --brief <file>          Path to the brief. If omitted, the brief is read from stdin.
  *   --cd <dir>              Working root for Grok (default: current directory).
+ *   --trust-git-root <dir>  Explicitly trust this exact Git root for relay Git checks
+ *                           only; no persistent config or child permission changes.
+ *                           Validation asks git once — via a single-use
+ *                           wildcard-trust query — for git's own canonical
+ *                           spelling of that exact root, verifies it against the
+ *                           path you supplied, and scopes every relay Git check to
+ *                           that string: git matches safe.directory against
+ *                           literal path forms it canonicalizes itself, which
+ *                           Node cannot reproduce reliably on Windows.
  *   --lane <name>           Fleet lane from delegate-setup config (dials apply; explicit flags win).
  *   --model <name>          Grok model (default: Grok's own configured default).
  *   --effort <level>        Reasoning effort for this run (passed as `--effort`).
@@ -81,10 +92,10 @@
  * file must therefore also treat a non-zero exit with no file as a usage error.
  */
 
-import { spawn, execFileSync, spawnSync } from "node:child_process";
+import { spawn, execFileSync as nativeExecFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, writeFileSync, renameSync, readFileSync, readdirSync, existsSync, appendFileSync, lstatSync, readlinkSync, openSync, readSync, closeSync, realpathSync } from "node:fs";
-import { join, relative, resolve, basename, dirname } from "node:path";
+import { mkdirSync, writeFileSync, renameSync, readFileSync, readdirSync, existsSync, appendFileSync, lstatSync, readlinkSync, openSync, readSync, closeSync, realpathSync, statSync } from "node:fs";
+import { join, relative, resolve, basename, dirname, isAbsolute, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { constants, tmpdir } from "node:os";
 import { StringDecoder } from "node:string_decoder";
@@ -97,6 +108,108 @@ const MAX_TIMER_MS = 2_147_483_647;
 const AUTONOMY_MODES = new Set(["workspace-write", "read-only", "full-access"]);
 
 const IMPLEMENTER_KEY = "grok";
+
+let trustedGitRoot = null;
+// The same root in git's own literal spelling, captured by the bootstrap query.
+// Git matches safe.directory against this exact string, so scoped relay git
+// calls must pass it through verbatim; trustedGitRoot stays the Node-canonical
+// forward-slashed form for containment checks and result.json.
+let trustedGitRootGitForm = null;
+
+function insideGitRoot(root, cwd) {
+  const path = relative(root, realpathSync(cwd));
+  return path === "" || (path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path));
+}
+
+// Git config entries are matched against forward-slashed literal paths on Windows.
+function fwd(path) {
+  return path.replaceAll("\\", "/");
+}
+
+// Compare two paths by filesystem identity, not by resolved path STRING. Node's
+// fs.realpathSync — the JS implementation this relay imports — does not expand
+// Windows 8.3 short names, while git canonicalizes them away; on a runner whose
+// temp is `C:\Users\RUNNER~1\...`, the Node-resolved form of the user-supplied
+// path and the Node-resolved form of git's reported toplevel are different
+// strings even though they name the same directory. (Earlier PR rounds
+// plausibly died at that string comparison, not at the safe.directory match.)
+// So never compare resolved path strings across the Node/git boundary: statSync
+// follows symlinks, and on Windows Node fills dev/ino from the NT file index,
+// which is spelling-independent (8.3 vs long form, case, separators). Filesystems
+// where ino is unusable (0) on either side fall back to the realpath comparison.
+// The execFileSync trust guard obeys this rule too: on-disk identity for the
+// trusted root itself, string containment for everything beyond it.
+function samePhysicalDir(a, b) {
+  try {
+    const sa = statSync(a);
+    const sb = statSync(b);
+    if (sa.ino !== 0 && sb.ino !== 0) return sa.dev === sb.dev && sa.ino === sb.ino;
+    return relative(realpathSync(a), realpathSync(b)) === "";
+  } catch {
+    return false;
+  }
+}
+
+function configureGitTrust(opts) {
+  if (opts.trustGitRoot === null) return;
+  try {
+    // Reject Git's wildcard trust syntax even on filesystems allowing literal '*'.
+    if (opts.trustGitRoot.includes("*")) throw new Error("wildcard trust is unsupported");
+    const asGiven = resolve(opts.trustGitRoot);
+    const root = realpathSync(asGiven);
+    if (root.includes("*")) throw new Error("wildcard trust is unsupported");
+    if (!insideGitRoot(root, opts.cd)) throw new Error("--cd is outside the supplied root");
+    // Two Windows CI rounds proved literal-form enumeration (as-given, realpath,
+    // 8.3 aliases) cannot reproduce the path spelling Git for Windows compares
+    // safe.directory against. So ask git itself: the single-use wildcard trust
+    // below exists only to make this one query answer with git's own canonical
+    // spelling of the root — it authorizes nothing else, is never persisted, and
+    // is never used again. `reported` is then kept verbatim for every scoped
+    // relay git call, and an on-disk directory identity check — never a resolved
+    // path-string comparison (see samePhysicalDir) — proves it names the exact
+    // physical root the user supplied.
+    const reported = nativeExecFileSync("git", ["-c", "safe.directory=*",
+      "rev-parse", "--show-toplevel"], {
+      cwd: asGiven, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 10_000,
+    }).replace(/\r?\n$/, "");
+    if (!samePhysicalDir(root, reported)) {
+      const detail = JSON.stringify({ asGiven, root, reported }).replace(/\s+/g, " ").slice(0, 300);
+      throw new Error(`path is not a Git worktree root (identity check failed: ${detail})`);
+    }
+    trustedGitRoot = fwd(root);
+    trustedGitRootGitForm = reported;
+  } catch (err) {
+    let cause = err?.message ?? String(err);
+    if (err?.stderr != null) {
+      const gitStderr = (Buffer.isBuffer(err.stderr) ? err.stderr.toString("utf8") : String(err.stderr))
+        .replace(/\s+/g, " ").trim();
+      if (gitStderr && !cause.includes(gitStderr)) cause += ` — git stderr: ${gitStderr.slice(-300)}`;
+    }
+    fail(`--trust-git-root must name an accessible exact Git worktree root containing --cd; Git must be available (wildcards are unsupported): ${cause}`);
+  }
+}
+
+function execFileSync(file, args, options) {
+  // Scope trust at the process boundary so the shared Git helpers stay identical.
+  // Never mutate GIT_CONFIG_* or pass this exception to the Grok child process.
+  if (file === "git" && trustedGitRoot !== null) {
+    // cwd reaches this guard in two spellings: every check but one runs with the
+    // --cd spelling the user supplied, while gitIndexFingerprints runs in the
+    // toplevel spelling git itself reported — and those strings can differ for the
+    // same directory (Windows 8.3 temp paths, case-insensitive filesystems). Accept
+    // the root itself by on-disk identity and keep the string test for containment.
+    const callCwd = options?.cwd ?? process.cwd();
+    if (!samePhysicalDir(trustedGitRoot, callCwd) && !insideGitRoot(trustedGitRoot, callCwd)) {
+      throw new Error("Git check is outside the explicitly trusted root");
+    }
+    // safe.directory entries form a list: git matches its own spelling first,
+    // the forward-slashed canonical form is belt-and-braces. Extra entries win
+    // nothing and change nothing.
+    return nativeExecFileSync(file, ["-c", `safe.directory=${trustedGitRootGitForm}`,
+      "-c", `safe.directory=${trustedGitRoot}`, ...args], options);
+  }
+  return nativeExecFileSync(file, args, options);
+}
 
 function makeEventScanner(onObject) {
   let buf = "";
@@ -208,6 +321,7 @@ function parseArgs(argv) {
     laneSource: null,
     brief: null,
     cd: process.cwd(),
+    trustGitRoot: null,
     model: null,
     effort: null,
     maxTurns: null,
@@ -233,6 +347,7 @@ function parseArgs(argv) {
         break;
       case "--brief": opts.brief = next(); break;
       case "--cd": opts.cd = resolve(next()); break;
+      case "--trust-git-root": opts.trustGitRoot = next(); break;
       case "--lane": opts.lane = next(); break;
       case "--model": opts.model = next(); flagged.add("model"); break;
       case "--effort": opts.effort = next(); flagged.add("effort"); break;
@@ -660,17 +775,33 @@ function timestamp() {
 
 function autonomyFlags(autonomy) {
   // Maps the relay's three autonomy modes onto Grok's native --sandbox /
-  // --always-approve / --permission-mode flags. Grok's default permission mode
-  // is `ask`, which hangs a headless pipe — so every path sets autonomy
-  // explicitly. Sandbox profiles (verified valid on grok 0.2.101):
-  //   workspace  — write CWD /tmp ~/.grok/   (workspace-write analog)
-  //   read-only  — review intent ONLY; the sandbox restricts out-of-workspace
-  //                access, not grok's own edit tool, so a headless run can still
-  //                write the tree. Best-effort — verify touchedFiles afterward.
+  // --always-approve flags. Grok's default permission mode is `ask`, which
+  // hangs a headless pipe — so every path sets autonomy explicitly.
+  // Sandbox profiles (verified on grok 1.0.25):
+  //   workspace  — read everywhere; write CWD + /tmp + /var/tmp + ~/.grok/
+  //   read-only  — read everywhere; write ONLY /tmp + /var/tmp + ~/.grok/
   //   off        — unrestricted              (full-access opt-in)
   switch (autonomy) {
     case "read-only":
-      return ["--sandbox", "read-only", "--permission-mode", "plan"];
+      // Enforcement is the sandbox, not the permission mode. This previously
+      // paired the sandbox with `--permission-mode plan`, but plan mode is
+      // designed not to execute tools: headless, grok's first
+      // run_terminal_command came back "User cancelled the execution" and the
+      // session ended with stopReason=cancelled, so a read-only run returned no
+      // work at all. Any command grok cannot statically prove safe — an
+      // `echo "${VAR:-unset}"` is enough — trips it.
+      //
+      // The read-only sandbox is kernel-enforced (Seatbelt on macOS, Landlock
+      // on Linux) and denies grok's own write/search_replace tools AND shell
+      // redirects with EPERM, so --always-approve is safe here and is a
+      // stronger guarantee than advisory plan mode. This also brings grok in
+      // line with codex-delegate, which likewise leans on its sandbox alone.
+      //
+      // Caveat: the profile still permits writes to /tmp, /var/tmp and
+      // ~/.grok/, so a repo under one of those paths is NOT protected by it,
+      // and on macOS the profile does not restrict child-process network.
+      // Keep verifying touchedFiles after a read-only run.
+      return ["--sandbox", "read-only", "--always-approve"];
     case "full-access":
       return ["--always-approve", "--sandbox", "off"];
     case "workspace-write":
@@ -762,6 +893,7 @@ function makeResultWriter(opts, version, run) {
       laneSource: opts.laneSource,
       tool: "grok",
       workdir: opts.cd,
+      trustedGitRoot,
       autonomy: opts.autonomy,
       model: opts.model,
       effort: opts.effort,
@@ -813,9 +945,9 @@ function reportVersionFailure(opts, writeResult, run, error, probeTimeoutMs) {
 }
 
 function dispatchToGrok(opts, run, writeResult) {
-  // grok cannot be prevented from writing headlessly (the read-only sandbox and
-  // plan mode are advisory), so a --read-only run snapshots the tree up front
-  // and flags a violation in the result instead of pretending to enforce.
+  // enforcement is the kernel sandbox, but it is not total (/tmp, /var/tmp and
+  // ~/.grok stay writable), so a --read-only run snapshots the tree up front
+  // and flags a violation in the result instead of relying on the flag alone.
   const relayArtifacts = [run.briefPath, run.eventsPath, run.finalPath, run.resultPath];
   const beforeTree = opts.autonomy === "read-only" ? gitTripwireState(opts.cd, relayArtifacts) : null;
   // Working-tree and index state for paths that are ALREADY dirty. Their porcelain lines will not
@@ -938,6 +1070,23 @@ function dispatchToGrok(opts, run, writeResult) {
     });
   }
 
+  // A grandchild that outlives grok and inherited the pipes keeps stdout/stderr open, so
+  // "close" never fires and the relay waits forever, writing no result. Once grok itself is
+  // gone the pipes hold nothing we still need, so drop them after a short drain grace and let
+  // "close" run. This is the normal-exit twin of the stream teardown the watchdog already
+  // does on the timeout path.
+  child.once("exit", () => {
+    // The implementer already exited. Leaving the watchdog armed lets a drain that
+    // overlaps the remaining budget fire, set watchdogFired, and report timeout.
+    if (!watchdogFired) clearWatchdog();
+    const drain = setTimeout(() => {
+      if (settled) return;
+      child.stdout.destroy();
+      child.stderr.destroy();
+    }, 500);
+    if (typeof drain.unref === "function") drain.unref();
+  });
+
   child.on("error", (err) => {
     if (settled) return;
     settled = true;
@@ -990,6 +1139,7 @@ function dispatchToGrok(opts, run, writeResult) {
 
 function main() {
   const opts = parseArgs(process.argv.slice(2));
+  configureGitTrust(opts);
   const brief = readBrief(opts);
   if (!brief.trim()) fail("empty brief (pass --brief <file> or pipe the brief on stdin)");
 

@@ -16,6 +16,10 @@ metadata:
 
 # Grok Delegate
 
+For a trusted repository rejected by Git's ownership check, the relay supports
+`--trust-git-root <exact-worktree-root>`. This opt-in affects only relay Git checks, without persistent
+Git config or Grok permission changes. See [dispatch and poll](references/dispatch-and-poll.md#git-ownership-errors-on-shared-or-remounted-drives).
+
 You are the **orchestrator**. This skill lets you hand a bounded coding task to a separate
 **implementer** — the Grok Build CLI (`grok`) — then review what it produced and land it yourself. You
 write the brief and own the judgment; Grok does the typing under an explicit autonomy profile; you
@@ -124,17 +128,19 @@ relay therefore always sets autonomy explicitly:
 | Relay flag | What Grok gets | Use when |
 | --- | --- | --- |
 | *(default)* | `--always-approve --sandbox workspace` | Normal implementation — writes scoped to the working tree |
-| `--read-only` | `--sandbox read-only --permission-mode plan` | Review / diagnosis — **best-effort, not enforced** (see caveat below) |
+| `--read-only` | `--sandbox read-only --always-approve` | Review / diagnosis — kernel-enforced sandbox, not total (see caveat below) |
 | `--full-access` | `--always-approve --sandbox off` | Explicit opt-in when the task needs unrestricted tools |
 
 `--always-approve` alone would approve *all* tools (writes, shell, network) — closer to unrestricted
 than to a workspace-scoped write. Pairing it with `--sandbox workspace` is what keeps the default
 safe. Reach for `--full-access` only when the human asks for it.
 
-**`--read-only` is best-effort, not a hard guarantee.** The read-only sandbox restricts out-of-workspace
-filesystem/network access, not grok's own edit tool, and headless `plan` mode is advisory — a run
-verified here still wrote the working tree when told to. Use `--read-only` to *signal* review intent,
-but always confirm `touchedFiles` afterward; treat the diff, not the flag, as the guarantee. The relay
+**`--read-only` is kernel-enforced, not total.** On grok 1.0.25 the read-only sandbox (Seatbelt on
+macOS, Landlock on Linux) denies grok's own write/search_replace tools and shell redirects with
+EPERM, so `--always-approve` only auto-approves tools *inside* the sandbox. The profile is not
+total, though: it still permits writes to `/tmp`, `/var/tmp` and `~/.grok/`, so a repo under one of
+those paths is not protected, and on macOS it does not restrict child-process network. Always
+confirm `touchedFiles` afterward; treat the diff, not the flag, as the guarantee. The relay
 automates a reporting tripwire: it compares parsed git porcelain and fingerprints the working-tree
 identity and index entries of Git-visible paths that were already dirty. `readOnlyViolation` is `true`
 when either signal proves a change, `false` when coverage is complete and detects none, and `null` when
