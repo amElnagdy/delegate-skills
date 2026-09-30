@@ -94,6 +94,60 @@ Two limits stated plainly, because ZCode cannot enforce them:
   genuinely enforced. An explicit allowlisted tool surface is therefore impossible here — do not
   assume one.
 
+## Choosing a provider and model
+
+ZCode has no `--model` flag. It reads the model from its own config file, whose path it derives from
+the process home directory. So `--model` on this relay generates a config that pins one provider and
+model, writes it into a home directory belonging to the run, and points the ZCode child at that home.
+
+**To offer the user a choice, list what they have first.** `delegate-setup`'s discovery reports
+ZCode's catalogue — every `provider/model` id, plus each provider's `kind` and `baseURL`, which is
+exactly what the three flags below need:
+
+```bash
+node "<delegate-setup-dir>/scripts/discover.mjs"   # zcode entry: models.values + models.providers
+```
+
+That listing comes from ZCode's own config file, because ZCode has no `models` subcommand. Note what
+that costs: the file also holds API keys, so `delegate-setup` loads them into its process, and only
+the routing and the ids leave its parser. **This relay never opens that file** — the three flags
+below are why. Present the list, take the user's pick, then dispatch with it.
+
+Pass all three flags together — the generated provider block needs the endpoint and the kind as much
+as the id, and the relay cannot discover them:
+
+```bash
+node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo \
+  --model openrouter/z-ai/glm-5.2:free \
+  --model-base-url https://openrouter.ai/api/v1 \
+  --model-kind openai-compatible
+```
+
+Only the first `/` separates provider from model, so an id that itself contains slashes or a `:`
+suffix passes through whole. `--model-kind` is `anthropic`, `openai`, or `openai-compatible`.
+
+**The key must be in the environment.** The relay writes no `apiKey` into the generated config — it
+reads and writes no credentials at all. ZCode resolves the key itself from `<PROVIDER>_API_KEY`
+(the provider name upper-cased, every non-alphanumeric run folded to `_`) or `ZCODE_API_KEY`, plus
+`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` for those two kinds. The relay checks that one of them is
+*present* before dispatching and exits 2 naming them if none is; it never reads their values. Note
+that a kind of `anthropic` puts `ANTHROPIC_API_KEY` in that chain, so a key exported for something
+else would be sent to the base URL you named — prefer the `<PROVIDER>_API_KEY` form.
+
+Two limits:
+
+- **`--model` cannot be combined with `--session` or `--resume-last`.** ZCode keeps its session store
+  under the same home as the config, so a per-run home takes the sessions with it. The relay refuses
+  the combination rather than start a fresh session under a resume flag.
+- **This rides behaviour ZCode does not document** — a config path derived from the home directory,
+  and an environment fallback for the key. Both were verified against zcode 0.16.5; a ZCode update
+  could change either. Without these flags the relay does not touch the home directory at all, and
+  ZCode uses whatever the user's own config selects.
+
+Where the model is a **fleet lane** concern rather than a per-run one, note that `model` is still not
+a lane dial for `zcode` — see
+[delegate-setup's schema](../delegate-setup/references/schema.md).
+
 ## The loop
 
 Run these five steps per task. Steps 1, 4, and 5 are your judgment; 2 and 3 are mechanical.
@@ -116,6 +170,7 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 # continue a specific session:              add --session <sess_...>  (from result.json; send only the delta brief)
 # continue the latest session for --cd:     add --resume-last
 # withhold tools (denylist):                add --disallowed-tools "Write,Edit,Bash"
+# pin a provider and model for this run:    add --model <provider/model> --model-base-url <url> --model-kind <kind>
 # point at the CLI explicitly:              add --zcode-path /path/to/zcode.cjs
 # hard time limit (watchdog):               add --timeout 2h  (default: off)
 # see all options:                          node .../relay.mjs --help
