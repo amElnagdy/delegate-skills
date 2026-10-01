@@ -285,7 +285,7 @@ function validateModelOrProvider(implementer, field, value, laneName, label) {
   } else if (implementer === "opencode") {
     // opencode 2.x carries the variant inside the model value as provider/model#variant.
     pattern = MODEL_TOKEN.opencode;
-    hint = "letters, digits, . _ : / # -";
+    hint = "letters, digits, . _ : @ ~ / # -";
   } else if (
     implementer === "grok" ||
     implementer === "pi" ||

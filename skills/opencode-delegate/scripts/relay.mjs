@@ -81,11 +81,13 @@ const MAX_BUFFERED_CHARS = 1_048_576;
 const VERSION_PROBE_TIMEOUT_MS = 10_000;
 const MAX_TIMER_MS = 2_147_483_647;
 // model/variant reach cmd.exe on win32 (shell:true for the opencode.cmd shim). The
-// model token may carry a variant suffix (provider/model#variant on opencode 2.x);
-// '#' is not a cmd.exe metacharacter. Keep SAFE_TOKEN in lockstep with delegate-setup
-// MODEL_TOKEN.shellSafe, and MODEL_TOKEN with MODEL_TOKEN.opencode.
+// model token may carry a variant suffix (provider/model#variant on opencode 2.x), and
+// catalog ids carry '@' (Workers AI @cf/..., Vertex model@default, region@eu) and '~'
+// (OpenRouter/Kilo ~vendor/model-latest aliases). None of '#', '@' or '~' is a cmd.exe
+// metacharacter, and no shell runs off win32. Keep SAFE_TOKEN in lockstep with
+// delegate-setup MODEL_TOKEN.shellSafe, and MODEL_TOKEN with MODEL_TOKEN.opencode.
 const SAFE_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
-const MODEL_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:/#-]*$/;
+const MODEL_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:@~/#-]*$/;
 
 const IMPLEMENTER_KEY = "opencode";
 
@@ -243,7 +245,7 @@ function parseArgs(argv) {
   }
   applyFleetLane(opts, flagged);
   if (opts.model !== null && !MODEL_TOKEN.test(opts.model)) {
-    fail("--model contains unsupported characters (allowed: letters, digits, . _ : / # -)");
+    fail("--model contains unsupported characters (allowed: letters, digits, . _ : @ ~ / # -)");
   }
   if (opts.variant !== null && !SAFE_TOKEN.test(opts.variant)) {
     fail("--variant contains unsupported characters (allowed: letters, digits, . _ : / -)");
