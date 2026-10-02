@@ -106,16 +106,13 @@ export async function runAgy(h) {
     });
     const value = existsSync(join(workDir, "result.json")) ? h.result(workDir) : {};
     const args = readArgs(argsFile);
-    // read-only is the sandbox plus auto-approve inside it, NOT `--mode plan`:
-    // plan mode auto-denies the first tool needing a permission prompt, which
-    // headless --print cannot answer, so the run returned nothing at all.
-    // Assert both flags reach agy and that plan mode is gone.
-    h.check(`agy read-only ${name}: effort and sandboxed auto-approve reach agy and result metadata`,
-      result.status === 0 &&
+    // Windows plan mode avoids the unsupported sandbox/bypass combination.
+    // Fingerprints must fail the run if any implementation still persists a write.
+    h.check(`agy read-only ${name}: effort and platform permission flags reach agy and result metadata`,
+      result.status === (changed ? 1 : 0) &&
       h.pair(args, "--effort", "high") &&
-      args.includes("--sandbox") &&
-      args.includes("--dangerously-skip-permissions") &&
-      !args.includes("--mode") &&
+      (h.WIN ? h.pair(args, "--mode", "plan") && !args.includes("--dangerously-skip-permissions")
+        : args.includes("--sandbox") && args.includes("--dangerously-skip-permissions") && !args.includes("--mode")) &&
       value.effort === "high" &&
       value.readOnly === true);
     h.check(`agy read-only ${name}: relay artifacts are excluded from the verdict (got ${String(value.readOnlyViolation)})`,

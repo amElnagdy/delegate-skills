@@ -49,11 +49,13 @@ class FakeCli {
       Console.Error.WriteLine("jetski: no output produced — a tool required the \"write_file\" permission that headless\nmode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow\nin settings.json (e.g. write_file(<target>)). Alternatively, re-run with\n--dangerously-skip-permissions to auto-approve all tools.");
       return 0;
     }
-    if (mode == "agy-analysis") {
+    if (mode == "agy-analysis" || mode == "agy-wrong-project") {
       var argsFile = Environment.GetEnvironmentVariable("SMOKE_ARGS_FILE");
       if (!String.IsNullOrEmpty(argsFile)) File.WriteAllLines(argsFile, args);
       var logAt = Array.IndexOf(args, "--log-file");
-      if (logAt >= 0) File.WriteAllText(args[logAt + 1], "fake agy log\n");
+      var projectAt = Array.IndexOf(args, "--project");
+      var project = mode == "agy-wrong-project" ? "default-cli-project" : projectAt >= 0 ? args[projectAt + 1] : "default-cli-project";
+      if (logAt >= 0) File.WriteAllText(args[logAt + 1], "Conversation using project ID: " + project + "\n");
       Console.WriteLine("fake agy analysis completed");
       return 0;
     }

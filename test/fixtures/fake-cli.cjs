@@ -158,10 +158,12 @@ if (process.env.SMOKE_MODE === "agy-permission-denied") {
   console.error('jetski: no output produced — a tool required the "write_file" permission that headless\nmode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow\nin settings.json (e.g. write_file(<target>)). Alternatively, re-run with\n--dangerously-skip-permissions to auto-approve all tools.');
   process.exit(0);
 }
-if (process.env.SMOKE_MODE === "agy-analysis") {
+if (process.env.SMOKE_MODE === "agy-analysis" || process.env.SMOKE_MODE === "agy-wrong-project") {
   if (process.env.SMOKE_ARGS_FILE) fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify(args));
   const logAt = args.indexOf("--log-file");
-  if (logAt !== -1) fs.writeFileSync(args[logAt + 1], "fake agy log\n");
+  const projectAt = args.indexOf("--project");
+  const project = process.env.SMOKE_MODE === "agy-wrong-project" ? "default-cli-project" : projectAt >= 0 ? args[projectAt + 1] : "default-cli-project";
+  if (logAt !== -1) fs.writeFileSync(args[logAt + 1], `Conversation using project ID: ${project}\n`);
   console.log("fake agy analysis completed");
   process.exit(0);
 }

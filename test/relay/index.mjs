@@ -3,6 +3,7 @@ import { runSyntax } from "./syntax.mjs";
 import { runCodex } from "./codex.mjs";
 import { runCline } from "./cline.mjs";
 import { runAgy } from "./agy.mjs";
+import { runAgyProjectGrants } from "./agy-project-grants.mjs";
 import { runCursor } from "./cursor.mjs";
 import { runVibe } from "./vibe.mjs";
 import { runOpencode } from "./opencode.mjs";
@@ -30,6 +31,7 @@ export const runners = [
   ["codex", runCodex],
   ["cline", runCline],
   ["agy", runAgy],
+  ["agy-project-grants", runAgyProjectGrants],
   ["cursor", runCursor],
   ["vibe", runVibe],
   ["opencode", runOpencode],
