@@ -46,6 +46,7 @@
  *   --resume-last           Continue the most recent OpenCode session; send only the delta brief.
  *   --session <id>          Continue a specific session id (ses_...); send only the delta brief.
  *   --pure                  Run OpenCode without external plugins (cleaner event stream).
+ *                           1.x only; rejected on 2.x, which dropped the flag.
  *   --timeout <dur>         Relay-side watchdog (default: off). Durations use h/m/s
  *                           strings like 30m or 2h. On expiry the opencode child is
  *                           killed and result.json gets status "timeout".
@@ -726,6 +727,10 @@ function main() {
   // value — on 2.x there is no --variant flag to fall back to.
   if (opts.variant && !opts.model && opencodeJoinsVariant(probe.version)) {
     fail("--variant needs --model on opencode 2.x: the variant joins the model value as provider/model#variant");
+  }
+  // 2.x dropped --pure from `opencode run` (same version gate as the variant dial).
+  if (opts.pure && opencodeJoinsVariant(probe.version)) {
+    fail("--pure is not supported on opencode 2.x: `opencode run` dropped the flag and has no replacement; drop --pure");
   }
 
   dispatchToOpenCode(opts, brief, run, writeResult, probe.version);

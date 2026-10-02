@@ -39,7 +39,7 @@ Options:
 | `--no-auto` | The relay passes `opencode`'s `--auto` (auto-approve permissions) **by default** so a headless run doesn't hang on a prompt; `--no-auto` drops it and honors the agent's own permission config instead. A `--read-only`/`plan` run never gets `--auto`, so it can't be auto-approved into edits. |
 | `--resume-last` | Continue the most recent OpenCode session; send only the delta brief (see review-and-land). |
 | `--session <id>` | Continue a specific session id (`ses_…`); send only the delta brief. |
-| `--pure` | Run OpenCode without external plugins (cleaner event stream). |
+| `--pure` | Run OpenCode without external plugins (cleaner event stream). Version-gated: 1.x only — opencode 2.x dropped the flag from `run` with no replacement, so the relay rejects `--pure` there (usage error) after probing the version. |
 | `--timeout <dur>` | Relay-side watchdog (e.g. `30m`, `2h`); on expiry the child is killed and `result.json` gets `status: "timeout"`. Off by default. |
 | `--out-dir <dir>` | Where artifacts go (default: a fresh dir under the system temp dir). |
 
