@@ -15,7 +15,7 @@
  * Node built-ins only. Probed CLIs may contact their own services.
  */
 
-import { execFileSync, spawnSync } from "node:child_process";
+import { execSync, execFileSync, spawnSync } from "node:child_process";
 import { accessSync, constants as fsConstants, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, isAbsolute, join, resolve, sep } from "node:path";
@@ -165,13 +165,15 @@ function quoteForCmd(value) {
 }
 
 function runProbe(launch, args, useShell) {
-  const command = useShell ? quoteForCmd(launch.command) : launch.command;
-  return execFileSync(command, [...launch.prefixArgs, ...args], {
+  const probeArgs = [...launch.prefixArgs, ...args];
+  const command = useShell ? [quoteForCmd(launch.command), ...probeArgs].join(" ") : launch.command;
+  const options = {
     encoding: "utf8",
     timeout: PROBE_TIMEOUT_MS,
     stdio: ["pipe", "pipe", "pipe"],
     shell: useShell,
-  });
+  };
+  return useShell ? execSync(command, options) : execFileSync(command, probeArgs, options);
 }
 
 /** Probe output is colorized (opencode); patterns match the plain text. */
@@ -182,13 +184,17 @@ function stripAnsi(text) {
 /** spawnSync, not runProbe: success-path stderr matters (codex prints login status there). */
 function captureProbe(launch, args, useShell) {
   try {
-    const command = useShell ? quoteForCmd(launch.command) : launch.command;
-    const result = spawnSync(command, [...launch.prefixArgs, ...args], {
+    const probeArgs = [...launch.prefixArgs, ...args];
+    const command = useShell ? [quoteForCmd(launch.command), ...probeArgs].join(" ") : launch.command;
+    const options = {
       encoding: "utf8",
       timeout: PROBE_TIMEOUT_MS,
       stdio: ["pipe", "pipe", "pipe"],
       shell: useShell,
-    });
+    };
+    const result = useShell
+      ? spawnSync(command, options)
+      : spawnSync(command, probeArgs, options);
     const stdout = result.stdout || "";
     return {
       ok: !result.error && result.status === 0,
