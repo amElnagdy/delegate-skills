@@ -41,17 +41,20 @@ Four invariants hold for every skill here, and they are the bar for a new one:
 ## Utility skills (exception)
 
 `delegate-setup` is a **utility** skill: it configures fleet **lanes** (discover → propose → approve →
-write). It is not an implementer skill.
+write). `codex-background` is a support utility that keeps Codex MCP requests pending around
+explicitly registered existing relays. Neither is an implementer skill.
 
 Utility checklist (instead of the four-references + `relay.mjs` bar above):
 
-- [ ] `skills/<name>/SKILL.md` with a `description` that triggers on setup/configure — **not** on
-      ordinary delegation.
+- [ ] `skills/<name>/SKILL.md` with a `description` that triggers on its specific support function, not selection of an implementer.
 - [ ] Scripts under `scripts/` stay Node built-ins only (same trust line as relays).
-- [ ] No `relay.mjs`; the skill must not dispatch coding work to an implementer.
+- [ ] No `relay.mjs`; setup does not dispatch, and background support only wraps registered existing relays.
 - [ ] Registered in `skills.sh.json` (Setup grouping is fine).
 - [ ] Listed in the smoke suite's **utility** carve-out (not the `*-delegate` timeout/abort matrix).
-- [ ] A short README mention and vocabulary in `AGENTS.md` (`lane`, `fleet`, setup skill).
+- [ ] A short README mention and utility scope in `AGENTS.md`.
+- [ ] Runtime support has lifecycle and unchanged-relay integration fixtures registered in CI.
+      Run `node --test --test-concurrency=1 skills/codex-background/scripts/server.test.mjs` and
+      `node --test test/codex-background-relays.mjs`.
 
 Do not invent a second utility that duplicates lane setup. Extend `delegate-setup` instead.
 

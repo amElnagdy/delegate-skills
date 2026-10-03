@@ -60,6 +60,12 @@ report contract. Tell Qoder not to commit. Keep one task per brief. See
 
 ### 2. Dispatch
 
+For a **Codex orchestrator** with the separately installed **codex-background** support skill
+configured, invoke its registered `delegate_run` MCP tool once in place of the shell example below.
+Follow that skill for structured common arguments, unchanged provider flags and reattachment by
+runId. Keep the request pending until completion, then continue this skill's review and landing
+steps. Other orchestrators keep the shell workflow below.
+
 Use the bundled relay. It wraps Qoder's non-interactive `stream-json` mode and writes `result.json`.
 `<skill-dir>` is the installed folder containing this `SKILL.md`.
 
@@ -77,6 +83,9 @@ unless the caller explicitly requests it, and it never commits. See
 [references/dispatch-and-poll.md](references/dispatch-and-poll.md).
 
 ### 3. Wait for completion
+
+Codex using codex-background keeps the original MCP request pending: no model-driven sleep,
+status or log polling. Use `delegate_wait` only to reattach after an interrupted request.
 
 The relay blocks until Qoder exits. Run it with the orchestrator's background-command facility, or
 background it in the shell and wait for `result.json`. Completion means the process exited and the

@@ -57,6 +57,12 @@ instructions reach it without inlining. See
 
 ### 2. Dispatch
 
+For a **Codex orchestrator** with the separately installed **codex-background** support skill
+configured, invoke its registered `delegate_run` MCP tool once in place of the shell example below.
+Follow that skill for structured common arguments, unchanged provider flags and reattachment by
+runId. Keep the request pending until completion, then continue this skill's review and landing
+steps. Other orchestrators keep the shell workflow below.
+
 Use the bundled relay. It pipes the brief to `pi --mode json` on stdin, captures the JSON event
 stream, and writes `result.json`. (`<skill-dir>` is the installed folder containing this
 `SKILL.md`.)
@@ -77,6 +83,9 @@ The child process's cwd pins the workspace. The relay writes artifacts under the
 by default and never commits. See [references/dispatch-and-poll.md](references/dispatch-and-poll.md).
 
 ### 3. Wait for completion
+
+Codex using codex-background keeps the original MCP request pending: no model-driven sleep,
+status or log polling. Use `delegate_wait` only to reattach after an interrupted request.
 
 The relay blocks until pi finishes. Run it with the orchestrator's background-command facility,
 or background it in the shell and poll for `result.json`. A pre-run usage error exits 2 and writes

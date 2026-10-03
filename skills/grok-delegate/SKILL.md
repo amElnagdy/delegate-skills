@@ -61,6 +61,12 @@ brief. Full guidance and a template: [references/writing-the-brief.md](reference
 
 ### 2. Dispatch
 
+For a **Codex orchestrator** with the separately installed **codex-background** support skill
+configured, invoke its registered `delegate_run` MCP tool once in place of the shell example below.
+Follow that skill for structured common arguments, unchanged provider flags and reattachment by
+runId. Keep the request pending until completion, then continue this skill's review and landing
+steps. Other orchestrators keep the shell workflow below.
+
 Send the brief to Grok with the bundled helper. It wraps `grok -p`, captures the run, and writes a
 structured `result.json` — so your only job is "run a command, read a file." (`<skill-dir>` below is
 this skill's installed directory — the folder containing this `SKILL.md`, i.e. the directory you loaded
@@ -82,6 +88,9 @@ It **never commits** — see step 5. Mechanics, flags, and the `result.json` sha
 [references/dispatch-and-poll.md](references/dispatch-and-poll.md).
 
 ### 3. Wait for completion
+
+Codex using codex-background keeps the original MCP request pending: no model-driven sleep,
+status or log polling. Use `delegate_wait` only to reattach after an interrupted request.
 
 The helper blocks until Grok finishes, so back it with whatever your orchestrator offers and resume
 when it returns:

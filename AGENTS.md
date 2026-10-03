@@ -9,8 +9,8 @@ and land the result. Seventeen implementer skills ship today: `claude-delegate` 
 `pi-delegate` (Pi CLI), `omp-delegate` (Oh My Pi), `aider-delegate` (Aider), `copilot-delegate` (GitHub Copilot CLI),
 `warp-delegate` (Warp Agent CLI), `zcode-delegate` (Z.AI ZCode), and `commandcode-delegate` (Command Code); siblings like
 `gemini-delegate` can be added
-later without renaming the repo. One **utility** skill
-ships alongside them: `delegate-setup` (configure fleet lanes — setup only, never dispatches).
+later without renaming the repo. Two **utility** skills ship alongside them: `delegate-setup` (configure fleet lanes — setup only,
+never dispatches) and `codex-background` (Codex waiting boundary around registered existing relays).
 
 ## Vocabulary
 
@@ -62,9 +62,10 @@ CLI flag, field, and command in the docs must match the installed implementer CL
 - **One skill per directory** under `skills/<name>/`, each with a `SKILL.md` plus optional
   `references/` and `scripts/`. Implementer skills are named `<cli>-delegate` (the verb is the repo;
   the target agent is the skill name), mirroring `guard-skills` → `clean-code-guard`.
-- **Utility skills** (today: `delegate-setup`) are the exception to the implementer shape: they are
+- **Utility skills** (`delegate-setup` and `codex-background`) are the exception to the implementer shape: they are
   not `<cli>-delegate`, they do not ship `scripts/relay.mjs` or the four brief/dispatch/review/queue
-  references, and they never dispatch coding work. They still use Node built-ins only, no network of
+  references. `delegate-setup` never dispatches coding work; `codex-background` hosts existing
+  registered relays without replacing implementer behavior. They still use Node built-ins only, no network of
   their own, no credentials, no telemetry. Document any new utility in `CONTRIBUTING.md` and register
   it in `skills.sh.json` and the smoke suite's utility carve-out.
 - **`SKILL.md` frontmatter:** `name` (must equal the directory), `description`, and optionally

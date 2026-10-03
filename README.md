@@ -116,6 +116,16 @@ Each skill name links to its `SKILL.md`, which owns that implementer's prerequis
 caveats. Building one for another CLI? [Claim it first](../../issues?q=is%3Aissue+label%3Aimplementer),
 then see [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## Optional Codex waiting support
+
+Install [codex-background](skills/codex-background/SKILL.md) alongside the selected delegate skills
+when Codex is the orchestrator. Configure an explicit installed-relay registry and a host MCP tool
+timeout greater than the relay timeout. One pending MCP request captures logs locally and returns
+a single completion; the selected skill still owns permissions, results, review and landing.
+Claude's background Bash workflow stays unchanged. See
+[configuration and recovery](skills/codex-background/references/configuration.md). Local protocol
+fixtures cover the waiting boundary; they do not measure Codex Desktop token usage.
+
 ## Install
 
 Browse first:
@@ -212,6 +222,8 @@ This package is intentionally inspectable:
 - Those scripts make no network calls of their own, read or write no credentials, send no telemetry, and
   have no dependencies (Node built-ins only). Relays launch an implementer CLI and `git`, plus the
   platform process launcher/termination utility where a Windows shim or process-tree kill requires one.
+  The optional `codex-background` utility adds a local stdio MCP server around explicitly registered
+  existing relays, with the same Node-built-ins-only trust line and no network calls of its own.
   Discover may invoke installed CLIs for `--version` / model list probes (those CLIs may contact their
   own services). Read the script before you run it.
 - None of the relays ever commit — committing is always the orchestrator's job, after review.
@@ -383,7 +395,7 @@ designed-for but unproven.
 
 ## Repository shape
 
-Implementer skills share one shape; the setup utility has a different one:
+Implementer skills share one shape; the utilities have different ones:
 
 ```text
 skills/
@@ -395,6 +407,12 @@ skills/
 │       ├── dispatch-and-poll.md
 │       ├── review-and-land.md
 │       └── multi-task-queues.md
+├── codex-background/
+│   ├── SKILL.md
+│   ├── scripts/
+│   │   ├── server.mjs
+│   │   └── server.test.mjs
+│   └── references/configuration.md
 └── delegate-setup/
     ├── SKILL.md
     ├── scripts/
