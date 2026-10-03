@@ -34,14 +34,27 @@ static int signal_owned_children(int signal_number) {
   while (fscanf(file, "%ld", &pid) == 1) if (kill((pid_t)pid, signal_number) != 0 && errno != ESRCH) { fclose(file); return -1; }
   return fclose(file);
 }
+static int record_ownership(const char *directory, const char *name) {
+  char path[PATH_MAX], temporary[PATH_MAX];
+  if (snprintf(path, sizeof path, "%s/%s.json", directory, name) >= (int)sizeof path || snprintf(temporary, sizeof temporary, "%s.tmp", path) >= (int)sizeof temporary) return -1;
+  FILE *file = fopen(temporary, "w"); if (!file) return -1;
+  if (fputs("{}", file) == EOF) { fclose(file); return -1; }
+  if (fclose(file) != 0) return -1;
+  return rename(temporary, path);
+}
 int main(int argc, char **argv) {
-  if (argc < 4) return 2;
+  if (argc < 5) return 2;
   if (prctl(PR_SET_CHILD_SUBREAPER, 1) != 0) { perror("subreaper initialization"); return 1; }
   struct sigaction action = {0}; action.sa_handler = stop; sigemptyset(&action.sa_mask);
   if (sigaction(SIGTERM, &action, NULL) != 0 || sigaction(SIGINT, &action, NULL) != 0) { perror("signal initialization"); return 1; }
   if (signal_owned_children(0) != 0) { perror("procfs ownership initialization"); return 1; }
-  pid_t root = fork(); if (root < 0) { perror("fork"); return 1; }
-  if (root == 0) { signal(SIGTERM, SIG_DFL); signal(SIGINT, SIG_DFL); execv(argv[2], &argv[2]); perror("relay exec"); _exit(127); }
+  // Parent death must stop owned descendants even when the Node anchor cannot run cleanup.
+  if (prctl(PR_SET_PDEATHSIG, SIGTERM) != 0) { perror("parent death initialization"); return 1; }
+  if (getppid() != (pid_t)strtol(argv[2], NULL, 10)) return 1;
+  if (record_ownership(argv[1], "owner-ready") != 0) { perror("ownership ready record"); return 1; }
+  if (stopping || getppid() != (pid_t)strtol(argv[2], NULL, 10)) { record_ownership(argv[1], "owner-closed"); return 1; }
+  pid_t root = fork(); if (root < 0) { perror("fork"); record_ownership(argv[1], "owner-closed"); return 1; }
+  if (root == 0) { signal(SIGTERM, SIG_DFL); signal(SIGINT, SIG_DFL); execv(argv[3], &argv[3]); perror("relay exec"); _exit(127); }
   long stop_at = 0; int root_seen = 0, failed = 0;
   for (;;) {
     if (stopping) {
@@ -54,7 +67,10 @@ int main(int argc, char **argv) {
     while ((child = waitpid(-1, &status, WNOHANG)) > 0) {
       if (child == root) { root_seen = 1; if (record_exit(argv[1], status) != 0) { perror("relay exit record"); failed = 1; stopping = 1; } }
     }
-    if (child < 0 && errno == ECHILD) return root_seen && !failed ? 0 : 1;
+    if (child < 0 && errno == ECHILD) {
+      if (record_ownership(argv[1], "owner-closed") != 0) { perror("ownership close record"); return 1; }
+      return root_seen && !failed ? 0 : 1;
+    }
     if (child < 0 && errno != EINTR) { perror("waitpid"); stopping = 1; failed = 1; }
     struct timespec pause = {0, 10000000}; nanosleep(&pause, NULL);
   }

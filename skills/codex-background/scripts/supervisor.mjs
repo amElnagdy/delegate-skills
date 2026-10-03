@@ -8,6 +8,7 @@ const spec = JSON.parse(readFileSync(process.argv[2], 'utf8'));
 const exitPath = join(spec.runDirectory, 'relay-exit.json');
 const outcomePath = join(spec.runDirectory, 'owner-outcome.json');
 function record(path, value) { writeFileSync(path + '.tmp', JSON.stringify(value), { mode: 0o600 }); renameSync(path + '.tmp', path); }
+record(join(spec.runDirectory, 'supervisor.json'), { pid: process.pid });
 if (process.platform === 'win32') {
   const systemRoot = process.env.SystemRoot || process.env.WINDIR;
   if (!systemRoot) throw Error('Windows system directory unavailable');
@@ -27,7 +28,7 @@ if (process.platform === 'win32') {
     record(outcomePath, { error: 'Linux ownership helper requires /usr/bin/cc: ' + (compiled.error?.message || compiled.stderr) });
     process.exitCode = 1;
   } else {
-    owner = spawn(executable, [spec.runDirectory, spec.node, spec.relayPath, ...spec.argv], { cwd: spec.workspace, stdio: 'inherit' });
+    owner = spawn(executable, [spec.runDirectory, String(process.pid), spec.node, spec.relayPath, ...spec.argv], { cwd: spec.workspace, stdio: 'inherit' });
     if (stopping) owner.kill('SIGTERM');
     owner.once('error', error => { record(outcomePath, { error: error.message }); process.exitCode = 1; });
     owner.once('exit', (code, signal) => {

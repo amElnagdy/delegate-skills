@@ -137,6 +137,7 @@ export function startServer({ registryFile = process.env.CODEX_BACKGROUND_REGIST
   }
 
   async function terminate(job) {
+    if (job.anchorExited) return job.cleanup; // Native parent-death cleanup owns the tree now; never signal an old PID.
     if (job.exited || job.ownerExited || job.child.exitCode !== null) return;
     if (process.platform === 'win32') {
       await new Promise((resolveStop, rejectStop) => {
@@ -151,11 +152,12 @@ export function startServer({ registryFile = process.env.CODEX_BACKGROUND_REGIST
       try { process.kill(-job.child.pid, 'SIGTERM'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
       // Sweep the owned process group even if its parent exits before a stubborn descendant.
       await new Promise(resolveGrace => setTimeout(resolveGrace, 3500));
-      if (job.ownerExited) return; // The ownership anchor finished; never signal a recycled group ID.
+      if (job.anchorExited) { await job.cleanup; return; } // Never signal a recycled group ID.
       try { process.kill(-job.child.pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
     }
   }
   function stop(job, reason) {
+    if (job.anchorExited) return job.cleanup;
     if (job.exited || job.ownerExited) return job.termination ?? Promise.resolve();
     if (!job.termination) {
       job.stopReason = reason;
@@ -181,13 +183,24 @@ export function startServer({ registryFile = process.env.CODEX_BACKGROUND_REGIST
     const ownerSpec = join(spec.runDirectory, 'owner-spec.json');
     persist(ownerSpec, { node: process.execPath, relayPath: spec.relayPath, argv: spec.argv, workspace: spec.workspace, runDirectory: spec.runDirectory });
     const child = spawn(process.execPath, [fileURLToPath(new URL('./supervisor.mjs', import.meta.url)), ownerSpec], { cwd: spec.workspace, windowsHide: true, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
-    const job = { child, errors: [], stopReason: null, termination: null, ownerExited: false, exited: false };
+    const job = { child, errors: [], stopReason: null, termination: null, ownerExited: false, anchorExited: false, cleanup: Promise.resolve(), exited: false };
     jobs.set(spec.runId, job);
     const guard = setTimeout(() => { stop(job, 'adapter_timeout').catch(() => {}); }, spec.timeoutMs + GRACE_MS);
     child.once('error', error => { job.errors.push(error.message); });
     child.once('exit', () => {
-      job.ownerExited = true;
+      job.anchorExited = true;
       clearTimeout(guard);
+      job.cleanup = (async () => {
+        if (process.platform === 'linux' && existsSync(join(spec.runDirectory, 'owner-ready.json'))) {
+          const deadline = Date.now() + 5000;
+          while (!existsSync(join(spec.runDirectory, 'owner-closed.json'))) {
+            if (Date.now() >= deadline) throw Error('Linux ownership cleanup was not confirmed after supervisor exit');
+            await new Promise(resolveCleanup => setTimeout(resolveCleanup, 20));
+          }
+        }
+        job.ownerExited = true;
+      })();
+      job.cleanup.catch(error => { job.errors.push(error.message); });
       const drain = setTimeout(() => { if (!job.exited) { child.stdout.destroy(); child.stderr.destroy(); stdout.end(); stderr.end(); } }, 1000);
       drain.unref();
     });
@@ -198,6 +211,7 @@ export function startServer({ registryFile = process.env.CODEX_BACKGROUND_REGIST
     job.done = new Promise(resolveDone => child.once('close', async (exitCode, signal) => {
       clearTimeout(guard);
       if (job.termination) await job.termination.catch(() => {});
+      await job.cleanup.catch(() => {});
       job.exited = true;
       stdout.end(); stderr.end();
       for (const error of await Promise.all([stdoutDone, stderrDone])) if (error) job.errors.push(error.message);

@@ -288,3 +288,23 @@ test('abort racing ownership startup stays terminal and cannot leave a live impl
     assert.deepEqual(outcome(await c.tool('delegate_wait', { runId: 'startup' }).promise), value);
   } finally { await clean(s, c); }
 });
+
+test('unexpected supervisor exit cleans detached descendants after relay exit', { timeout: 20000 }, async () => {
+  const s = setup(), c = client(s);
+  const unrelated = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { windowsHide: true, stdio: 'ignore' });
+  try {
+    const call = c.run('lost-anchor', { mode: 'orphan' });
+    await until(() => existsSync(join(s.state, 'lost-anchor', 'relay-exit.json')));
+    const pid = Number(readFileSync(join(s.artifacts, 'lost-anchor', 'child.pid')));
+    assert.equal(alive(pid), true);
+    const anchor = JSON.parse(readFileSync(join(s.state, 'lost-anchor', 'supervisor.json'))).pid;
+    process.kill(anchor, 'SIGKILL');
+    const value = outcome(await call.promise);
+    assert.equal(value.adapterStatus, 'failed');
+    if (process.platform === 'linux') assert.equal(alive(pid), false, 'completion waits for native ownership closure');
+    await until(() => !alive(pid));
+    assert.equal(alive(unrelated.pid), true);
+    assert.equal(value.resultText, 'parent finished, owned descendant still alive');
+    assert.deepEqual(outcome(await c.tool('delegate_abort', { runId: 'lost-anchor' }).promise), value);
+  } finally { unrelated.kill(); await clean(s, c); }
+});
