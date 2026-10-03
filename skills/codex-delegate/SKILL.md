@@ -52,10 +52,17 @@ the project's **actual** gate commands (discover them from the repo's CLAUDE.md/
 do not assume), and a report contract. Tell Codex it will **not** commit (you will). Keep one task per
 brief. Full guidance and a template: [references/writing-the-brief.md](references/writing-the-brief.md).
 
+This skill selects Codex as the **implementer**. Codex as the **orchestrator** is a separate role:
+background waiting requires codex-background and its configured MCP server. Installing
+codex-delegate does not automatically install or configure that support utility. See the
+[codex-background setup guide](../codex-background/references/configuration.md).
+
 ### 2. Dispatch
 
-For a **Codex orchestrator** with the separately installed **codex-background** support skill
-configured, invoke its registered `delegate_run` MCP tool once in place of the shell example below.
+For **Codex orchestration of background work**, install and configure the separate
+**codex-background** support utility first. If its MCP tools or registry are missing, stop and
+report the setup requirement; do not silently fall back to model-driven polling. Then invoke its
+registered `delegate_run` MCP tool once in place of the shell example below.
 Follow that skill for structured common arguments, unchanged provider flags and reattachment by
 runId. Keep the request pending until completion, then continue this skill's review and landing
 steps. Other orchestrators keep the shell workflow below.

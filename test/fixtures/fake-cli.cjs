@@ -48,6 +48,7 @@ if (versionProbe && process.env.SMOKE_MODE === "grok-spawn-error" && process.pla
   console.log(fakeVersion);
   process.exit(0);
 }
+if (process.env.SMOKE_FORWARD_ARGS_FILE) fs.writeFileSync(process.env.SMOKE_FORWARD_ARGS_FILE, JSON.stringify(args));
 if (process.env.SMOKE_MODE === "capture") {
   fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify(args));
   if (process.env.SMOKE_ENV_FILE) fs.writeFileSync(process.env.SMOKE_ENV_FILE, JSON.stringify(capturedEnv()));

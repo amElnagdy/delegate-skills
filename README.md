@@ -119,7 +119,8 @@ then see [CONTRIBUTING.md](CONTRIBUTING.md).
 ## Optional Codex waiting support
 
 Install [codex-background](skills/codex-background/SKILL.md) alongside the selected delegate skills
-when Codex is the orchestrator. Configure an explicit installed-relay registry and a host MCP tool
+when Codex is the orchestrator. It is a separate installation; codex-delegate does not install
+or configure it automatically. Missing tools/registry must be reported as a setup error. Configure an explicit installed-relay registry and a host MCP tool
 timeout greater than the relay timeout. One pending MCP request captures logs locally and returns
 a single completion; the selected skill still owns permissions, results, review and landing.
 Claude's background Bash workflow stays unchanged. See
@@ -223,7 +224,9 @@ This package is intentionally inspectable:
   have no dependencies (Node built-ins only). Relays launch an implementer CLI and `git`, plus the
   platform process launcher/termination utility where a Windows shim or process-tree kill requires one.
   The optional `codex-background` utility adds a local stdio MCP server around explicitly registered
-  existing relays, with the same Node-built-ins-only trust line and no network calls of its own.
+  existing relays, with no npm dependencies or network calls of its own. Its provider-independent
+  ownership supervisor uses a compiled subreaper on Linux and inbox PowerShell plus kernel job
+  APIs on Windows. Linux requires /usr/bin/cc and procfs; other hosts fail setup explicitly.
   Discover may invoke installed CLIs for `--version` / model list probes (those CLIs may contact their
   own services). Read the script before you run it.
 - None of the relays ever commit — committing is always the orchestrator's job, after review.
@@ -411,7 +414,11 @@ skills/
 │   ├── SKILL.md
 │   ├── scripts/
 │   │   ├── server.mjs
-│   │   └── server.test.mjs
+│   │   ├── server.test.mjs
+│   │   ├── supervisor.mjs
+│   │   ├── linux-owner.c
+│   │   ├── windows-job.ps1
+│   │   └── windows-job.cs
 │   └── references/configuration.md
 └── delegate-setup/
     ├── SKILL.md

@@ -47,11 +47,14 @@ explicitly registered existing relays. Neither is an implementer skill.
 Utility checklist (instead of the four-references + `relay.mjs` bar above):
 
 - [ ] `skills/<name>/SKILL.md` with a `description` that triggers on its specific support function, not selection of an implementer.
-- [ ] Scripts under `scripts/` stay Node built-ins only (same trust line as relays).
+- [ ] JavaScript under `scripts/` uses Node built-ins only; background ownership may also use
+      bundled OS helpers under the trust line described in `AGENTS.md`.
 - [ ] No `relay.mjs`; setup does not dispatch, and background support only wraps registered existing relays.
 - [ ] Registered in `skills.sh.json` (Setup grouping is fine).
 - [ ] Listed in the smoke suite's **utility** carve-out (not the `*-delegate` timeout/abort matrix).
 - [ ] A short README mention and utility scope in `AGENTS.md`.
+- [ ] OS ownership helpers use inbox primitives only; test descendants surviving relay-parent exit
+      on Windows, plus abort/timeout/shutdown and unrelated-process safety.
 - [ ] Runtime support has lifecycle and unchanged-relay integration fixtures registered in CI.
       Run `node --test --test-concurrency=1 skills/codex-background/scripts/server.test.mjs` and
       `node --test test/codex-background-relays.mjs`.

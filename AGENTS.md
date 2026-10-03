@@ -65,8 +65,8 @@ CLI flag, field, and command in the docs must match the installed implementer CL
 - **Utility skills** (`delegate-setup` and `codex-background`) are the exception to the implementer shape: they are
   not `<cli>-delegate`, they do not ship `scripts/relay.mjs` or the four brief/dispatch/review/queue
   references. `delegate-setup` never dispatches coding work; `codex-background` hosts existing
-  registered relays without replacing implementer behavior. They still use Node built-ins only, no network of
-  their own, no credentials, no telemetry. Document any new utility in `CONTRIBUTING.md` and register
+  registered relays without replacing implementer behavior. Their JavaScript uses Node built-ins only; background ownership also uses the bundled
+  OS helpers described below. No network of their own, credentials, or telemetry. Document any new utility in `CONTRIBUTING.md` and register
   it in `skills.sh.json` and the smoke suite's utility carve-out.
 - **`SKILL.md` frontmatter:** `name` (must equal the directory), `description`, and optionally
   `license`, `compatibility`, `metadata.version`, `allowed-tools`. The **`description` is the only
@@ -82,8 +82,12 @@ CLI flag, field, and command in the docs must match the installed implementer CL
   when needed.
 - **Executables:** keep them minimal and inspectable. Each `*-delegate` skill has one
   `scripts/relay.mjs`. Utility skills may ship other scripts (e.g. `discover.mjs`, `config.mjs`) under
-  the same trust line: Node built-ins only, no dependencies, no network calls of their own, no
-  credentials, no telemetry. The README's trust section must stay accurate.
+  the same trust line: JavaScript uses Node built-ins only, no package dependencies, no network calls of their own, no
+  credentials, no telemetry. codex-background uses a provider-independent ownership supervisor:
+  a bundled C subreaper compiled with /usr/bin/cc on Linux and an inbox PowerShell/C# helper
+  calling kernel job APIs on Windows. Other hosts fail setup explicitly. No
+  external packages, global policy changes, executable discovery or stale-PID adoption.
+  The README's trust section must stay accurate.
 
 ## Before publishing a change
 

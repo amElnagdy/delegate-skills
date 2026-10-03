@@ -10,7 +10,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 const SERVER = fileURLToPath(new URL('./server.mjs', import.meta.url));
 const fixture = String.raw`import { spawn } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 const argv = process.argv.slice(2);
@@ -25,6 +25,18 @@ function result(code = 0) {
   process.exit(code);
 }
 if (spec.mode === 'usage') process.exit(2);
+if (spec.mode === 'missing') process.exit(0);
+if (spec.earlyResult) writeFileSync(join(out, 'result.json'), 'early opaque report');
+if (spec.mode === 'orphan') {
+  const ready = join(out, 'child-ready');
+  const program = "require('node:fs').writeFileSync(process.argv[1],'ready');" + (spec.childLifetime ? 'setTimeout(()=>{},' + spec.childLifetime + ')' : "process.on('SIGTERM',()=>{});setInterval(()=>{},1000)");
+  const child = spawn(process.execPath, ['-e', program, ready], { stdio: 'ignore', windowsHide: true, detached: true });
+  for (let i = 0; i < 100 && !existsSync(ready); i++) await delay(50);
+  if (!existsSync(ready)) throw Error('Orphan fixture failed to start');
+  writeFileSync(join(out, 'child.pid'), String(child.pid));
+  writeFileSync(join(out, 'result.json'), 'parent finished, owned descendant still alive');
+  process.exit(0);
+}
 if (spec.mode === 'stuck') {
   const child = spawn(process.execPath, ['-e', "process.on('SIGTERM',()=>{});setInterval(()=>{},1000)"], { stdio: 'ignore', windowsHide: true });
   writeFileSync(join(out, 'child.pid'), String(child.pid));
@@ -90,7 +102,7 @@ test('one pending MCP invocation stays quiet for more than sixty seconds', { tim
     const listed = await c.request('tools/list', {}).promise;
     assert.deepEqual(listed.result.tools.map(tool => tool.name), ['delegate_run', 'delegate_wait', 'delegate_abort']);
     const started = Date.now();
-    const native = ['--session', 'Opaque:Resume/ID', '--effort', 'high'];
+    const native = ['--session', 'Opaque:Resume/ID', '--effort', 'high', '--fixture-values', '', 'space value', 'quote"value', 'trailing\\', 'slash\\"quote'];
     const call = c.run('long', { delayMs: 65000 }, { relayArgs: native });
     const response = await call.promise, value = outcome(response), elapsedMs = Date.now() - started;
     assert.ok(elapsedMs >= 65000); assert.equal(c.calls.length, 1); assert.equal(c.messages.length, 3);
@@ -109,10 +121,10 @@ test('one pending MCP invocation stays quiet for more than sixty seconds', { tim
 test('opaque result bytes and nonzero relay failures are preserved', async () => {
   const s = setup(), c = client(s);
   try {
-    for (const [id, spec] of [['opaque', { raw: 'not JSON\n  unchanged' }], ['binary', { binary: true }], ['failed', { code: 1 }], ['timeout', { code: 124 }], ['usage', { mode: 'usage' }]]) {
+    for (const [id, spec] of [['opaque', { raw: 'not JSON\n  unchanged' }], ['binary', { binary: true }], ['failed', { code: 1 }], ['timeout', { code: 124 }], ['usage', { mode: 'usage' }], ['missing', { mode: 'missing' }]]) {
       const response = await c.run(id, spec).promise, value = outcome(response);
-      assert.equal(response.result.isError, ['failed', 'timeout', 'usage'].includes(id));
-      if (id === 'usage') { assert.equal(existsSync(value.resultPath), false); assert.equal(value.resultText, undefined); }
+      assert.equal(response.result.isError, ['failed', 'timeout', 'usage', 'missing'].includes(id), JSON.stringify(response) + readFileSync(value.stderrPath, 'utf8'));
+      if (id === 'usage' || id === 'missing') { assert.equal(existsSync(value.resultPath), false); assert.equal(value.resultText, undefined); }
       else assert.deepEqual(Buffer.from(value.resultText, value.resultEncoding === 'base64' ? 'base64' : 'utf8'), readFileSync(value.resultPath));
     }
   } finally { await clean(s, c); }
@@ -156,7 +168,7 @@ test('server shutdown aborts owned jobs and terminal outcomes survive restart', 
     const next = client(s);
     try { assert.equal(outcome(await next.tool('delegate_wait', { runId: 'shutdown' }).promise).adapterStatus, 'aborted'); }
     finally { await next.close(); }
-  } finally { rmSync(s.root, { recursive: true, force: true }); }
+  } finally { await c.close(); rmSync(s.root, { recursive: true, force: true }); }
 });
 test('restart recovers terminal reports and unresolved state never adopts a PID', async () => {
   const s = setup(), c = client(s);
@@ -200,4 +212,79 @@ test('registry rejects executables and mismatched implementer paths at startup',
       const code = await new Promise(resolve => child.once('close', resolve)); assert.equal(code, 1);
     }
   } finally { rmSync(s.root, { recursive: true, force: true }); }
+});
+
+for (const action of ['abort', 'timeout', 'shutdown']) test(action + ' cleans descendants after the relay parent exits', { timeout: 26000 }, async () => {
+  const s = setup(), c = client(s);
+  const unrelated = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { windowsHide: true, stdio: 'ignore' });
+  try {
+    const call = c.run('orphan', { mode: 'orphan' }, { relayTimeoutSeconds: action === 'timeout' ? 1 : 90 });
+    const rootExit = join(s.state, 'orphan', 'relay-exit.json'), pidFile = join(s.artifacts, 'orphan', 'child.pid');
+    await until(() => existsSync(rootExit));
+    assert.equal(JSON.parse(readFileSync(rootExit)).exitCode, 0);
+    const pid = Number(readFileSync(pidFile)); assert.equal(alive(pid), true);
+    assert.equal(c.messages.filter(message => message.id === call.id).length, 0, 'parent exit and result file do not complete the owned tree');
+    if (action === 'shutdown') await c.close();
+    else {
+      const response = action === 'abort' ? await c.tool('delegate_abort', { runId: 'orphan' }).promise : await call.promise;
+      const value = outcome(response); assert.equal(value.adapterStatus, action === 'abort' ? 'aborted' : 'adapter_timeout');
+      assert.equal(value.resultText, 'parent finished, owned descendant still alive');
+    }
+    await until(() => !alive(pid)); assert.equal(alive(unrelated.pid), true, 'unrelated process survives');
+    if (action === 'shutdown') assert.equal(JSON.parse(readFileSync(join(s.state, 'orphan', 'outcome.json'))).adapterStatus, 'aborted');
+  } finally { unrelated.kill(); await clean(s, c); }
+});
+test('an early result never completes a live relay; cancellation at completion stays recoverable', async () => {
+  const s = setup(), c = client(s);
+  try {
+    const call = c.run('early', { earlyResult: true, delayMs: 1000 });
+    await until(() => existsSync(join(s.artifacts, 'early', 'result.json')));
+    assert.equal(c.messages.length, 0);
+    await until(() => existsSync(join(s.state, 'early', 'relay-exit.json')));
+    c.child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: call.id } }) + '\n');
+    const value = outcome(await c.tool('delegate_wait', { runId: 'early' }).promise);
+    assert.equal(value.adapterStatus, 'completed'); assert.equal(value.resultText, readFileSync(value.resultPath, 'utf8'));
+    assert.ok(c.messages.filter(message => message.id === call.id).length <= 1);
+  } finally { await clean(s, c); }
+});
+test('timeout near final descendant exit cannot report completion with a surviving process', { timeout: 26000 }, async () => {
+  const s = setup(), c = client(s);
+  try {
+    const call = c.run('boundary', { mode: 'orphan', childLifetime: 13000 }, { relayTimeoutSeconds: 1 });
+    const value = outcome(await call.promise);
+    assert.ok(['completed', 'adapter_timeout'].includes(value.adapterStatus));
+    const pid = Number(readFileSync(join(s.artifacts, 'boundary', 'child.pid'))); await until(() => !alive(pid));
+    assert.equal(value.resultText, 'parent finished, owned descendant still alive');
+  } finally { await clean(s, c); }
+});
+test('shutdown racing relay completion persists exactly one valid terminal outcome', async () => {
+  const s = setup(), c = client(s);
+  try {
+    c.run('closing', { delayMs: 100 }); await until(() => existsSync(join(s.artifacts, 'closing', 'received.json')));
+    await c.close(); const value = JSON.parse(readFileSync(join(s.state, 'closing', 'outcome.json')));
+    assert.ok(['completed', 'aborted'].includes(value.adapterStatus));
+    const next = client(s);
+    try { assert.deepEqual(outcome(await next.tool('delegate_wait', { runId: 'closing' }).promise), value); }
+    finally { await next.close(); }
+  } finally { await clean(s, c); }
+});
+
+test('missing registry fails startup with actionable setup guidance', async () => {
+  const child = spawn(process.execPath, [SERVER], { env: { ...process.env, CODEX_BACKGROUND_REGISTRY: '' }, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  let stdout = '', stderr = '';
+  child.stdout.on('data', data => { stdout += data; }); child.stderr.on('data', data => { stderr += data; });
+  const code = await new Promise(resolve => child.once('close', resolve));
+  assert.equal(code, 1); assert.equal(stdout, ''); assert.match(stderr, /Missing CODEX_BACKGROUND_REGISTRY/);
+});
+
+test('abort racing ownership startup stays terminal and cannot leave a live implementer', async () => {
+  const s = setup(), c = client(s);
+  try {
+    const call = c.run('startup', { mode: 'stuck' });
+    const value = outcome(await c.tool('delegate_abort', { runId: 'startup' }).promise);
+    assert.equal(value.adapterStatus, 'aborted'); assert.equal(outcome(await call.promise).adapterStatus, 'aborted');
+    const pidFile = join(s.artifacts, 'startup', 'child.pid');
+    if (existsSync(pidFile)) await until(() => !alive(Number(readFileSync(pidFile))));
+    assert.deepEqual(outcome(await c.tool('delegate_wait', { runId: 'startup' }).promise), value);
+  } finally { await clean(s, c); }
 });

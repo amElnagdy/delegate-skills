@@ -35,6 +35,9 @@ function directories(values) {
   return values.map(value => { const path = realpathSync(absolute(value)); if (!statSync(path).isDirectory()) throw Error('Configured root is not a directory'); return path; });
 }
 function readRegistry(file) {
+  if (!['win32', 'linux'].includes(process.platform)) throw Error('Safe ownership requires Windows or Linux; other hosts are unsupported');
+  if (process.platform === 'linux' && !existsSync('/usr/bin/cc')) throw Error('Linux ownership requires the system C compiler at /usr/bin/cc');
+  if (!file) throw Error('Missing CODEX_BACKGROUND_REGISTRY: configure the codex-background MCP server registry first');
   const source = readFileSync(absolute(file), 'utf8');
   const registry = JSON.parse(source);
   onlyKeys(registry, ['schema', 'hostToolTimeoutSeconds', 'stateDirectory', 'workspaceRoots', 'artifactRoots', 'relays']);
@@ -134,7 +137,7 @@ export function startServer({ registryFile = process.env.CODEX_BACKGROUND_REGIST
   }
 
   async function terminate(job) {
-    if (job.exited || job.rootExited || job.child.exitCode !== null) return;
+    if (job.exited || job.ownerExited || job.child.exitCode !== null) return;
     if (process.platform === 'win32') {
       await new Promise((resolveStop, rejectStop) => {
         const systemRoot = process.env.SystemRoot || process.env.WINDIR;
@@ -142,17 +145,18 @@ export function startServer({ registryFile = process.env.CODEX_BACKGROUND_REGIST
         const killer = spawn(join(systemRoot, 'System32', 'taskkill.exe'), ['/PID', String(job.child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
         const limit = setTimeout(() => { killer.kill(); rejectStop(Error('Process-tree termination timed out')); }, 5000);
         killer.once('error', error => { clearTimeout(limit); rejectStop(error); });
-        killer.once('exit', code => { clearTimeout(limit); if (code === 0 || job.rootExited) resolveStop(); else rejectStop(Error(`Process-tree termination failed (${code})`)); });
+        killer.once('exit', code => { clearTimeout(limit); if (code === 0 || job.ownerExited) resolveStop(); else rejectStop(Error(`Process-tree termination failed (${code})`)); });
       });
     } else {
       try { process.kill(-job.child.pid, 'SIGTERM'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
       // Sweep the owned process group even if its parent exits before a stubborn descendant.
-      await new Promise(resolveGrace => setTimeout(resolveGrace, 1000));
+      await new Promise(resolveGrace => setTimeout(resolveGrace, 3500));
+      if (job.ownerExited) return; // The ownership anchor finished; never signal a recycled group ID.
       try { process.kill(-job.child.pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
     }
   }
   function stop(job, reason) {
-    if (job.exited || job.rootExited) return job.termination ?? Promise.resolve();
+    if (job.exited || job.ownerExited) return job.termination ?? Promise.resolve();
     if (!job.termination) {
       job.stopReason = reason;
       job.termination = terminate(job);
@@ -162,6 +166,7 @@ export function startServer({ registryFile = process.env.CODEX_BACKGROUND_REGIST
   }
 
   function launch(args) {
+    if (closing) throw Error('Server is shutting down; no new delegation is accepted');
     const spec = prepare(args);
     mkdirSync(spec.runDirectory); // Exclusive durable run claim, including across server instances.
     const outputKey = createHash('sha256').update(process.platform === 'win32' ? spec.outputDirectory.toLowerCase() : spec.outputDirectory).digest('hex');
@@ -173,13 +178,15 @@ export function startServer({ registryFile = process.env.CODEX_BACKGROUND_REGIST
     const stderr = createWriteStream(manifest.stderrPath, { flags: 'wx', mode: 0o600 });
     const stdoutDone = finished(stdout).catch(error => error);
     const stderrDone = finished(stderr).catch(error => error);
-    const child = spawn(process.execPath, [spec.relayPath, ...spec.argv], { cwd: spec.workspace, windowsHide: true, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
-    const job = { child, errors: [], stopReason: null, termination: null, rootExited: false, exited: false };
+    const ownerSpec = join(spec.runDirectory, 'owner-spec.json');
+    persist(ownerSpec, { node: process.execPath, relayPath: spec.relayPath, argv: spec.argv, workspace: spec.workspace, runDirectory: spec.runDirectory });
+    const child = spawn(process.execPath, [fileURLToPath(new URL('./supervisor.mjs', import.meta.url)), ownerSpec], { cwd: spec.workspace, windowsHide: true, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
+    const job = { child, errors: [], stopReason: null, termination: null, ownerExited: false, exited: false };
     jobs.set(spec.runId, job);
     const guard = setTimeout(() => { stop(job, 'adapter_timeout').catch(() => {}); }, spec.timeoutMs + GRACE_MS);
     child.once('error', error => { job.errors.push(error.message); });
     child.once('exit', () => {
-      job.rootExited = true;
+      job.ownerExited = true;
       clearTimeout(guard);
       const drain = setTimeout(() => { if (!job.exited) { child.stdout.destroy(); child.stderr.destroy(); stdout.end(); stderr.end(); } }, 1000);
       drain.unref();
@@ -196,7 +203,14 @@ export function startServer({ registryFile = process.env.CODEX_BACKGROUND_REGIST
       for (const error of await Promise.all([stdoutDone, stderrDone])) if (error) job.errors.push(error.message);
       let result = {};
       try { result = opaqueResult(manifest.resultPath); } catch (error) { job.errors.push(error.message); }
-      const outcome = { ...manifest, ...result, phase: 'closed', exitCode, signal, adapterStatus: job.stopReason || (exitCode === 0 && !job.errors.length ? 'completed' : 'failed'), errors: job.errors };
+      let relayExit = { exitCode, signal };
+      try { relayExit = JSON.parse(readFileSync(join(spec.runDirectory, 'relay-exit.json'), 'utf8')); } catch {}
+      try {
+        const owner = JSON.parse(readFileSync(join(spec.runDirectory, 'owner-outcome.json'), 'utf8'));
+        if (owner.error) job.errors.push(owner.error);
+        if (process.platform === 'win32' && owner.ownerExitCode !== relayExit.exitCode && !job.stopReason) job.errors.push('Windows job owner did not close normally');
+      } catch { if (!job.stopReason) job.errors.push('Ownership supervisor exited without a terminal outcome'); }
+      const outcome = { ...manifest, ...result, ...relayExit, phase: 'closed', adapterStatus: job.stopReason || (exitCode === 0 && relayExit.exitCode === 0 && !job.errors.length ? 'completed' : 'failed'), errors: job.errors };
       try { persist(join(spec.runDirectory, 'outcome.json'), outcome); } catch (error) { outcome.adapterStatus = 'failed'; outcome.errors.push(error.message); }
       resolveDone(outcome);
     }));

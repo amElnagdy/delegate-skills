@@ -1,7 +1,7 @@
 ---
 name: codex-background
 description: Keep a Codex orchestrator's delegation to an installed delegate skill pending until its registered relay completes, without model-driven progress polling. Use with a selected implementer delegate skill when Codex is the orchestrator and this MCP server is configured.
-compatibility: Requires Node 18+, installed delegate skills and their authenticated implementer CLIs, and a Codex MCP host configured with a tool timeout exceeding the explicit relay timeout.
+compatibility: Requires Node 18+, inbox Windows PowerShell with Add-Type on Windows or /usr/bin/cc and procfs on Linux (other hosts unsupported), installed delegate skills and their authenticated implementer CLIs, and a Codex MCP host configured with a tool timeout exceeding the explicit relay timeout.
 metadata:
   version: 0.5.0
 ---
@@ -11,6 +11,10 @@ metadata:
 This support skill changes Codex's waiting boundary. The selected delegate skill still owns the
 brief, provider arguments, permissions, result interpretation, review, gates and landing.
 Claude's background Bash workflow stays unchanged.
+
+Missing tools or registry mean setup is incomplete: stop and report the setup requirement;
+do not silently use shell polling. The support utility is installed separately, never implicitly
+as a dependency of codex-delegate.
 
 Read [references/configuration.md](references/configuration.md) before first use. Install this
 skill alongside the chosen delegate skills and explicitly register their installed relay paths.
