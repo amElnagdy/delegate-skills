@@ -83,7 +83,7 @@
  * and forwarded the kill to copilot), or copilot_unavailable.
  */
 
-import { spawn, execFileSync, spawnSync } from "node:child_process";
+import { spawn, execSync, execFileSync, spawnSync } from "node:child_process";
 import {
   appendFileSync,
   existsSync,
@@ -354,12 +354,15 @@ function copilotVersion(timeoutMs) {
   // `copilot version` (subcommand) prints "GitHub Copilot CLI X.Y.Z" as the
   // first line, followed by an optional update notice — parse only the first line.
   try {
-    const raw = execFileSync("copilot", ["version"], {
+    const options = {
       encoding: "utf8",
       shell: process.platform === "win32",
       timeout: limit,
       killSignal: "SIGKILL",
-    }).trim();
+    };
+    const raw = (process.platform === "win32"
+      ? execSync("copilot version", options)
+      : execFileSync("copilot", ["version"], options)).trim();
     const firstLine = raw.split("\n")[0].trim();
     // Extract version from "GitHub Copilot CLI 1.0.78"
     const versionMatch = firstLine.match(/(\d+\.\d+\.\d+(?:-[A-Za-z0-9._-]+)?)/);
@@ -534,16 +537,22 @@ function installPreflightSignalHandlers(opts, run, writeResult) {
   };
 }
 
+function spawnShellLaunch(binary, argv, options, useShell) {
+  if (!useShell) return spawn(binary, argv, options);
+  // Node 24 warns when shell:true is paired with an args array. The args here
+  // are already token-validated or quoted for cmd.exe, so serialize them once.
+  return spawn([binary, ...argv].join(" "), { ...options, shell: true });
+}
+
 function dispatchToCopilot(opts, run, writeResult, onReady) {
-  const child = spawn("copilot", buildArgv(opts, run.briefPath), {
+  const child = spawnShellLaunch("copilot", buildArgv(opts, run.briefPath), {
     cwd: opts.cd,
     stdio: ["ignore", "pipe", "pipe"],
     // shell:true on win32 so the copilot.cmd shim resolves. Safe: the brief
     // rides `-p @<briefPath>` as a quoted file path, --model/--effort/--session
     // are restricted to safe tokens at parse time.
-    shell: process.platform === "win32",
     detached: process.platform !== "win32", // POSIX: lead a new process group so killChild can fell the whole tree
-  });
+  }, process.platform === "win32");
 
   let sessionId = null;
   let lastAssistantMessage = "";

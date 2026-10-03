@@ -554,16 +554,22 @@ function installPreflightSignalHandlers(opts, run, writeResult, getChild) {
   };
 }
 
+function spawnShellLaunch(binary, argv, options, useShell) {
+  if (!useShell) return spawn(binary, argv, options);
+  // Node 24 warns when shell:true is paired with an args array. The args here
+  // are already token-validated or quoted for cmd.exe, so serialize them once.
+  return spawn([binary, ...argv].join(" "), { ...options, shell: true });
+}
+
 function dispatchToPi(opts, brief, run, writeResult) {
-  const child = spawn("pi", buildArgv(opts), {
+  const child = spawnShellLaunch("pi", buildArgv(opts), {
     cwd: opts.cd,
     stdio: ["pipe", "pipe", "pipe"],
     // shell:true on win32 so the pi.cmd shim resolves. Safe: the brief is fed
     // via stdin — never argv — and argv holds only the fixed flag names and
     // token-validated --provider/--model/--session values.
-    shell: process.platform === "win32",
     detached: process.platform !== "win32", // POSIX: lead a new process group so killChild can fell the whole tree
-  });
+  }, process.platform === "win32");
 
   let sessionId = null;
   let actualProvider = null;
