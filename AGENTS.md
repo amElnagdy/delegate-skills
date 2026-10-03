@@ -87,6 +87,10 @@ CLI flag, field, and command in the docs must match the installed implementer CL
   a bundled C subreaper compiled with /usr/bin/cc on Linux and an inbox PowerShell/C# helper
   calling kernel job APIs on Windows. Other hosts fail setup explicitly. No
   external packages, global policy changes, executable discovery or stale-PID adoption.
+  Its `bootstrap.mjs` (run by the user or by Codex on first use) is the only script that writes outside
+  the skill: `$CODEX_HOME/config.toml` (managed block plus the `code_mode` namespace entry, backed up
+  first) and `$CODEX_HOME/codex-background/`. It registers only `<key>-delegate` siblings found in the
+  installed skills directory — no PATH scan — and its tests use temporary homes only.
   The README's trust section must stay accurate.
 
 ## Before publishing a change

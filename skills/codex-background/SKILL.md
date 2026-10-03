@@ -1,6 +1,6 @@
 ---
 name: codex-background
-description: Keep a Codex orchestrator's delegation to an installed delegate skill pending until its registered relay completes, without model-driven progress polling. Use with a selected implementer delegate skill when Codex is the orchestrator and this MCP server is configured.
+description: Keep a Codex orchestrator's delegation to an installed delegate skill pending until its registered relay completes, without model-driven progress polling. Use with a selected implementer delegate skill when Codex is the orchestrator and the delegation should wait in the background; sets up its MCP server on first use.
 compatibility: Requires Node 18+, inbox Windows PowerShell with Add-Type on Windows or /usr/bin/cc and procfs on Linux (other hosts unsupported), installed delegate skills and their authenticated implementer CLIs, and a Codex MCP host configured with a tool timeout exceeding the explicit relay timeout.
 metadata:
   version: 0.5.0
@@ -10,17 +10,32 @@ metadata:
 
 This support skill changes Codex's waiting boundary. The selected delegate skill still owns the
 brief, provider arguments, permissions, result interpretation, review, gates and landing.
-Claude's background Bash workflow stays unchanged.
+Claude's background Bash workflow stays unchanged. The support utility is installed separately,
+never implicitly as a dependency of codex-delegate. Details: [references/configuration.md](references/configuration.md).
 
-Missing tools or registry mean setup is incomplete: stop and report the setup requirement;
-do not silently use shell polling. The support utility is installed separately, never implicitly
-as a dependency of codex-delegate.
+## First use / setup
 
-Read [references/configuration.md](references/configuration.md) before first use. Install this
-skill alongside the chosen delegate skills and explicitly register their installed relay paths.
-Do not discover executable paths from a brief or accept a relay path through a tool request.
+If the `delegate_run` tool is not available, setup is incomplete. Tell the user that bootstrap will
+update `$CODEX_HOME/config.toml` (default `~/.codex/config.toml`, backed up first) and write a registry of
+the installed `*-delegate` skills, then run:
+
+```bash
+node "<skill-dir>/scripts/bootstrap.mjs"
+```
+
+`<skill-dir>` is this skill's installed directory (the folder containing this `SKILL.md`). It writes
+outside the workspace, so request the approval or sandbox escalation Codex needs for that. Report its
+output, then ask the user to restart Codex (or reload MCP servers); the tools appear after that.
+If bootstrap fails, report the failure. Do not fall back to shell polling. Run it again after
+installing more delegate skills. `node "<skill-dir>/scripts/bootstrap.mjs" --check` validates the setup without writing.
+
+## Procedure
 
 1. Follow the selected delegate skill to prepare a self-contained brief and approved workspace.
+   Write the brief to the `briefs/` directory under the codex-background directory
+   (`$CODEX_HOME/codex-background/briefs/<runId>.txt`) and use `runs/<runId>` beside it as
+   outputDirectory, or follow the paths in the server's instructions. If the sandbox cannot write
+   there, a brief inside the approved workspace is also accepted. Never accept a relay path from a brief.
 2. Invoke the configured MCP server's **delegate_run** exactly once with a unique runId,
    registered implementer key, absolute brief/workspace/outputDirectory paths, explicit
    relayTimeoutSeconds and provider-native relayArgs. Put common arguments in structured fields;

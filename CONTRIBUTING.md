@@ -56,8 +56,13 @@ Utility checklist (instead of the four-references + `relay.mjs` bar above):
 - [ ] OS ownership helpers use inbox primitives only; test descendants surviving relay-parent exit
       on Windows, plus abort/timeout/shutdown and unrelated-process safety.
 - [ ] Runtime support has lifecycle and unchanged-relay integration fixtures registered in CI.
-      Run `node --test --test-concurrency=1 skills/codex-background/scripts/server.test.mjs` and
-      `node --test test/codex-background-relays.mjs`.
+      Run `node --test --test-concurrency=1 skills/codex-background/scripts/server.test.mjs`,
+      `node --test --test-concurrency=1 skills/codex-background/scripts/bootstrap.test.mjs`,
+      `node --test test/codex-background-relays.mjs` and
+      `node --test test/codex-background-bootstrap-e2e.mjs`.
+- [ ] `codex-background`'s `bootstrap.mjs` edits `$CODEX_HOME/config.toml` only inside its marked
+      block and the `code_mode` namespace entry, backs up first, and its tests use temporary
+      Codex homes, never the real one.
 
 Do not invent a second utility that duplicates lane setup. Extend `delegate-setup` instead.
 

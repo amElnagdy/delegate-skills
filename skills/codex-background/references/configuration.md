@@ -1,7 +1,8 @@
 # Configuration and lifecycle
 
 Install codex-background and each selected implementer delegate skill explicitly. This package
-does not declare automatic Skills CLI dependencies and does not configure MCP during installation.
+does not declare automatic Skills CLI dependencies, and installation itself does not touch Codex
+configuration; the bootstrap script does, when you (or Codex) run it.
 
 ```sh
 npx skills add amElnagdy/delegate-skills --skill codex-delegate
@@ -10,19 +11,111 @@ npx skills add amElnagdy/delegate-skills --skill codex-background
 
 The first skill selects a Codex implementer; the second supports a Codex orchestrator using any
 registered implementer. A short foreground shell run does not require the support utility.
-For background work, missing MCP tools/registry are a setup error, not a reason to start polling.
-Locate their installed paths yourself, review the scripts, and create a local registry outside the contribution.
-The server uses Node built-ins only and makes no network calls itself. The selected relay
+For background work, missing MCP tools are a setup step, not a reason to start polling.
+The scripts use Node built-ins only and make no network calls themselves. The selected relay
 continues to launch its own implementer CLI with its existing authentication and permissions.
 
-## Explicit registry
+## Setup: install, bootstrap, restart, use
 
-Set CODEX_BACKGROUND_REGISTRY to an absolute JSON file path in the MCP server environment.
-No PATH scans, fleet discovery, executable overrides or automatic registry updates occur.
-A key maps to the canonical installed <key>-delegate/scripts/relay.mjs file. Only those registered
-scripts can be launched, always with the server's Node executable and no shell.
+1. Install the delegate skills you want and codex-background (above).
+2. Bootstrap. Codex runs this itself when the MCP tools are missing (the SKILL.md tells it to);
+   you can also run it by hand from the installed skill directory:
 
-Example registry (replace every example path with an absolute path appropriate to the host):
+   ```sh
+   node "<skill-dir>/scripts/bootstrap.mjs"
+   ```
+
+3. Restart Codex (or reload MCP servers) if bootstrap says config or registry changed.
+4. Delegate. Codex writes each brief to `<codex-home>/codex-background/briefs/<runId>.txt` and uses
+   `<codex-home>/codex-background/runs/<runId>` as outputDirectory; the server's initialize
+   instructions and tool descriptions state these exact paths, so no brief needs to be moved by hand.
+
+`<codex-home>` is `--codex-home`, else `$CODEX_HOME`, else `~/.codex`. Bootstrap is idempotent:
+a second run with nothing to change writes nothing, creates no backup and reports "Already configured."
+
+| Flag | Meaning |
+| --- | --- |
+| `--codex-home <dir>` | Codex home to configure |
+| `--skills-dir <dir>` | installed skills directory to scan (default: the parent of this skill's directory) |
+| `--workspace-root <dir>` | approved workspace root; repeatable. Default: the home directory plus `<codex-home>/worktrees` when it exists. Roots nested inside another are dropped |
+| `--host-timeout <s>` | host tool timeout in seconds, 31 or more (default 7200). Also written to `tool_timeout_sec` |
+| `--dry-run` | print the planned changes, write nothing |
+| `--check` | validate only, write nothing (see below) |
+| `--json` | machine-readable summary instead of text |
+| `--help` | usage |
+
+An unknown flag or a missing value is a usage error (exit 2). Other failures exit 1.
+
+### What bootstrap writes
+
+- `<codex-home>/codex-background/registry.json` (schema `codex-background.registry.v1`, mode 0600,
+  written atomically): `hostToolTimeoutSeconds`, `stateDirectory` (`.../codex-background/state`),
+  `workspaceRoots`, `artifactRoots` (`[<codex-home>/codex-background]`) and `relays`. `relays` comes from
+  a scan of the skills directory only: every sibling `<key>-delegate` directory whose `scripts/relay.mjs`
+  exists, with the same key rules the server enforces. No PATH scan or executable discovery happens.
+  Re-running refreshes `relays` and keeps a previously written `workspaceRoots` and host timeout unless the
+  matching flag is passed. A registry that is not valid JSON, has another schema, or uses other state/artifact
+  roots is copied to `registry.json.bak-<timestamp>` before it is replaced.
+- `<codex-home>/codex-background/{state,briefs,runs}` directories.
+- `<codex-home>/config.toml`, created when missing. Bootstrap owns only the tables
+  `[mcp_servers.codex_background]` (`command` = the running Node executable, `args` = this skill's
+  `scripts/server.mjs`, `tool_timeout_sec`, `required = true`) and `[mcp_servers.codex_background.env]`
+  (`CODEX_BACKGROUND_REGISTRY`), written inside a marked block (`# BEGIN codex-background ...` to
+  `# END codex-background`). Re-running replaces only that block. A hand-written copy of those two
+  tables outside the block (the old manual setup) is removed and replaced by the block; any other key you
+  had inside them is dropped, reported, and kept in the backup.
+- `direct_only_tool_namespaces` under `[features.code_mode]` gains `"mcp__codex_background"`, which makes
+  Codex expose the tools as direct native calls instead of through the code-mode exec wrapper that yields
+  early and re-polls. Existing entries and order are kept (single-line and multi-line arrays); when the key
+  is missing it is inserted under the existing table; when there is no `[features.code_mode]` table, it is
+  added inside the managed block.
+- Everything else in `config.toml` is preserved byte for byte, including comments and the file's CRLF or LF
+  line endings. Before any change to an existing file, a copy is written next to it as
+  `config.toml.bak-<timestamp>`. Nothing is written, and no backup made, when the content would not change.
+
+### Conflicts and refusals
+
+Bootstrap does no TOML rewriting beyond the above. If `code_mode` is defined another way
+(`code_mode = true` or an inline table under `[features]`, a dotted `features.code_mode...` key, or
+`[[features.code_mode]]`), the namespace entry holds anything but single-line strings, the file has duplicate
+managed tables, unbalanced markers, or text it cannot parse (for example an unterminated array or string),
+bootstrap leaves `config.toml` untouched, prints the exact manual step, and exits 1. The registry may still
+have been written. Fix the file by hand and re-run.
+
+### Restart
+
+The server reads the registry at startup. If `config.toml` changed, restart Codex (or reload MCP servers).
+If only the registry changed (for example after installing another delegate skill), restart or reload the
+codex-background MCP server too. Re-run bootstrap after installing more delegate skills so they are registered.
+
+### Validation (`--check`, and automatic after a write)
+
+Reports pass/fail per item and exits non-zero on any failure: the managed config values and the namespace
+entry, the registry parse, each registered relay path, then it starts `server.mjs` with the configured
+command, args and `CODEX_BACKGROUND_REGISTRY`, performs an MCP `initialize` plus `tools/list` over stdio, and
+requires `delegate_run`, `delegate_wait` and `delegate_abort` with an implementer enum equal to the registered
+keys. It closes stdin to stop the server. `--check` expects the same Node executable and skill that bootstrap
+would write; after moving or reinstalling either, re-run bootstrap.
+
+## Registry
+
+The server reads the file named by CODEX_BACKGROUND_REGISTRY in its MCP server environment. The
+server never updates the registry; bootstrap does, only when run. No PATH scans, fleet discovery or
+executable overrides occur. A key maps to the canonical installed <key>-delegate/scripts/relay.mjs
+file. Only those registered scripts can be launched, always with the server's Node executable and no shell.
+If the registry is missing or invalid the server exits at startup and its error names the bootstrap command.
+
+Windows registry paths use JSON-escaped backslashes or forward slashes (bootstrap writes forward slashes).
+The state directory must be within an artifact root. A run's output directory must be fresh, within
+artifact roots and outside adapter state. Workspaces and briefs are canonicalized and checked against
+approved roots. These admission checks do not sandbox implementer tools; the selected delegate's
+permission model and the host's OS containment still apply. Registered scripts/configuration must be trusted.
+The default workspace root is your whole home directory; narrow it with `--workspace-root`.
+
+## Manual configuration (advanced)
+
+Bootstrap is the supported path. To configure by hand instead, create the registry (replace every example
+path with an absolute path appropriate to the host):
 
 ```json
 {
@@ -33,28 +126,15 @@ Example registry (replace every example path with an absolute path appropriate t
   "artifactRoots": ["/absolute/artifacts"],
   "relays": {
     "agy": "/absolute/skills/agy-delegate/scripts/relay.mjs",
-    "codex": "/absolute/skills/codex-delegate/scripts/relay.mjs",
-    "zcode": "/absolute/skills/zcode-delegate/scripts/relay.mjs",
-    "cline": "/absolute/skills/cline-delegate/scripts/relay.mjs",
-    "opencode": "/absolute/skills/opencode-delegate/scripts/relay.mjs"
+    "codex": "/absolute/skills/codex-delegate/scripts/relay.mjs"
   }
 }
 ```
 
-Windows registry paths use JSON-escaped backslashes or forward slashes. The state directory must
-be within an artifact root. A run's output directory must be fresh, within artifact roots and
-outside adapter state. Workspaces and briefs are canonicalized and checked against approved roots.
-These admission checks do not sandbox implementer tools; the selected delegate's permission
-model and the host's OS containment still apply. Registered scripts/configuration must be trusted.
-
-## Codex host setup
-
-Configure a stdio MCP server with command pointing to the installed Node executable and args
-containing only the absolute installed codex-background/scripts/server.mjs path. Set the registry
-environment variable. Configure Codex's tool_timeout_sec to match hostToolTimeoutSeconds;
-startup_timeout_sec controls startup only and does not extend tool execution.
-
-Portable template (substitute absolute paths; do not commit the user's resolved configuration):
+then add a stdio MCP server whose command is the installed Node executable and whose args contain only the
+absolute `codex-background/scripts/server.mjs` path, with `tool_timeout_sec` matching hostToolTimeoutSeconds
+(`startup_timeout_sec` controls startup only and does not extend tool execution). Substitute absolute paths;
+do not commit the user's resolved configuration:
 
 ```toml
 [mcp_servers.codex_background]
@@ -65,7 +145,15 @@ required = true
 
 [mcp_servers.codex_background.env]
 CODEX_BACKGROUND_REGISTRY = "/absolute/config/codex-background-registry.json"
+
+[features.code_mode]
+direct_only_tool_namespaces = ["mcp__codex_background"]
 ```
+
+Without the last table Codex routes the tools through its code-mode exec wrapper, which yields early and
+re-polls. Running bootstrap later migrates a manual setup into the managed block.
+
+## Codex host behavior
 
 Restart/reload the MCP connection after changing the registry. Invoke the exposed MCP tool directly,
 or through a host execution primitive that keeps the outer request pending for its full budget.
@@ -139,9 +227,19 @@ manually through the provider's existing workflow before starting a new explicit
 ## Local validation
 
 ```sh
+node --check skills/codex-background/scripts/bootstrap.mjs
+node --test --test-concurrency=1 skills/codex-background/scripts/bootstrap.test.mjs
 node --test --test-concurrency=1 skills/codex-background/scripts/server.test.mjs
 node --test test/codex-background-relays.mjs
+node --test test/codex-background-bootstrap-e2e.mjs
 ```
+
+The bootstrap tests use temporary Codex homes and fake skills directories only; they never read or write the
+real `~/.codex` or `~/.agents`. They cover fresh install, CRLF and unrelated-content preservation, migration
+of the manual setup, `code_mode` array edits, idempotency, `--dry-run`/`--check`, conflict refusal, an
+unsupported host, zero relays and registry re-runs. The end-to-end test installs copies of codex-background,
+agy-delegate and codex-delegate into a temporary skills directory, runs bootstrap, launches the server from
+the generated config and completes one `delegate_run` against a fake implementer.
 
 The lifecycle fixture runs for 65 seconds and emits noisy stdout/stderr, while asserting one
 MCP tool invocation, zero intermediate notifications and one completion response. Lifecycle tests

@@ -120,9 +120,12 @@ then see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Install [codex-background](skills/codex-background/SKILL.md) alongside the selected delegate skills
 when Codex is the orchestrator. It is a separate installation; codex-delegate does not install
-or configure it automatically. Missing tools/registry must be reported as a setup error. Configure an explicit installed-relay registry and a host MCP tool
-timeout greater than the relay timeout. One pending MCP request captures logs locally and returns
-a single completion; the selected skill still owns permissions, results, review and landing.
+or configure it automatically. If its MCP tools are missing, Codex runs the skill's
+`scripts/bootstrap.mjs` (after telling you it will update `$CODEX_HOME/config.toml`, with a backup);
+you can run it yourself with `node <skill-dir>/scripts/bootstrap.mjs`. It registers the installed
+`*-delegate` skills, writes the registry and the MCP server entry, and asks you to restart Codex. One
+pending MCP request captures logs locally and returns a single completion; the selected skill still
+owns permissions, results, review and landing.
 Claude's background Bash workflow stays unchanged. See
 [configuration and recovery](skills/codex-background/references/configuration.md). Local protocol
 fixtures cover the waiting boundary; they do not measure Codex Desktop token usage.
@@ -223,8 +226,10 @@ This package is intentionally inspectable:
 - Those scripts make no network calls of their own, read or write no credentials, send no telemetry, and
   have no dependencies (Node built-ins only). Relays launch an implementer CLI and `git`, plus the
   platform process launcher/termination utility where a Windows shim or process-tree kill requires one.
-  The optional `codex-background` utility adds a local stdio MCP server around explicitly registered
-  existing relays, with no npm dependencies or network calls of its own. Its provider-independent
+  The optional `codex-background` utility adds a local stdio MCP server around registered
+  existing relays, with no npm dependencies or network calls of its own. Its `bootstrap.mjs` writes
+  `$CODEX_HOME/config.toml` (a backup is made first) and the registry only when you or Codex run it,
+  and registers just the `*-delegate` skills found next to it. Its provider-independent
   ownership supervisor uses a compiled subreaper on Linux and inbox PowerShell plus kernel job
   APIs on Windows. Linux requires /usr/bin/cc and procfs; other hosts fail setup explicitly.
   Discover may invoke installed CLIs for `--version` / model list probes (those CLIs may contact their
@@ -413,6 +418,8 @@ skills/
 ├── codex-background/
 │   ├── SKILL.md
 │   ├── scripts/
+│   │   ├── bootstrap.mjs
+│   │   ├── bootstrap.test.mjs
 │   │   ├── server.mjs
 │   │   ├── server.test.mjs
 │   │   ├── supervisor.mjs

@@ -83,15 +83,16 @@ export function startServer({ registryFile = process.env.CODEX_BACKGROUND_REGIST
   const jobs = new Map();
   const active = new Set();
   const cancelled = new Set();
+  const artifactRoot = registry.artifactRoots[0].replaceAll('\\', '/');
   const idSchema = { type: 'object', properties: { runId: ID }, required: ['runId'], additionalProperties: false };
   const runSchema = {
     type: 'object', additionalProperties: false,
     required: ['runId', 'implementer', 'brief', 'workspace', 'outputDirectory', 'relayTimeoutSeconds'],
     properties: {
       runId: ID, implementer: { type: 'string', enum: [...registry.relays.keys()] },
-      brief: { type: 'string', description: 'Absolute existing brief file in approved roots.' },
+      brief: { type: 'string', description: `Absolute existing brief file in approved roots, e.g. ${artifactRoot}/briefs/<runId>.txt (create the briefs directory if missing).` },
       workspace: { type: 'string', description: 'Absolute approved workspace directory.' },
-      outputDirectory: { type: 'string', description: 'Absolute fresh relay artifact directory.' },
+      outputDirectory: { type: 'string', description: `Absolute fresh relay artifact directory, e.g. ${artifactRoot}/runs/<runId>.` },
       relayTimeoutSeconds: { type: 'integer', minimum: 1, maximum: Math.floor((registry.budgetMs - DELIVERY_MARGIN_MS - 1) / 1000) },
       relayArgs: { type: 'array', items: { type: 'string' }, default: [] },
     },
@@ -260,7 +261,7 @@ export function startServer({ registryFile = process.env.CODEX_BACKGROUND_REGIST
     if (active.has(request.id)) { send({ jsonrpc: '2.0', id: request.id, error: { code: -32600, message: 'Duplicate request ID' } }); return; }
     active.add(request.id);
     (async () => {
-      if (request.method === 'initialize') return { protocolVersion: request.params?.protocolVersion || '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'codex-background', version: '0.5.0' }, instructions: 'Codex only. Delegate through a registered relay with one pending delegate_run call. No sleep/status/log polling or intermediate progress. An interrupted wait can reattach by runId; only delegate_abort stops a job. Keep the outer host call pending, review opaque resultText, rerun gates and land through the selected delegate skill.' };
+      if (request.method === 'initialize') return { protocolVersion: request.params?.protocolVersion || '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'codex-background', version: '0.5.0' }, instructions: `Codex only. Delegate through a registered relay with one pending delegate_run call. No sleep/status/log polling or intermediate progress. An interrupted wait can reattach by runId; only delegate_abort stops a job. Keep the outer host call pending, review opaque resultText, rerun gates and land through the selected delegate skill. Write the brief to ${artifactRoot}/briefs/<runId>.txt (or anywhere inside an approved workspace or artifact root) and use ${artifactRoot}/runs/<runId> as outputDirectory.` };
       if (request.method === 'ping') return {};
       if (request.method === 'tools/list') return { tools };
       if (request.method === 'tools/call') {
@@ -282,5 +283,5 @@ export function startServer({ registryFile = process.env.CODEX_BACKGROUND_REGIST
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  try { startServer(); } catch (error) { process.stderr.write(`${error.message}\n`); process.exitCode = 1; }
+  try { startServer(); } catch (error) { process.stderr.write(`${error.message}\nTo configure codex-background, run: node "${fileURLToPath(new URL('./bootstrap.mjs', import.meta.url))}"\n`); process.exitCode = 1; }
 }
