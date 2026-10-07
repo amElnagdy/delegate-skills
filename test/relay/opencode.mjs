@@ -239,4 +239,55 @@ export async function runOpencode(h) {
   ], { env: h.baseEnv, encoding: "utf8" });
   h.check("opencode joined model plus --variant is a usage error",
     conflict.status === 2 && /already carries a variant/.test(conflict.stderr));
+
+  // opencode 2.x dropped --pure from `run`; the relay rejects it before dispatching.
+  const pure2ArgsFile = join(h.scratch, "args-opencode-v2-pure");
+  const pure2 = spawnSync(process.execPath, [
+    h.relayPath("opencode"),
+    "--brief", h.briefPath,
+    "--cd", workDir,
+    "--out-dir", join(h.scratch, "out-opencode-v2-pure"),
+    "--model", "fake/model",
+    "--pure",
+  ], {
+    env: {
+      ...h.baseEnv,
+      SMOKE_MODE: "opencode-success",
+      SMOKE_ARGS_FILE: pure2ArgsFile,
+      SMOKE_VERSION: "opencode v2.0.21",
+    },
+    encoding: "utf8",
+  });
+  h.check("opencode 2.x --pure is a usage error",
+    pure2.status === 2 && /--pure/.test(pure2.stderr));
+  h.check("opencode 2.x --pure: the CLI is never dispatched", !existsSync(pure2ArgsFile));
+
+  // 1.x still accepts --pure and forwards it.
+  const pure1OutDir = join(h.scratch, "out-opencode-v1-pure");
+  const pure1ArgsFile = join(h.scratch, "args-opencode-v1-pure");
+  const pure1 = spawnSync(process.execPath, [
+    h.relayPath("opencode"),
+    "--brief", h.briefPath,
+    "--cd", workDir,
+    "--out-dir", pure1OutDir,
+    "--model", "fake/model",
+    "--pure",
+  ], {
+    env: {
+      ...h.baseEnv,
+      SMOKE_MODE: "opencode-success",
+      SMOKE_ARGS_FILE: pure1ArgsFile,
+      SMOKE_VERSION: "1.18.30",
+    },
+    encoding: "utf8",
+  });
+  const pure1Capture = existsSync(pure1ArgsFile) ? JSON.parse(readFileSync(pure1ArgsFile, "utf8")) : {};
+  h.check("opencode 1.x --pure: forwarded to the CLI",
+    pure1.status === 0 &&
+    JSON.stringify(pure1Capture.args) === JSON.stringify([
+      "run", "--format", "json", "--pure",
+      "--agent", "build",
+      "--model", "fake/model",
+      "--auto",
+    ]));
 }
