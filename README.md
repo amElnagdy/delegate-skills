@@ -249,6 +249,19 @@ Per skill — platform, CLI version, and what the run exercised:
   result file; deny rules and the shell sandbox blocking `git commit`, `git push`, `git -C <dir> push`,
   a nested `claude`, and a `$HOME` write.
   macOS, `claude` 2.1.271: `--autocompact` argument handling only. The installed CLI accepted `auto`, `400k`, `1M`, `200`, and `200000` and rejected `auto2`, `50k`, `2m`, `99`, `1000001`, and `0` with exit 1, each observed through `claude --autocompact <value> --help`, which validates the option and exits before any model call; `claude` 2.1.220 rejects the option itself with `unknown option '--autocompact'`, which is the documented 2.1.221 floor. The relay's pass-through, resume re-pass, and `result.json` record are contract-tested against the smoke matrix; no delegated run has been dispatched with `--autocompact` set.
+  Windows 11, native, `claude` 2.1.274 through the npm `claude.cmd` shim, launched from Windows
+  PowerShell 5.1 with an `--out-dir` containing a space: write run under `acceptEdits` editing one
+  file and creating another, with `git status` run through the pre-approved PowerShell tool and a
+  `git commit` attempt denied by the relay's deny rule (`permission_denied` with
+  `decision_reason_type: "rule"` in the event stream, `HEAD` untouched); `--session` resume whose
+  delta brief referred only to "the notes file you created a moment ago" and was applied correctly;
+  `--read-only` plan-mode run ordered to write two files over an already-dirty tree, which wrote
+  nothing and reported `readOnlyViolation: false` with the dirty files byte-identical; a 45s
+  `--timeout` firing on a run blocked in a foreground `ping` grandchild, reporting `timeout` and
+  exit 1 with no `ping`, `cmd`, or `claude` process left behind; `claude_unavailable`/127 writing a
+  result file, and usage errors exiting 2 without one. The runs used `--model haiku`. Not run on
+  Windows: a directly spawned `claude.exe`, the abort path, and a read-only violation. Claude's shell
+  sandbox is unsupported there, so the write profile's PowerShell is not isolated.
 - `cursor-delegate` — Windows, `cursor-agent` 2026.07.23-e383d2b: write run under `--force`; plan-mode
   `--read-only` touching nothing; `--session <id>` resume applying a delta brief; usage errors exiting
   2. A maintainer-run native macOS plan-mode smoke against the same version captured model, session,
@@ -373,7 +386,8 @@ Per skill — platform, CLI version, and what the run exercised:
   flag-override against relays. The smoke suite runs live discovery against installed CLIs
   (versions vary by machine). Native Windows discover smoke not yet claimed.
 
-Not yet verified: native Windows launches for `claude`, exact-head `cline`, `grok`, `kimi`,
+Not yet verified: native Windows launches for a directly spawned `claude.exe` (the npm `claude.cmd`
+shim path has a run above), exact-head `cline`, `grok`, `kimi`,
 `pi`, `qoder`, `vibe`, and `omp` (`codex`/`opencode`/`grok`/`commandcode` have contract-tested `.cmd` shim handling;
 Cursor serializes a pre-joined, quoted command; Qoder and Vibe target their documented native executables).
 Claude's own shell sandbox is unsupported on native Windows regardless of launch mechanics, and upstream

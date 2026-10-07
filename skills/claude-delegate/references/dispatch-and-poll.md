@@ -217,9 +217,10 @@ The relay resolves PATH itself. A native `claude.exe` is spawned directly. An np
 invoked through `cmd.exe /d /v:off /s /c` with every argument quoted and user-selectable values
 restricted; stdin still carries the brief. `taskkill /t /f` terminates the process tree.
 
-This path is implemented but not yet verified on native Windows. Claude's Bash sandbox is unsupported
-there, so even a successful Windows smoke would verify launch and termination mechanics, not provide
-the supported-platform shell boundary.
+The npm `claude.cmd` path has a recorded native Windows run covering write, resume, read-only,
+watchdog tree termination, and the missing-binary result; a directly spawned `claude.exe` is not yet
+verified. Claude's Bash sandbox is unsupported there, so that run verifies launch and termination
+mechanics, not the supported-platform shell boundary.
 
 ## Commit boundary
 

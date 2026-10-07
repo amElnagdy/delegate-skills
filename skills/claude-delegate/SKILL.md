@@ -8,7 +8,7 @@ description: >-
   separate Claude session." Do not trigger merely because the current orchestrator is Claude, and do
   not use when the user asks the current Claude to implement directly without delegation.
 license: MIT
-compatibility: Requires the `claude` CLI (Claude Code) installed and authenticated, Node 18+, and git. The orchestrating agent must be able to run shell commands and read files. Claude's shell sandbox requires macOS, Linux, or WSL2; native Windows launch is pending verification. The optional --autocompact flag requires claude 2.1.221 or newer.
+compatibility: Requires the `claude` CLI (Claude Code) installed and authenticated, Node 18+, and git. The orchestrating agent must be able to run shell commands and read files. Claude's shell sandbox requires macOS, Linux, or WSL2; on native Windows the npm `claude.cmd` launch is verified and a direct `claude.exe` launch is pending verification. The optional --autocompact flag requires claude 2.1.221 or newer.
 metadata:
   version: 0.5.0
 ---
@@ -133,7 +133,9 @@ The normal profile is deliberately explicit:
 
 Native Windows does not support Claude's shell sandbox. The relay restricts the tool surface and
 pre-approves PowerShell so the run remains non-interactive, but that shell is not OS-isolated. Native
-`claude.exe` and npm `claude.cmd` launch paths are implemented; Windows verification is pending.
+`claude.exe` and npm `claude.cmd` launch paths are implemented. The `claude.cmd` path has a recorded
+native Windows run (see the README's Verification status); a directly spawned `claude.exe` is not yet
+verified.
 
 `--read-only` uses `plan` mode with only Read, Glob, and Grep. It removes edit, write, and shell paths,
 then compares parsed git porcelain and fingerprints the working-tree identity and index entries of

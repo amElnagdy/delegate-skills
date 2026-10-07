@@ -92,8 +92,9 @@
  * failed, timeout, aborted, and claude_unavailable outcomes.
  *
  * Native Windows launch behavior supports a directly spawned claude.exe and an
- * npm claude.cmd shim through cmd.exe with strictly serialized arguments. It
- * remains pending native-Windows verification.
+ * npm claude.cmd shim through cmd.exe with strictly serialized arguments. The
+ * claude.cmd path has a recorded native-Windows run; a directly spawned
+ * claude.exe remains pending native-Windows verification.
  */
 
 import { execFileSync, spawn, spawnSync } from "node:child_process";
