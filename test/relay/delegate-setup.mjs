@@ -115,6 +115,8 @@ export function runDelegateSetup(h) {
       shimmedCommandCode.discovered.some(({ key, path, version }) =>
         key === "commandcode" && path === commandCodeShim && version === "override-commandcode"),
     );
+    h.check("discover .cmd probes avoid DEP0190 on Windows Node 24+",
+      Number(process.versions.node.split(".")[0]) < 24 || !withCommandCodeShim.stderr.includes("DEP0190"));
   }
 
   const agyProbeDir = join(h.scratch, "discover-agy");
@@ -206,6 +208,9 @@ if (observation === "models") {
         grok?.models?.status === modelStatus &&
         (first !== "models" || grok.models.values[0] === "grok-code-fast-1"),
     );
+    if (h.WIN && Number(process.versions.node.split(".")[0]) >= 24) {
+      h.check(`Grok .cmd probes avoid DEP0190 when ${first}`, !grokDiscover.stderr.includes("DEP0190"));
+    }
   }
 
   // Keep fixtures inside the repo tree so sandboxed CI/dev runs can write; seed a

@@ -84,7 +84,7 @@
  * and gets PATH unchanged.
  */
 
-import {spawn, execFileSync, spawnSync } from "node:child_process";
+import {spawn, execSync, execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync, renameSync, readFileSync, existsSync, appendFileSync, openSync, fstatSync, readSync, closeSync } from "node:fs";
 import {join, resolve, basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -341,13 +341,16 @@ function codexVersion(probeTimeoutMs, env) {
     // auto-appends .exe, never .cmd, so launching it needs shell:true there or it
     // ENOENTs on a working install. POSIX is unaffected. (git installs a real
     // git.exe and must NOT get this flag — see gitTouchedFiles.)
-    const version = execFileSync("codex", ["--version"], {
+    const options = {
       encoding: "utf8",
       shell: process.platform === "win32",
       timeout: probeTimeoutMs,
       killSignal: "SIGKILL",
       env,
-    }).trim();
+    };
+    const version = (process.platform === "win32"
+      ? execSync("codex --version", options)
+      : execFileSync("codex", ["--version"], options)).trim();
     return { version: version || "unknown", error: null };
   } catch (error) {
     if (error?.code === "ENOENT") return { version: null, error: null };
@@ -552,13 +555,20 @@ function reportVersionFailure(opts, writeResult, run, error, probeTimeoutMs) {
   process.exit(result.exitCode);
 }
 
+function spawnShellLaunch(binary, argv, options, useShell) {
+  if (!useShell) return spawn(binary, argv, options);
+  // Node 24 warns when shell:true is paired with an args array. The args here
+  // are already token-validated or quoted for cmd.exe, so serialize them once.
+  return spawn([binary, ...argv].join(" "), { ...options, shell: true });
+}
+
 function dispatchToCodex(opts, brief, run, writeResult, env) {
   const argv = buildArgv(opts, run.finalPath);
   // shell:true on Windows so the codex.cmd shim resolves (see codexVersion). Safe:
   // the brief is fed via child.stdin below — never argv — and argv holds only
   // sandbox enums, model names, the pattern-checked effort, and file paths.
   // detached on POSIX: the child leads a new process group so killChild can fell the whole tree
-  const child = spawn("codex", argv, { cwd: opts.cd, stdio: ["pipe", "pipe", "pipe"], shell: process.platform === "win32", detached: process.platform !== "win32", env });
+  const child = spawnShellLaunch("codex", argv, { cwd: opts.cd, stdio: ["pipe", "pipe", "pipe"], detached: process.platform !== "win32", env }, process.platform === "win32");
 
   let threadId = null;
   let stdoutBuf = "";

@@ -75,7 +75,7 @@
  * with no file as a usage error.
  */
 
-import {spawn, execFileSync, spawnSync } from "node:child_process";
+import {spawn, execSync, execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync, renameSync, readFileSync, readdirSync, existsSync, appendFileSync, statSync, readlinkSync, lstatSync, openSync, readSync, closeSync, realpathSync } from "node:fs";
 import {join, resolve, basename, dirname, sep, isAbsolute, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -391,18 +391,28 @@ function launchCommand(target) {
   return needsShell(target) ? `"${target.command}"` : target.command;
 }
 
+function spawnShellLaunch(command, argv, options, useShell) {
+  if (!useShell) return spawn(command, argv, options);
+  // Node 24 warns when shell:true is paired with an args array. The shim path
+  // and any spaceable argv values are quoted before they reach cmd.exe.
+  return spawn([command, ...argv].join(" "), { ...options, shell: true });
+}
+
 function zcodeVersion(target, probeTimeoutMs) {
   try {
     // A .cmd shim on win32 needs shell:true — Node's CreateProcess only
     // auto-appends .exe, never .cmd, so it would ENOENT on a working install.
     // A `node <bundle>` launch is a real executable and must NOT get the flag.
-    const version = execFileSync(launchCommand(target), [...target.prefixArgs, "--version"], {
+    const options = {
       encoding: "utf8",
       shell: needsShell(target),
       timeout: probeTimeoutMs,
       killSignal: "SIGKILL",
       env: process.env,
-    }).trim();
+    };
+    const version = (needsShell(target)
+      ? execSync([launchCommand(target), ...target.prefixArgs, "--version"].join(" "), options)
+      : execFileSync(launchCommand(target), [...target.prefixArgs, "--version"], options)).trim();
     return { version: version || "unknown", error: null };
   } catch (error) {
     if (error?.code === "ENOENT") return { version: null, error: null };
@@ -814,13 +824,12 @@ function dispatchToZcode(opts, run, target, writeResult, beforeTree, beforeFinge
   // holds only the mode enum, a pattern-checked session id and tool denylist,
   // and file paths, with spaceable values quoted when the shell is involved.
   // detached on POSIX: the child leads a new process group so killChild can fell the whole tree
-  const child = spawn(launchCommand(target), [...target.prefixArgs, ...argv], {
+  const child = spawnShellLaunch(launchCommand(target), [...target.prefixArgs, ...argv], {
     cwd: opts.cd,
     stdio: ["ignore", "pipe", "pipe"],
-    shell: needsShell(target),
     detached: process.platform !== "win32",
     env: process.env,
-  });
+  }, needsShell(target));
 
   let stdoutBuf = "";
   let stdoutTruncated = false;

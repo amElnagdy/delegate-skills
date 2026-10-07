@@ -70,7 +70,7 @@
  * file must therefore also treat a non-zero exit with no file as a usage error.
  */
 
-import {spawn, execFileSync, spawnSync } from "node:child_process";
+import {spawn, execSync, execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync, renameSync, readFileSync, existsSync, appendFileSync } from "node:fs";
 import {join, resolve, basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -339,12 +339,15 @@ function opencodeVersion(probeTimeoutMs) {
     // auto-appends .exe, never .cmd, so launching it needs shell:true there or it
     // ENOENTs on a working install. POSIX is unaffected. (git installs a real
     // git.exe and must NOT get this flag — see gitTouchedFiles.)
-    const version = execFileSync("opencode", ["--version"], {
+    const options = {
       encoding: "utf8",
       shell: process.platform === "win32",
       timeout: probeTimeoutMs,
       killSignal: "SIGKILL",
-    }).trim();
+    };
+    const version = (process.platform === "win32"
+      ? execSync("opencode --version", options)
+      : execFileSync("opencode", ["--version"], options)).trim();
     return { version: version || "unknown", error: null };
   } catch (error) {
     if (error?.code === "ENOENT") return { version: null, error: null };
@@ -504,6 +507,13 @@ function reportVersionFailure(opts, writeResult, run, error, probeTimeoutMs) {
   process.exit(result.exitCode);
 }
 
+function spawnShellLaunch(binary, argv, options, useShell) {
+  if (!useShell) return spawn(binary, argv, options);
+  // Node 24 warns when shell:true is paired with an args array. The args here
+  // are already token-validated or quoted for cmd.exe, so serialize them once.
+  return spawn([binary, ...argv].join(" "), { ...options, shell: true });
+}
+
 function dispatchToOpenCode(opts, brief, run, writeResult, version) {
   const argv = buildArgv(opts, version);
   // Pin the working root two ways: `cwd` sets the child's real directory, and PWD
@@ -516,13 +526,12 @@ function dispatchToOpenCode(opts, brief, run, writeResult, version) {
   // Safe: the brief is fed via child.stdin below — never argv — and argv holds only
   // flag names, an agent enum, a model string, and a session id, with no shell
   // metacharacters or spaceable paths.
-  const child = spawn("opencode", argv, {
+  const child = spawnShellLaunch("opencode", argv, {
     cwd: opts.cd,
     env: { ...process.env, PWD: opts.cd },
     stdio: ["pipe", "pipe", "pipe"],
-    shell: process.platform === "win32",
     detached: process.platform !== "win32", // POSIX: lead a new process group so killChild can fell the whole tree
-  });
+  }, process.platform === "win32");
 
   let sessionId = opts.session || null;
   let totalCost = 0;

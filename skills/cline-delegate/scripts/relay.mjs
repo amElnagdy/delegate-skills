@@ -542,17 +542,23 @@ function installPreflightSignalHandlers(opts, run, writeResult, getChild) {
   };
 }
 
+function spawnShellLaunch(binary, argv, options, useShell) {
+  if (!useShell) return spawn(binary, argv, options);
+  // Node 24 warns when shell:true is paired with an args array. The args here
+  // are already token-validated or quoted for cmd.exe, so serialize them once.
+  return spawn([binary, ...argv].join(" "), { ...options, shell: true });
+}
+
 function dispatchToCline(opts, brief, run, writeResult) {
-  const child = spawn("cline", buildArgv(opts), {
+  const child = spawnShellLaunch("cline", buildArgv(opts), {
     cwd: opts.cd,
     stdio: ["pipe", "pipe", "pipe"],
     // shell:true on win32 so the cline.cmd shim resolves. Safe on both
     // platforms the same way codex-delegate's launch is: argv holds only fixed
     // values plus token-validated --provider/--model values. The brief is
     // stdin and cwd is a spawn option, so neither reaches cmd.exe.
-    shell: process.platform === "win32",
     detached: process.platform !== "win32", // POSIX: lead a new process group so killChild can fell the whole tree
-  });
+  }, process.platform === "win32");
 
   let sessionId = null;
   let actualProvider = null;

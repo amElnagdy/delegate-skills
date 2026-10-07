@@ -374,6 +374,13 @@ function versionProbeTimeout(opts) {
   return timeoutMs === null ? VERSION_PROBE_TIMEOUT_MS : Math.min(timeoutMs, VERSION_PROBE_TIMEOUT_MS);
 }
 
+function spawnShellLaunch(binary, argv, options, useShell) {
+  if (!useShell) return spawn(binary, argv, options);
+  // Node 24 warns when shell:true is paired with an args array. The args here
+  // are already token-validated or quoted for cmd.exe, so serialize them once.
+  return spawn([binary, ...argv].join(" "), { ...options, shell: true });
+}
+
 function commandCodeEnv(opts) {
   if (!opts.cleanEnv) return process.env;
   const keep = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "LC_CTYPE", "TERM",
@@ -384,12 +391,11 @@ function commandCodeEnv(opts) {
 
 async function commandCodeVersion(probeTimeoutMs, env, onChild) {
   const probe = await new Promise((resolveProbe) => {
-    const child = spawn(LAUNCH_BIN, ["--version"], {
+    const child = spawnShellLaunch(LAUNCH_BIN, ["--version"], {
       stdio: ["ignore", "pipe", "pipe"],
-      shell: WIN_SHELL,
       detached: process.platform !== "win32",
       env,
-    });
+    }, WIN_SHELL);
     onChild(child);
     let stdout = "";
     let stderr = "";
@@ -993,7 +999,7 @@ function installPreflightSignalHandlers(opts, run, writeResult, getChild) {
 function dispatchToCommandCode(opts, brief, run, writeResult, env) {
   const argv = buildArgv(opts);
   // detached on POSIX: the child leads a new process group so killChild can fell the whole tree.
-  const child = spawn(LAUNCH_BIN, argv, { cwd: opts.cd, stdio: ["pipe", "pipe", "pipe"], shell: WIN_SHELL, detached: process.platform !== "win32", env });
+  const child = spawnShellLaunch(LAUNCH_BIN, argv, { cwd: opts.cd, stdio: ["pipe", "pipe", "pipe"], detached: process.platform !== "win32", env }, WIN_SHELL);
 
   const state = { sessionId: null, result: null, lastText: null, truncatedTail: false, deltas: [], pending: [], pendingChars: 0 };
   let stdoutBuf = "";

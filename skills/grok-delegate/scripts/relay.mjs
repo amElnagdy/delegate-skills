@@ -92,7 +92,7 @@
  * file must therefore also treat a non-zero exit with no file as a usage error.
  */
 
-import { spawn, execFileSync as nativeExecFileSync, spawnSync } from "node:child_process";
+import { spawn, execSync, execFileSync as nativeExecFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync, renameSync, readFileSync, readdirSync, existsSync, appendFileSync, lstatSync, readlinkSync, openSync, readSync, closeSync, realpathSync, statSync } from "node:fs";
 import { join, relative, resolve, basename, dirname, isAbsolute, sep } from "node:path";
@@ -469,12 +469,15 @@ function grokVersion(probeTimeoutMs) {
   // git.exe and must NOT get this flag — see gitTouchedFiles.)
   const probe = (argv, timeout = probeTimeoutMs) => {
     try {
-      const version = execFileSync("grok", argv, {
+      const options = {
         encoding: "utf8",
         shell: process.platform === "win32",
         timeout,
         killSignal: "SIGKILL",
-      }).trim();
+      };
+      const version = (process.platform === "win32"
+        ? execSync(["grok", ...argv].join(" "), options)
+        : nativeExecFileSync("grok", argv, options)).trim();
       return { version: version || "unknown", error: null };
     } catch (error) {
       if (error?.code === "ENOENT") return { version: null, error: null };
@@ -944,6 +947,13 @@ function reportVersionFailure(opts, writeResult, run, error, probeTimeoutMs) {
   process.exit(result.exitCode);
 }
 
+function spawnShellLaunch(binary, argv, options, useShell) {
+  if (!useShell) return spawn(binary, argv, options);
+  // Node 24 warns when shell:true is paired with an args array. The args here
+  // are already token-validated or quoted for cmd.exe, so serialize them once.
+  return spawn([binary, ...argv].join(" "), { ...options, shell: true });
+}
+
 function dispatchToGrok(opts, run, writeResult) {
   // enforcement is the kernel sandbox, but it is not total (/tmp, /var/tmp and
   // ~/.grok stay writable), so a --read-only run snapshots the tree up front
@@ -964,13 +974,12 @@ function dispatchToGrok(opts, run, writeResult) {
   // the brief is delivered via --prompt-file (never argv), --model/--effort/--session
   // are restricted to safe tokens at parse time, and the two path args are
   // quoted for win32 in buildArgv.
-  const child = spawn("grok", argv, {
+  const child = spawnShellLaunch("grok", argv, {
     cwd: opts.cd,
     env: { ...process.env },
     stdio: ["ignore", "pipe", "pipe"],
-    shell: process.platform === "win32",
     detached: process.platform !== "win32", // POSIX: lead a new process group so killChild can fell the whole tree
-  });
+  }, process.platform === "win32");
 
   let sessionId = opts.session || null;
   let usage = null;
