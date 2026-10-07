@@ -204,6 +204,31 @@ export async function runOpencode(h) {
     h.pair(joinedCapture.args, "--model", "fake/model#high") &&
     !joinedCapture.args.includes("--variant"));
 
+  // Catalog ids carrying '@' (Workers AI @cf/, Vertex @default) or '~' (OpenRouter ~latest)
+  // are forwarded verbatim.
+  for (const [shape, model] of [
+    ["Workers AI @cf/", "cloudflare-workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast"],
+    ["Vertex @default", "google-vertex-anthropic/claude-opus-4-8@default"],
+    ["OpenRouter ~latest", "openrouter/~anthropic/claude-sonnet-latest"],
+  ]) {
+    const slug = shape.replace(/\W+/g, "-");
+    const catalogOutDir = join(h.scratch, `out-opencode-catalog-model-${slug}`);
+    const catalogArgsFile = join(h.scratch, `args-opencode-catalog-model-${slug}`);
+    const catalogRun = spawnSync(process.execPath, [
+      h.relayPath("opencode"),
+      "--brief", h.briefPath,
+      "--cd", workDir,
+      "--out-dir", catalogOutDir,
+      "--model", model,
+    ], {
+      env: { ...h.baseEnv, SMOKE_MODE: "opencode-success", SMOKE_ARGS_FILE: catalogArgsFile },
+      encoding: "utf8",
+    });
+    const catalogCapture = existsSync(catalogArgsFile) ? JSON.parse(readFileSync(catalogArgsFile, "utf8")) : {};
+    h.check(`opencode catalog model id (${shape}): forwarded verbatim`,
+      catalogRun.status === 0 && h.pair(catalogCapture.args, "--model", model));
+  }
+
   // A model that already carries a variant plus an explicit --variant is ambiguous.
   const conflict = spawnSync(process.execPath, [
     h.relayPath("opencode"),

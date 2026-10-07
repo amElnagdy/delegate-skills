@@ -401,6 +401,45 @@ if (observation === "models") {
     );
     h.check("opencode relay rejects shell-unsafe --variant", unsafeVariantFlag.status === 2);
 
+    // OpenCode catalog ids carry '@' and '~', neither of which is a shell metacharacter.
+    for (const [shape, model] of [
+      ["Workers AI @cf/", "cloudflare-workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast"],
+      ["Vertex @default", "google-vertex-anthropic/claude-opus-4-8@default"],
+      ["region @eu", "requesty/gpt-6.1-sol@eu"],
+      ["OpenRouter ~latest", "openrouter/~anthropic/claude-sonnet-latest"],
+    ]) {
+      const catalogModel = {
+        version: "delegate-fleet.v1",
+        lanes: { feature: { implementer: "opencode", model } },
+      };
+      const catalogModelFile = join(cfgRepo, `catalog-opencode-model-${shape.replace(/\W+/g, "-")}.json`);
+      writeFileSync(catalogModelFile, `${JSON.stringify(catalogModel)}\n`);
+      const acceptCatalogModel = spawnSync(
+        process.execPath,
+        [join(setupDir, "config.mjs"), "validate", catalogModelFile],
+        { encoding: "utf8", env: process.env },
+      );
+      h.check(`config validate accepts opencode catalog model id (${shape})`, acceptCatalogModel.status === 0);
+    }
+    // '@' and '~' must not open the door to cmd.exe metacharacters ('&', '%') riding alongside them.
+    for (const [index, model] of ["x/@cf & whoami", "x/~%PATH%"].entries()) {
+      const badOpenCodeModel = {
+        version: "delegate-fleet.v1",
+        lanes: { feature: { implementer: "opencode", model } },
+      };
+      const badOpenCodeModelFile = join(cfgRepo, `bad-opencode-model-${index}.json`);
+      writeFileSync(badOpenCodeModelFile, `${JSON.stringify(badOpenCodeModel)}\n`);
+      const rejectOpenCodeModel = spawnSync(
+        process.execPath,
+        [join(setupDir, "config.mjs"), "validate", badOpenCodeModelFile],
+        { encoding: "utf8", env: process.env },
+      );
+      h.check(
+        `config validate rejects shell-unsafe opencode model (${model})`,
+        rejectOpenCodeModel.status === 2 && /unsupported characters/.test(rejectOpenCodeModel.stderr),
+      );
+    }
+
     const badEffort = {
       version: "delegate-fleet.v1",
       lanes: { feature: { implementer: "opencode", model: "opencode/grok", effort: "high" } },
