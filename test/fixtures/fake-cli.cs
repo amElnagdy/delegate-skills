@@ -62,6 +62,23 @@ class FakeCli {
       return 0;
     }
     if (mode == "agy-silent-noop") return 0;
+    if (mode == "agy-stall" || mode == "agy-streaming") {
+      var logAt = Array.IndexOf(args, "--log-file");
+      var logPath = logAt >= 0 ? args[logAt + 1] : null;
+      Action<string> log = (text) => { if (logPath != null) File.AppendAllText(logPath, text); };
+      log("I0816 streamGenerateContent\n");
+      var editFile = Environment.GetEnvironmentVariable("SMOKE_EDIT_FILE");
+      if (!String.IsNullOrEmpty(editFile)) File.AppendAllText(editFile, "dispatch edit\n");
+      if (mode == "agy-stall") {
+        while (true) { Thread.Sleep(100); log("I0816 fetchAvailableModels\n"); }
+      }
+      for (int tick = 1; tick <= 24; tick++) {
+        Thread.Sleep(125);
+        log(tick % 2 == 1 ? "I0816 streamGenerate" : "Content\n");
+      }
+      Console.WriteLine("fake agy streamed to completion");
+      return 0;
+    }
     if (Environment.GetEnvironmentVariable("SMOKE_MODE") == "qoder-success") {
       File.WriteAllLines(Environment.GetEnvironmentVariable("SMOKE_ARGS_FILE"), args);
       Console.WriteLine("{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"qoder-session-1\",\"model\":\"performance\",\"permissionMode\":\"auto\"}");

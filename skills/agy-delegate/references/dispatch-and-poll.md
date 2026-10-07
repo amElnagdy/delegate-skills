@@ -42,6 +42,7 @@ Options:
 | `--dangerously-skip-permissions` | Pass Antigravity's permission-bypass flag; mutually exclusive with `--read-only`. Never use this unless the human explicitly accepts it. |
 | `--print-timeout <duration>` | Timeout agy itself applies to print mode (default: `30m`). |
 | `--timeout <dur>` | Relay-side watchdog (e.g. `30m`); overrides the default of `--print-timeout` plus a 60s grace. On expiry the agy process tree is killed and `result.json` gets `status: "timeout"`. Set it explicitly when agy may hang past its own print timeout. Malformed, zero, and out-of-range durations are rejected; the maximum is `596h31m23s`. |
+| `--stall-timeout <dur>` | Opt-in stall watchdog (e.g. `5m`; off by default). If `agy.log` gains no new `streamGenerateContent` line for this long, the agy process tree is killed and `result.json` gets `status: "stalled"`. The clock starts at launch and restarts on every generation call, so it catches a run that lost its stream and only re-runs auth and model-discovery handshakes while the log keeps growing. Set it above the longest tool step you expect: a long test run makes no generation calls. It keys on agy's log format, which agy does not document as stable. Validated like `--timeout`. |
 | `--add-dir <dir>` | Add an extra workspace directory. Repeatable; relative paths resolve against `--cd`. Fresh runs always add the `--cd` repo (absolute path) as a workspace dir. Edits inside extra workspaces are not reported in `touchedFiles`. |
 | `--out-dir <dir>` | Where artifacts go (default: a fresh dir under the system temp dir). |
 
@@ -54,8 +55,8 @@ touched-files report shows only Antigravity's edits and nothing of the helper's 
 
 - `schema` - the result-format version (currently `delegate-relay.result.v1`)
 - `tool` - `agy`
-- `status` - `completed` | `failed` | `timeout` | `aborted` | `agy_unavailable`
-- `exitCode` - mirrors Antigravity's exit code; `128` plus the signal number if the child was killed; `127` if `agy` is not on PATH; on a `timeout` the relay forces a non-zero code even when the child exited `0` after the watchdog's SIGTERM
+- `status` - `completed` | `failed` | `timeout` | `stalled` | `aborted` | `agy_unavailable`
+- `exitCode` - mirrors Antigravity's exit code; `128` plus the signal number if the child was killed; `127` if `agy` is not on PATH; on a `timeout` or `stalled` run the relay forces a non-zero code even when the child exited `0` after the watchdog's SIGTERM
 - `signal` - the signal that killed the child, otherwise `null`
 - `agyVersion` - inferred from `agy changelog` when available
 - `projectId` / `conversationId` - parsed from the Antigravity log when present
@@ -65,11 +66,11 @@ touched-files report shows only Antigravity's edits and nothing of the helper's 
 - `readOnlyViolation` - `true` when fingerprints prove a working-tree change, `false` when coverage is complete and proves none, and `null` when fingerprinting was incomplete or the run was not `--read-only`
 - `briefPath` / `finalPath` / `logPath` / `stderrPath` - the exact brief, final message, Antigravity
   log, and stderr capture
-- `workdir`, `model`, `effort`, `project` (the `--project` you passed, vs `projectId` parsed from the log),
+- `workdir`, `model`, `effort`, `stallTimeout` (the `--stall-timeout` you passed, or `null`), `project` (the `--project` you passed, vs `projectId` parsed from the log),
   `sandbox`, `readOnly`, `dangerouslySkipPermissions`, `resumed` (true for a `--resume-last` or `--conversation`
   run), `startedAt`, `finishedAt`
-- `stderrTail` - last ~20 stderr lines; present on every run that did not complete (`failed`, `timeout`, `aborted`), except a launch failure, which reports `failed` with no `stderrTail`; also present when `finalMessage` is empty so diagnostics are not discarded
-- `error` - present on a launch failure, `timeout`, `aborted`, headless permission denial, or silent no-op
+- `stderrTail` - last ~20 stderr lines; present on every run that did not complete (`failed`, `timeout`, `stalled`, `aborted`), except a launch failure, which reports `failed` with no `stderrTail`; also present when `finalMessage` is empty so diagnostics are not discarded
+- `error` - present on a launch failure, `timeout`, `stalled`, `aborted`, headless permission denial, or silent no-op
 
 The helper also prints a summary to stdout and normally exits with Antigravity's exit code. It forces
 exit 1 when Antigravity exits 0 after a detected headless permission denial or with neither a final
@@ -96,6 +97,11 @@ process has exited and `result.json` is written.
 - **`status: timeout`:** the relay watchdog killed the run. Inspect `error` to see whether the selected
   limit was explicit `--timeout` or the derived `--print-timeout` plus 60s grace. The working tree may
   hold a half-applied change — inspect it before changing that limit, reducing the brief, or resuming.
+- **`status: stalled`:** the `--stall-timeout` watchdog killed a run that stopped making generation
+  calls. This usually means agy lost its stream, not that the brief was too large, and the working tree
+  often holds nearly finished work. Review it and finish the rest with a short delta brief (e.g.
+  `--conversation <id>`) instead of re-dispatching the whole task. If the run was really in a long
+  tool step, raise `--stall-timeout` above that step.
 - **`status: aborted`:** the relay itself was killed (its parent's timeout, a stopped task, a
   closed terminal) and forwarded the kill to agy. The result is written before the relay exits;
   inspect the working tree before re-dispatching. On native Windows a hard kill of the relay is

@@ -170,6 +170,31 @@ if (process.env.SMOKE_MODE === "agy-silent-edit") {
   process.exit(0);
 }
 if (process.env.SMOKE_MODE === "agy-silent-noop") process.exit(0);
+// agy-stall: one generation call, then only reconnect handshakes - the log keeps growing but
+// no model request follows. agy-streaming: generation calls keep coming, each marker written in
+// two halves so the relay's log watch must join a marker split across reads.
+if (process.env.SMOKE_MODE === "agy-stall" || process.env.SMOKE_MODE === "agy-streaming") {
+  const logAt = args.indexOf("--log-file");
+  const log = (text) => { if (logAt !== -1) fs.appendFileSync(args[logAt + 1], text); };
+  log("I0816 streamGenerateContent\n");
+  // #89's shape: the edits land, then the stream dies before the run can finish.
+  if (process.env.SMOKE_EDIT_FILE) fs.appendFileSync(process.env.SMOKE_EDIT_FILE, "dispatch edit\n");
+  if (process.env.SMOKE_MODE === "agy-stall") {
+    setInterval(() => log("I0816 fetchAvailableModels\n"), 100);
+  } else {
+    let ticks = 0;
+    const stream = setInterval(() => {
+      ticks += 1;
+      log(ticks % 2 ? "I0816 streamGenerate" : "Content\n");
+      if (ticks >= 24) {
+        clearInterval(stream);
+        console.log("fake agy streamed to completion");
+        process.exit(0);
+      }
+    }, 125);
+  }
+  return;
+}
 if (process.env.SMOKE_MODE === "zcode-success") {
   fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify(args));
   // ZCode's bundled AI SDK prints this banner with console.info — i.e. on stdout,

@@ -242,7 +242,10 @@ Per skill — platform, CLI version, and what the run exercised:
   `readOnly` true, `readOnlyViolation` false; argument validation for a bad `--effort` value and for
   `--read-only` combined with `--dangerously-skip-permissions`, both exiting 2; resume by
   `--conversation` with a delta brief. macOS, `agy` 1.0.16: headless edit run, `--print=` delivery,
-  absolute `--add-dir` workspace pin.
+  absolute `--add-dir` workspace pin. `--stall-timeout` is contract-tested, live stall pending: a fake
+  whose log keeps growing without `streamGenerateContent` lines reports `stalled`, steady generation
+  calls split across writes keep a run alive, and the watchdog is off unless passed; run on native
+  Windows against the compiled fake.
 - `claude-delegate` — macOS, `claude` 2.1.220: write run under `acceptEdits`; plan mode refusing an
   edit, with the Git tripwire true on a violation and false on a clean run;
   `--session`/`--resume-last` resume; `claude_unavailable`/127 and usage errors exiting 2 without a
