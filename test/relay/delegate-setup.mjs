@@ -621,6 +621,266 @@ if (observation === "models") {
       laneMismatchResolve.status === 2 && /use opencode-delegate/.test(laneMismatchResolve.stderr),
     );
 
+    // ---- per-orchestrator agent fleets (global `agents` + selector) ----
+    const agentDoc = {
+      version: "delegate-fleet.v1",
+      lanes: {
+        feature: { implementer: "opencode", model: "opencode/shared-fake", variant: "high" },
+        tests: { implementer: "grok", effort: "medium" },
+      },
+      agents: {
+        claude: {
+          lanes: {
+            feature: { implementer: "opencode", model: "opencode/agent-fake" },
+            review: { implementer: "claude", readOnly: true },
+          },
+        },
+      },
+    };
+    const agentFile = join(cfgRepo, "agent-lanes.json");
+    writeFileSync(agentFile, `${JSON.stringify(agentDoc, null, 2)}\n`);
+
+    // Validation: the agents map rides the same lane validator shape-by-shape.
+    const validateAgents = spawnSync(
+      process.execPath,
+      [join(setupDir, "config.mjs"), "validate", agentFile],
+      { encoding: "utf8", env: process.env },
+    );
+    h.check("config validate accepts a map with agent fleets", validateAgents.status === 0);
+    for (const [index, [label, doc]] of [
+      ["non-object agents", { agents: "claude" }],
+      ["unknown agent field", { agents: { claude: { model: "opencode/grok" } } }],
+      ["missing lanes object", { agents: { claude: {} } }],
+      ["agents array", { agents: [1] }],
+      ["unsafe identity ../evil", { agents: { "../evil": { lanes: {} } } }],
+      ["agent fleet lane below the shared bar", { agents: { claude: { lanes: { f: { implementer: "opencode" } } } } }],
+    ].entries()) {
+      const bad = { version: "delegate-fleet.v1", lanes: { ok: { implementer: "claude", effort: "high" } }, ...doc };
+      const badFile = join(cfgRepo, `bad-agents-${index}.json`);
+      writeFileSync(badFile, `${JSON.stringify(bad, null, 2)}\n`);
+      const rejected = spawnSync(
+        process.execPath,
+        [join(setupDir, "config.mjs"), "validate", badFile],
+        { encoding: "utf8", env: process.env },
+      );
+      h.check(`config validate rejects agent fleets: ${label}`, rejected.status === 2);
+    }
+    // A raw "__proto__" key survives JSON.parse as an own property; build the
+    // payload as text or the object literal would swallow it into the prototype.
+    const protoFile = join(cfgRepo, "bad-agents-proto.json");
+    writeFileSync(
+      protoFile,
+      `{"version":"delegate-fleet.v1","lanes":{"ok":{"implementer":"claude"}},"agents":{"__proto__":{"lanes":{}}}}\n`,
+    );
+    const rejectProto = spawnSync(
+      process.execPath,
+      [join(setupDir, "config.mjs"), "validate", protoFile],
+      { encoding: "utf8", env: process.env },
+    );
+    h.check("config validate rejects agent fleets: unsafe identity __proto__", rejectProto.status === 2);
+
+    // Project scope never carries agent fleets (fail closed, not silently ignored).
+    const projectWithAgents = {
+      version: "delegate-fleet.v1",
+      lanes: { feature: { implementer: "claude", effort: "high" } },
+      agents: { claude: { lanes: {} } },
+    };
+    const projectWithAgentsFile = join(cfgRepo, "project-agents.json");
+    writeFileSync(projectWithAgentsFile, `${JSON.stringify(projectWithAgents, null, 2)}\n`);
+    const rejectProjectAgents = spawnSync(
+      process.execPath,
+      [join(setupDir, "config.mjs"), "write", "--scope", "project", "--cwd", cfgRepo, projectWithAgentsFile],
+      { encoding: "utf8", env: process.env },
+    );
+    h.check(
+      "config write --scope project refuses agents (global-only fleets)",
+      rejectProjectAgents.status === 2 && /global-scope/.test(rejectProjectAgents.stderr),
+    );
+    mkdirSync(join(cfgRepo, ".delegate"), { recursive: true });
+    writeFileSync(join(cfgRepo, ".delegate", "config.json"), JSON.stringify(projectWithAgents));
+    const rejectProjectLoad = spawnSync(process.execPath,
+      [join(setupDir, "config.mjs"), "load", "--cwd", cfgRepo], { encoding: "utf8", env: process.env });
+    h.check("project config with agents fails load rather than silently ignoring the field",
+      rejectProjectLoad.status === 2 && /project fleet config cannot define agents/.test(rejectProjectLoad.stderr));
+    rmSync(join(cfgRepo, ".delegate", "config.json"));
+
+    const writeAgents = spawnSync(
+      process.execPath,
+      [join(setupDir, "config.mjs"), "write", "--scope", "global", agentFile],
+      { encoding: "utf8", env: process.env },
+    );
+    h.check("config write --scope global accepts agent fleets", writeAgents.status === 0);
+
+    const agentLoad = (env, extraArgs) => spawnSync(
+      process.execPath,
+      [join(setupDir, "config.mjs"), "load", "--cwd", cfgRepo, ...(extraArgs ?? [])],
+      { encoding: "utf8", env: { ...process.env, ...env } },
+    );
+    const parseOutput = (run) => {
+      try { return JSON.parse(run.stdout); } catch { return null; }
+    };
+    const noSelector = parseOutput(agentLoad());
+    h.check(
+      "load without a selector uses shared lanes and lists configured fleets",
+      noSelector?.lanes?.feature?.model === "opencode/shared-fake" &&
+        noSelector?.lanes?.feature?.variant === "high" &&
+        noSelector?.agent === null &&
+        noSelector?.agentFleets?.join(",") === "claude" &&
+        noSelector?.lanes?.review === undefined,
+    );
+    const claudeByEnv = parseOutput(agentLoad({ DELEGATE_ORCHESTRATOR: "claude" }));
+    h.check(
+      "DELEGATE_ORCHESTRATOR selects the agent fleet",
+      claudeByEnv?.agent === "claude" &&
+        claudeByEnv?.lanes?.feature?.model === "opencode/agent-fake" &&
+        claudeByEnv?.lanes?.review?.implementer === "claude",
+    );
+    // Whole-lane replacement: the agent lane replaces the shared lane wholesale,
+    // so the shared `variant` dial must not leak into the agent view.
+    h.check(
+      "agent fleet lane replaces the whole shared lane (no dial merge)",
+      claudeByEnv?.lanes?.feature?.variant === undefined,
+    );
+    const claudeByFlag = parseOutput(agentLoad({}, ["--agent", "claude"]));
+    h.check(
+      "--agent selects the same fleet, reported as the selector",
+      claudeByFlag?.agent === "claude" && claudeByFlag?.chosenBy === "--agent" &&
+        claudeByFlag?.lanes?.feature?.model === "opencode/agent-fake",
+    );
+    // Explicit --agent beats a disagreeing env selector (explicit wins, like dials);
+    // the env value would otherwise be unconfigured.
+    const flagBeatsEnv = parseOutput(agentLoad({ DELEGATE_ORCHESTRATOR: "cursor" }, ["--agent", "claude"]));
+    h.check(
+      "--agent wins over DELEGATE_ORCHESTRATOR",
+      flagBeatsEnv?.agent === "claude" && flagBeatsEnv?.agentFleets?.join(",") === "claude",
+    );
+    const rejectUnknownAgent = agentLoad({}, ["--agent", "cursor"]);
+    h.check(
+      "unknown agent selector fails closed",
+      rejectUnknownAgent.status === 2 && /agent "cursor" has no fleet/.test(rejectUnknownAgent.stderr) &&
+        /configured: claude/.test(rejectUnknownAgent.stderr),
+    );
+    const rejectPrototypeAgent = agentLoad({}, ["--agent", "constructor"]);
+    h.check("inherited object property cannot masquerade as an agent fleet",
+      rejectPrototypeAgent.status === 2 && /has no fleet/.test(rejectPrototypeAgent.stderr));
+    const rejectUnsafeEnv = agentLoad({ DELEGATE_ORCHESTRATOR: "../evil" });
+    h.check(
+      "unsafe DELEGATE_ORCHESTRATOR fails closed",
+      rejectUnsafeEnv.status === 2 && /invalid agent selector/.test(rejectUnsafeEnv.stderr),
+    );
+    const rejectUnsafeFlag = agentLoad({}, ["--agent", "head chair"]);
+    h.check(
+      "unsafe --agent identity fails closed",
+      rejectUnsafeFlag.status === 2 && /invalid agent selector/.test(rejectUnsafeFlag.stderr),
+    );
+    const emptyEnv = agentLoad({ DELEGATE_ORCHESTRATOR: "   " });
+    h.check(
+      "whitespace-only DELEGATE_ORCHESTRATOR counts as no selection",
+      parseOutput(emptyEnv)?.agent === null && emptyEnv.status === 0,
+    );
+
+    // Selector with no agents block at all (shared-only config): fail closed.
+    const preventAccidentalRemoval = spawnSync(process.execPath, [join(setupDir, "config.mjs"), "write", "--scope", "global", goodFile], {
+      encoding: "utf8", env: process.env,
+    });
+    h.check("global write refuses to drop existing agent fleets without explicit approval",
+      preventAccidentalRemoval.status === 2 && /would remove agent fleets: claude/.test(preventAccidentalRemoval.stderr) &&
+      JSON.parse(readFileSync(join(cfgHome, ".config", "delegate-skills", "config.json"), "utf8")).agents?.claude !== undefined);
+    spawnSync(process.execPath, [join(setupDir, "config.mjs"), "write", "--scope", "global", "--allow-agent-removal", goodFile], {
+      encoding: "utf8",
+      env: process.env,
+    });
+    const rejectNoFleets = agentLoad({ DELEGATE_ORCHESTRATOR: "claude" });
+    h.check(
+      "agent selector with no agents block fails closed (no silent shared fleet)",
+      rejectNoFleets.status === 2 && /no agent fleets are configured/.test(rejectNoFleets.stderr),
+    );
+    spawnSync(process.execPath, [join(setupDir, "config.mjs"), "write", "--scope", "global", agentFile], {
+      encoding: "utf8",
+      env: process.env,
+    });
+
+    // Lane resolution under a selector: agent lanes override same-name shared lanes.
+    const agentLaneResolve = (env, extraArgs) => spawnSync(
+      process.execPath,
+      [
+        join(setupDir, "lane.mjs"), "resolve",
+        "--cwd", cfgRepo, "--lane", "feature", "--implementer", "opencode",
+        ...(extraArgs ?? []),
+      ],
+      { encoding: "utf8", env: { ...process.env, ...env } },
+    );
+    let sharedResolve = null;
+    try { sharedResolve = JSON.parse(agentLaneResolve().stdout); } catch { sharedResolve = null; }
+    h.check("lane resolve without a selector refuses an overridden shared lane",
+      sharedResolve === null && /differs by orchestrator/.test(agentLaneResolve().stderr));
+    const deliberateShared = parseOutput(agentLaneResolve({ DELEGATE_ORCHESTRATOR: "__shared__" }));
+    h.check("explicit shared selector resolves an overridden shared lane",
+      deliberateShared?.dials?.model === "opencode/shared-fake" && deliberateShared?.source === "global");
+    let agentResolve = null;
+    try { agentResolve = JSON.parse(agentLaneResolve({ DELEGATE_ORCHESTRATOR: "claude" }).stdout); } catch { agentResolve = null; }
+    h.check(
+      "lane resolve with DELEGATE_ORCHESTRATOR applies agent dials",
+      agentResolve?.dials?.model === "opencode/agent-fake" && agentResolve?.dials?.variant === undefined,
+    );
+    const agentOnlySharedMiss = agentLaneResolve({}, ["--lane", "review", "--implementer", "claude"]);
+    h.check(
+      "agent-only lane is inaccessible without a selector, with a pointing error",
+      agentOnlySharedMiss.status === 2 &&
+        /fleet lane "review" differs by orchestrator/.test(agentOnlySharedMiss.stderr) &&
+        /DELEGATE_ORCHESTRATOR/.test(agentOnlySharedMiss.stderr),
+    );
+    const agentOnlyWithSelector = agentLaneResolve({ DELEGATE_ORCHESTRATOR: "claude" }, ["--lane", "review", "--implementer", "claude"]);
+    let agentOnlyJson = null;
+    try { agentOnlyJson = JSON.parse(agentOnlyWithSelector.stdout); } catch { agentOnlyJson = null; }
+    h.check(
+      "agent-only lane resolves under its selector",
+      agentOnlyWithSelector.status === 0 && agentOnlyJson?.dials?.readOnly === true,
+    );
+    // Names like "constructor" are legal lane/identity tokens but inherited
+    // Object properties must not become accidental lanes or hint lists.
+    const prototypeName = agentLaneResolve({}, ["--lane", "constructor"]);
+    h.check("prototype property names are not treated as configured lanes",
+      prototypeName.status === 2 && /fleet lane not found: constructor/.test(prototypeName.stderr));
+    const agentImplementerMismatch = agentLaneResolve({ DELEGATE_ORCHESTRATOR: "claude" }, ["--lane", "feature", "--implementer", "claude"]);
+    h.check(
+      "agent view keeps implementer containment (mismatch fails loud)",
+      agentImplementerMismatch.status === 2 && /use opencode-delegate/.test(agentImplementerMismatch.stderr),
+    );
+
+    // Project lanes continue to override both shared and agent-specific global lanes.
+    const projectFeature = { version: "delegate-fleet.v1", lanes: { feature: { implementer: "claude", effort: "high" } } };
+    const projectFeatureFile = join(cfgRepo, "project-feature.json");
+    writeFileSync(projectFeatureFile, `${JSON.stringify(projectFeature, null, 2)}\n`);
+    const writeProjectFeature = spawnSync(
+      process.execPath,
+      [join(setupDir, "config.mjs"), "write", "--scope", "project", "--cwd", cfgRepo, projectFeatureFile],
+      { encoding: "utf8", env: process.env },
+    );
+    // The project feature lane is implementer claude; under the claude selector it
+    // wins over both the shared lane (opencode) and the agents' own feature lane.
+    const projectWinnerRun = spawnSync(
+      process.execPath,
+      [join(setupDir, "lane.mjs"), "resolve", "--cwd", cfgRepo, "--lane", "feature", "--implementer", "claude", "--agent", "claude"],
+      { encoding: "utf8", env: { ...process.env, DELEGATE_ORCHESTRATOR: "claude" } },
+    );
+    let projectWinner = null;
+    try { projectWinner = JSON.parse(projectWinnerRun.stdout); } catch { projectWinner = null; }
+    h.check(
+      "project lane overrides the agent fleet (trusted project still wins)",
+      writeProjectFeature.status === 0 && projectWinner?.source === "project" &&
+        projectWinner?.dials?.effort === "high" && projectWinner?.dials?.model === undefined,
+    );
+    // Restore a pristine project scope and the shared-only global map for the rest
+    // of the fleet suite.
+    rmSync(join(cfgRepo, ".delegate", "config.json"), { force: true });
+    rmSync(join(cfgRepo, ".git", "delegate-skills", "project-config.sha256"), { force: true });
+    rmSync(join(cfgRepo, ".git", "delegate-skills"), { recursive: true, force: true });
+    spawnSync(process.execPath, [join(setupDir, "config.mjs"), "write", "--scope", "global", "--allow-agent-removal", goodFile], {
+      encoding: "utf8",
+      env: process.env,
+    });
+
     const laneBrief = join(cfgRepo, "lane-brief.txt");
     writeFileSync(laneBrief, "fleet lane smoke brief\n");
     const laneOut = join(cfgRepo, "out-lane-opencode");
@@ -737,7 +997,7 @@ if (observation === "models") {
       !agyDspArgs.includes("--mode") &&
       h.result(agyDspOut).dangerouslySkipPermissions === true &&
       h.result(agyDspOut).readOnly === false);
-    spawnSync(process.execPath, [join(setupDir, "config.mjs"), "write", "--scope", "global", goodFile], {
+    spawnSync(process.execPath, [join(setupDir, "config.mjs"), "write", "--scope", "global", "--allow-agent-removal", goodFile], {
       encoding: "utf8",
       env: process.env,
     });
@@ -870,6 +1130,96 @@ if (observation === "models") {
       overrideRun.status === 0 &&
         h.pair(overrideArgs, "--model", "openai/gpt-test#low") &&
         !overrideArgs.includes("--variant"));
+
+    // ---- relay passes the orchestrator identity through to lane resolution ----
+    // Relays never derive the agent from the implementer key: the dispatching
+    // orchestrator exports DELEGATE_ORCHESTRATOR and the relay's environment
+    // reaches lane.mjs unchanged. Restore the agents doc for these runs.
+    spawnSync(process.execPath, [join(setupDir, "config.mjs"), "write", "--scope", "global", agentFile], {
+      encoding: "utf8",
+      env: process.env,
+    });
+    const agentRelayOut = join(cfgRepo, "out-lane-agent-select");
+    const agentRelayArgsFile = join(cfgRepo, "args-lane-agent-select.json");
+    mkdirSync(agentRelayOut, { recursive: true });
+    const agentRelayRun = spawnSync(
+      process.execPath,
+      [h.relayPath("opencode"), "--brief", laneBrief, "--cd", cfgRepo, "--out-dir", agentRelayOut, "--lane", "feature"],
+      {
+        encoding: "utf8",
+        env: {
+          ...fleetEnv,
+          DELEGATE_ORCHESTRATOR: "claude",
+          SMOKE_MODE: "capture",
+          SMOKE_ARGS_FILE: agentRelayArgsFile,
+          SMOKE_VERSION: "opencode v2.0.11",
+        },
+      },
+    );
+    const agentRelayArgs = existsSync(agentRelayArgsFile) ? JSON.parse(readFileSync(agentRelayArgsFile, "utf8")) : [];
+    h.check("relay --lane: DELEGATE_ORCHESTRATOR selects the agent fleet through the relay",
+      agentRelayRun.status === 0 &&
+        h.pair(agentRelayArgs, "--model", "opencode/agent-fake") &&
+        !agentRelayArgs.includes("--variant"));
+    h.check("relay --lane: result records agent-selected lane as global source",
+      existsSync(join(agentRelayOut, "result.json")) &&
+        h.result(agentRelayOut).lane === "feature" &&
+        h.result(agentRelayOut).laneSource === "global" &&
+        h.result(agentRelayOut).model === "opencode/agent-fake");
+
+    // An empty selector cannot silently select a shared lane overridden by an agent.
+    const sharedRelayOut = join(cfgRepo, "out-lane-agent-shared");
+    const sharedRelayArgsFile = join(cfgRepo, "args-lane-agent-shared.json");
+    mkdirSync(sharedRelayOut, { recursive: true });
+    const sharedRelayRun = spawnSync(
+      process.execPath,
+      [h.relayPath("opencode"), "--brief", laneBrief, "--cd", cfgRepo, "--out-dir", sharedRelayOut, "--lane", "feature"],
+      {
+        encoding: "utf8",
+        env: {
+          ...fleetEnv,
+          DELEGATE_ORCHESTRATOR: "",
+          SMOKE_MODE: "capture",
+          SMOKE_ARGS_FILE: sharedRelayArgsFile,
+          SMOKE_VERSION: "opencode v2.0.11",
+        },
+      },
+    );
+    h.check("relay --lane: empty selector refuses an overridden shared lane",
+      sharedRelayRun.status === 2 && /differs by orchestrator/.test(sharedRelayRun.stderr));
+    const deliberateSharedRelay = spawnSync(process.execPath,
+      [h.relayPath("opencode"), "--brief", laneBrief, "--cd", cfgRepo, "--out-dir", sharedRelayOut, "--lane", "feature"],
+      { encoding: "utf8", env: { ...fleetEnv, DELEGATE_ORCHESTRATOR: "__shared__", SMOKE_MODE: "capture", SMOKE_ARGS_FILE: sharedRelayArgsFile, SMOKE_VERSION: "opencode v2.0.11" } });
+    const explicitSharedArgs = existsSync(sharedRelayArgsFile) ? JSON.parse(readFileSync(sharedRelayArgsFile, "utf8")) : [];
+    h.check("relay --lane: explicit shared selector uses shared lanes",
+      deliberateSharedRelay.status === 0 && h.pair(explicitSharedArgs, "--model", "opencode/shared-fake#high"));
+
+    // Unconfigured selector: the relay fails loud before spawning the implementer.
+    const unknownAgentOut = join(cfgRepo, "out-lane-agent-unknown");
+    mkdirSync(unknownAgentOut, { recursive: true });
+    const unknownAgentRun = spawnSync(
+      process.execPath,
+      [h.relayPath("opencode"), "--brief", laneBrief, "--cd", cfgRepo, "--out-dir", unknownAgentOut, "--lane", "feature"],
+      {
+        encoding: "utf8",
+        env: {
+          ...fleetEnv,
+          DELEGATE_ORCHESTRATOR: "cursor",
+          SMOKE_MODE: "capture",
+          SMOKE_VERSION: "opencode v2.0.11",
+        },
+      },
+    );
+    h.check("relay --lane: unconfigured agent selector fails closed (exit 2, no result)",
+      unknownAgentRun.status === 2 &&
+        /agent "cursor" has no fleet/.test(unknownAgentRun.stderr) &&
+        !existsSync(join(unknownAgentOut, "result.json")));
+
+    // Back to the shared-only global map for the rest of the fleet suite.
+    spawnSync(process.execPath, [join(setupDir, "config.mjs"), "write", "--scope", "global", "--allow-agent-removal", goodFile], {
+      encoding: "utf8",
+      env: process.env,
+    });
 
     const projectOnly = {
       version: "delegate-fleet.v1",

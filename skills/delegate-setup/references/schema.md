@@ -1,6 +1,7 @@
 # Fleet schema (`delegate-fleet.v1`)
 
-One concept: **lanes**. A lane names an implementer and optional dials.
+One concept: **lanes**. A lane names an implementer and optional dials. A global config can also
+carry **per-orchestrator fleets**: the same lane shape, scoped to one orchestrator agent.
 
 ## Document
 
@@ -26,9 +27,69 @@ One concept: **lanes**. A lane names an implementer and optional dials.
 ```
 
 - `version` must be `delegate-fleet.v1`.
-- `lanes` is an object keyed by lane name (`[A-Za-z0-9][A-Za-z0-9._-]*`).
+- `lanes` is an object keyed by lane name (`[A-Za-z0-9][A-Za-z0-9._-]*`) and is always required —
+  shared lanes remain the plain fleet even when per-orchestrator fleets exist.
 - Every lane **requires** `implementer` (a key from the registry below).
 - Other fields are dials; only dials listed for that implementer are allowed.
+
+## Per-orchestrator fleets (`agents`, global scope only)
+
+The global config may also carry a top-level `agents` object keyed by an **orchestrator identity** —
+a free label for the seat that dispatches (the orchestrating agent's name, e.g. `claude`, `cursor`,
+or any custom name like `main` or `review-ide`). An identity is **not** an implementer key, and it
+must never be derived from one; each fleet entry holds its own `lanes` object in the same shape:
+
+```json
+{
+  "version": "delegate-fleet.v1",
+  "lanes": {
+    "feature": { "implementer": "opencode", "model": "opencode/grok", "variant": "high" }
+  },
+  "agents": {
+    "claude": {
+      "lanes": {
+        "feature": { "implementer": "claude", "effort": "high" }
+      }
+    }
+  }
+}
+```
+
+Identity names follow the lane-name shape (`[A-Za-z0-9][A-Za-z0-9._-]*`) so a selector can never
+smuggle shell or path syntax. Only `lanes` is allowed inside an agent entry — other fields fail
+validation, so future schema additions are always explicit rather than silent. Because whole-lane
+replacement applies at every layer, an agent fleet lane replaces the same-name shared lane
+**wholesale** (dials never merge across layers).
+
+Precedence for the same lane name, highest first:
+
+| # | Layer |
+| --- | --- |
+| 1 | project `.delegate/config.json` `lanes` (trusted at dispatch only) |
+| 2 | global `agents[<identity>].lanes` |
+| 3 | shared global `lanes` |
+
+Agent-only lanes (absent from the shared `lanes`) are invisible to dispatches that pass no
+orchestrator identity — the resolver reports the exact selectors that could reach them.
+
+**Selectors** (fail closed; both are validated, `--agent` wins):
+
+- `--agent <identity>` on `config.mjs load` and `lane.mjs resolve`.
+- Otherwise, when the flag is absent, `DELEGATE_ORCHESTRATOR` if non-empty. Relays pass their
+  environment through to lane resolution, so export the variable per seat (e.g.
+  `DELEGATE_ORCHESTRATOR=claude node relay.mjs --lane feature …`).
+- When a lane is overridden by any agent fleet, dispatch without a selector fails instead of
+  silently using the shared lane. Set `DELEGATE_ORCHESTRATOR=__shared__` to deliberately choose
+  that shared lane; the reserved value cannot be used as an agent identity. A `load` without a
+  selector still previews shared lanes.
+- A selector naming an identity with no `agents` fleet exits 2 rather than silently applying the
+  shared fleet — the shared fleet surprising the dispatcher is exactly what per-orchestrator lanes
+  prevent.
+
+Agents stay **global-only**: a `write --scope project` payload containing `agents` is refused, and
+an `agents` key inside a project file fails load and resolution. Tradeoff: one fleet is
+project-scoped and shared by every seat; differentiating by seat is a global config concern. This
+keeps project trust (one approved hash per repo) free of identity algebra.
 
 ## Paths
 
@@ -87,14 +148,22 @@ launches, and Oh My Pi's flag-injection defense even without a shell).
 
 ```bash
 node <skill-dir>/scripts/discover.mjs
-node <skill-dir>/scripts/config.mjs load [--cwd <dir>]
+node <skill-dir>/scripts/config.mjs load [--cwd <dir>] [--agent <identity>]
 node <skill-dir>/scripts/config.mjs validate <file>
-node <skill-dir>/scripts/config.mjs write --scope global|project [--cwd <dir>] <file>
-node <skill-dir>/scripts/lane.mjs resolve --cwd <dir> --lane <name> --implementer <key>
+node <skill-dir>/scripts/config.mjs write --scope global|project [--cwd <dir>] [--allow-agent-removal] <file>
+node <skill-dir>/scripts/lane.mjs resolve --cwd <dir> --lane <name> --implementer <key> [--agent <identity>]
 ```
 
-`load` prints the **effective** map (each lane includes a `source` of `global` or `project`) and
-`projectTrusted`, which reports whether the current project content matches its local approval hash.
-`lane.mjs resolve` is what `*-delegate` relays call for `--lane`: it fails loud on a missing
-lane, untrusted project config, or implementer mismatch, and prints relay-native dials
-(e.g. grok `sandbox` → `autonomy`).
+`load` prints the **effective** map (each lane includes a `source` of `global` or `project` — the
+agent overlay stays inside `global` scope), `projectTrusted`, which reports whether the current
+project content matches its local approval hash, and `agentFleets`, the orchestrator identities with
+a fleet in the global config. With a selector, `agent` echoes the identity the lanes were resolved
+for. Without one, `agent` is `null` and every agent-only lane is hidden: existing callers get the
+same map as before `agents` existed. `config.mjs write` keeps replacing the whole document for a
+scope, so a per-orchestrator write includes every fleet that should survive.
+Global writes refuse to remove existing agent fleets unless `--allow-agent-removal` is supplied
+after explicit user approval; read the raw global config first when updating shared lanes.
+`lane.mjs resolve` is what `*-delegate` relays call for `--lane`: it fails loud on a missing lane,
+untrusted project config, or implementer mismatch, and prints relay-native dials (e.g. grok
+`sandbox` → `autonomy`). An invalid or unconfigured `--agent` / `DELEGATE_ORCHESTRATOR` also fails
+loud there, and relays surface the same error before their implementer starts.

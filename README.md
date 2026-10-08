@@ -51,10 +51,18 @@ A **fleet** is your set of named lanes. Each **lane** binds a kind of work to on
 optional dials such as model, effort, or variant. Setup discovers what is available, proposes a compact
 fleet, shows you the complete configuration, and writes only after explicit approval.
 
-Configuration can apply globally or to one repository. Once it is ready, dispatch with the matching
+Configuration can apply globally or to one repository, and the global fleet can split **per
+orchestrator agent**: a top-level `agents` object in the global config holds a `lanes` map per
+orchestrator identity (e.g. `claude`, `cursor`), whose lanes override same-name shared lanes.
+Orchestrators declare their seat with `DELEGATE_ORCHESTRATOR=<identity>`; agents stay a global-scope
+concern, and project config keeps one trusted fleet per repository. Dispatch with the matching
 `*-delegate` skill and `--lane <name>`. Explicit flags override lane dials, and the wrong implementer
 skill for a lane fails loud. Project config is content-bound to explicit setup approval, so cloned or
-edited project lanes fail closed until re-approved. See the
+edited project lanes fail closed until re-approved, and an invalid or unconfigured orchestrator
+selector fails closed too. An overridden shared lane also requires an identity; set
+`DELEGATE_ORCHESTRATOR=__shared__` to choose the shared lane deliberately. Configure the identity
+per orchestrator, not in a shell profile shared by multiple agents, and update every skill install
+before using agent fleets. See the
 [`delegate-fleet.v1` schema](skills/delegate-setup/references/schema.md) for paths, supported dials,
 and overlay behavior.
 
@@ -383,7 +391,10 @@ Per skill — platform, CLI version, and what the run exercised:
   timeout/abort cleanup.
 - `delegate-setup` — contract-tested: discover JSON shape, config validate/write/load, whole-lane
   project overlay, global write without creating `.delegate/`, and `--lane` resolve / wrong-skill /
-  flag-override against relays. The smoke suite runs live discovery against installed CLIs
+  flag-override against relays; plus per-orchestrator `agents` fleets — validation, `--agent` /
+  `DELEGATE_ORCHESTRATOR` selection, whole-lane replacement over shared lanes, project-over-agent
+  precedence, fail-closed on unconfigured or unsafe selectors, and a relay dispatch honoring the
+  env selector through the fake CLI. The smoke suite runs live discovery against installed CLIs
   (versions vary by machine). Native Windows discover smoke not yet claimed.
 
 Not yet verified: native Windows launches for a directly spawned `claude.exe` (the npm `claude.cmd`

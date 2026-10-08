@@ -5,7 +5,7 @@ description: >-
   with optional model and effort (or variant) dials. Discovers installed CLIs, proposes
   a lane map for user approval, and writes global or project config only after explicit
   yes. Use when the user asks to set up, configure, or reconfigure delegation lanes,
-  a fleet of lanes, or which implementer handles feature/tests/ui work — not for
+  a fleet of lanes, per-orchestrator agent fleets, or which implementer handles feature/tests/ui work — not for
   dispatching a coding task to an implementer.
 license: MIT
 compatibility: Requires Node 18+. No implementer CLIs are required — the skill discovers what is available.
@@ -20,7 +20,9 @@ You are the **orchestrator** in **setup mode**. Discover installed implementer C
 
 This skill does **not** dispatch coding work. It only authors the lane map.
 
-One concept: **lanes**. Never say “routes.”
+One concept: **lanes**. Never say “routes.” Lane maps are **orchestrator-blind** by default — the
+same lane fires from every seat — but the global config may split lanes **per orchestrator agent**
+via a top-level `agents` object (see step 3 and [references/schema.md](references/schema.md)).
 
 Example lane: **feature** → implementer `opencode`, model `opencode/grok`, variant `high`
 (OpenCode uses `variant` for reasoning intensity, not `effort`).
@@ -42,6 +44,9 @@ Example lane: **feature** → implementer `opencode`, model `opencode/grok`, var
 8. Prefer 3–5 useful lanes over a kitchen-sink map.
 9. Never edit `AGENTS.md`, `CLAUDE.md`, or other user agent-instruction files.
 10. Never run a `*-delegate` relay from this skill.
+11. Per-orchestrator `agents` fleets live in the **global** config only; never propose or write them
+    into a project config, and never write an `agents` entry without an explicit user answer about
+    which orchestrator seat that fleet is for.
 
 (`<skill-dir>` is this skill’s install directory — the folder that contains this `SKILL.md`.)
 
@@ -70,6 +75,11 @@ node "<skill-dir>/scripts/config.mjs" load --cwd "$PWD"
   both raw files unless asked.
 - If `projectPresent` is true and `projectTrusted` is false, label the project lanes **untrusted**.
   They cannot dispatch until the user reviews and approves a project write.
+- If `DELEGATE_ORCHESTRATOR` is set but shared lanes need inspection, unset it for that `load` command.
+  A selected identity without a configured fleet fails closed; do not mistake that for missing config.
+- If `agentFleets` is non-empty, say which orchestrator identities have their own fleet, and preview
+  one with `load --agent <identity>` before proposing changes to shared lanes — a same-name lane can
+  hide under a per-orchestrator fleet.
 
 ### 3. Propose
 
@@ -109,6 +119,15 @@ decide:
   conservative lanes, name the axis you are blind on (no quota answer → say the map is quota-blind),
   and invite the answer anytime. Re-ask once at most; never backfill silence with priors.
 
+**Per-orchestrator fleets.** Lanes are orchestrator-blind unless the user asks to differ by seat
+(“Claude Code does the feature work, Cursor gets cheap lanes” is not a lane — it is an
+orchestrator-specific override). When the user does ask, propose a top-level `agents` object in the
+**global** config keyed by an orchestrator identity (their orchestrating agents' names — ask which
+seats they drive from; never derive one from an implementer). Propose **only the lanes that
+actually differ** per seat; same-name agent lanes replace the shared lane wholesale, so omit dials
+the user did not give you (rule 7) — the shared lane is not merged underneath. Project scope never
+carries `agents`: one project file is one fleet per repo, shared by every seat.
+
 **Delegation economics.** The orchestrator reviews and lands every result — the review is the
 quality gate, so optimize total cost, not implementer prestige:
 
@@ -120,8 +139,9 @@ quality gate, so optimize total cost, not implementer prestige:
   user's quota answer — or, in quick defaults, from your labeled opinion.
 - Avoid binding a lane to a CLI the user is protecting or orchestrates from, by default; bind it
   only when the user asks for it or no acceptable alternative exists. Lanes are
-  **orchestrator-blind**: the same lane fires from every seat the user drives from, and from that
-  CLI's own seat it dispatches the CLI to itself.
+  **orchestrator-blind** by default: the same lane fires from every seat the user drives from, and
+  from that CLI's own seat it dispatches the CLI to itself — per-orchestrator exceptions live
+  only in an `agents` fleet the user explicitly asked for (see step 3).
 - Surplus placement breaks down when rework and review cost exceed the savings; when the
   implementer is flaky; when correctness rides on security, concurrency, migrations, or unstated
   domain knowledge; and when the output **is** the product (debate, architecture, research) —
@@ -169,6 +189,10 @@ Schema and dial table: [references/schema.md](references/schema.md).
 On explicit yes, write **only** the chosen scope (validate first). Build the payload from that
 scope’s raw file (or an empty `lanes` object if new) — not from the effective merged `load` view,
 or a project write will shadow global-only lanes and a global write will promote project-only ones.
+For a global write, carry every existing `agents` entry through unchanged unless the user explicitly
+approved changing or removing it; `load` reports only fleet names, not the raw agent lane maps.
+If the user explicitly approved removing agent fleets, pass `--allow-agent-removal` on the global
+write. Never pass it merely to make a failed write succeed.
 
 Create a uniquely named file under the platform temporary directory (`$TMPDIR`, `%TEMP%`, or Node
 `os.tmpdir()`; never hard-code `/tmp`, which breaks on native Windows), write the **exact approved
@@ -190,8 +214,16 @@ before/after is enough.
 
 Stop after confirming. Tell the user the map is ready. For later work: read the lane’s
 `implementer`, load that `*-delegate` skill, and dispatch with `--lane <name>` (explicit
-`--model` / `--effort` / `--variant` still win when passed). Do not start a delegate task
-unless they ask.
+`--model` / `--effort` / `--variant` still win when passed). If the global config carries
+`agents` fleets, every dispatching orchestrator must declare its own identity: export
+`DELEGATE_ORCHESTRATOR=<identity>` around each relay dispatch — relays never guess it, and a
+selector naming an orchestrator with no fleet fails loud rather than falling back to the shared
+lanes. An overridden shared lane requires a selector; use `DELEGATE_ORCHESTRATOR=__shared__`
+only when deliberately dispatching the shared lane. Set the identity in the orchestrator's own
+environment, not in a shell profile shared by multiple orchestrators. An implementer may inherit
+the selector, so a nested dispatch must set its own identity. Install updated skills for every
+orchestrator before using per-agent fleets. `config.mjs load --agent <identity>` previews that seat's effective map first. Do not
+start a delegate task unless they ask.
 
 ## Reconfigure
 

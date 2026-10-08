@@ -20,7 +20,7 @@ own `--cwd`.
 | --- | --- |
 | `--brief <file>` | Path to the brief. Omit to read it from stdin. |
 | `--cd <dir>` | Working root (default: current directory). Also passed as Warp's `--cwd`. |
-| `--lane <name>` | Resolve dials from a `delegate-setup` fleet lane. Explicit flags win. |
+| `--lane <name>` | Resolve dials from a `delegate-setup` fleet lane. Explicit flags win. Per-orchestrator global fleets: export `DELEGATE_ORCHESTRATOR=<identity>` with the dispatch — the relay passes its environment to the fleet resolver, never guessing the identity from the implementer key, and an invalid or unconfigured selector exits 2 before the implementer starts. See the delegate-setup fleet schema. |
 | `--model <id>` | Warp model id from `oz model list`. Letters, digits, and `. _ : / -` only. |
 | `--profile <id>` | Warp agent profile. |
 | `--name <label>` | Labels the run in Warp's own run list. |

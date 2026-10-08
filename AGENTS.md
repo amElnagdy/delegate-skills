@@ -29,6 +29,7 @@ jargon. Use these terms; don't invent synonyms.
 | **relay** / `relay.mjs` | the dispatch **script** only | never a *category* of skills |
 | **lane** | a named fleet binding: implementer + optional dials (`model`, `effort` / `variant`, …) | "route", "profile" |
 | **fleet** | the user's set of lanes (which CLI handles which kind of work) | — |
+| **orchestrator identity** / agent selector (`--agent`, `DELEGATE_ORCHESTRATOR`) | names which orchestrator seat a global `agents` lane map belongs to; selects it at load/resolve, never guessed from the implementer key | implementer key |
 | **setup skill** / `delegate-setup` | utility that discovers CLIs and writes the lane map after approval | a `*-delegate` skill |
 | `exec`, `sandbox`, `resume`, `session` | Codex's own terms — use verbatim | don't paraphrase them |
 | `-p` / `--print`, `--yolo` (`--dangerously-skip-permissions`), `--permission-mode` (`standard`/`plan`/`auto-accept`), `--tools-all`, `--resume`, `--continue`, `--effort`, `--max-turns` | Command Code's own terms — use verbatim when discussing `cmd` | never say Command Code has a sandbox, or a write-capable mode between withheld-tools and `--yolo`: `--permission-mode auto-accept` and `--tools-all` do not enable edits headlessly. Never call the binary "the cmd shell" |

@@ -27,7 +27,7 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 | --- | --- |
 | `--brief <file>` | Brief path. Omit it to read the brief from stdin. |
 | `--cd <dir>` | Working root and child process cwd (default: current directory). |
-| `--lane <name>` | Fleet lane from `delegate-setup` config. Applies that lane's dials; fails if the lane's `implementer` is not this relay. Explicit dial flags win. |
+| `--lane <name>` | Fleet lane from `delegate-setup` config. Applies that lane's dials; fails if the lane's `implementer` is not this relay. Explicit dial flags win. Per-orchestrator global fleets: export `DELEGATE_ORCHESTRATOR=<identity>` with the dispatch — the relay passes its environment to the fleet resolver, never guessing the identity from the implementer key, and an invalid or unconfigured selector exits 2 before the implementer starts. See the delegate-setup fleet schema. |
 | `--model <alias>` | Kimi model alias for this run (default: Kimi's own `default_model`). |
 | `--session <id>` | Resume a specific Kimi session; send only the delta brief. |
 | `--resume-last` | Resume the most recent Kimi session for this cwd (`kimi --continue`); send only the delta brief. |
