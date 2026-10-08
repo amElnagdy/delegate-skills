@@ -51,7 +51,7 @@ later-edited project config fails closed until it is reviewed and written again 
 | `codex` | codex-delegate | `codex` | model, effort, sandbox, timeout, readOnly |
 | `commandcode` | commandcode-delegate | `cmd` | model, effort, timeout, readOnly |
 | `opencode` | opencode-delegate | `opencode` | model, **variant**, timeout, readOnly |
-| `agy` | agy-delegate | `agy` | model, effort, timeout, readOnly |
+| `agy` | agy-delegate | `agy` | model, effort, timeout, readOnly, **account** |
 | `grok` | grok-delegate | `grok` | model, effort, sandbox, timeout, readOnly |
 | `kimi` | kimi-delegate | `kimi` | model, timeout |
 | `qoder` | qoder-delegate | `qodercli` | model, permissionMode, timeout, readOnly |
@@ -69,6 +69,10 @@ documents `build` and `edit`, but a headless run has no permission client, so th
 write tool and exit 0 having changed nothing. ZCode has no `--model` flag — the model is chosen in
 the CLI's own config file — so `model` is not a dial for `zcode` lanes. ZCode also ships its CLI
 inside the desktop app rather than on PATH, so discovery falls back to the installed app bundle.
+
+`account` (agy only) names one of several Antigravity accounts. The relay passes it to a
+user-supplied launcher (`AGY_ACCOUNT_LAUNCHER`) instead of running `agy` directly; see
+agy-delegate's dispatch reference. It is a bare token: letters, digits, `.`, `_`, `-`.
 
 OpenCode uses `variant` for reasoning intensity, not `effort`. Do not write `effort` on an `opencode` lane.
 Oh My Pi (`omp`) uses the lane `effort` dial for omp's `--thinking` (`off`, `auto`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`). Do not write `thinking` as a lane field.
