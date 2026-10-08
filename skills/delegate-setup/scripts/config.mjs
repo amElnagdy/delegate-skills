@@ -148,7 +148,13 @@ function validateLane(name, lane, label) {
     if (!impl.supports.includes(field)) {
       return `${label}: lane ${name}: ${impl.key} does not support ${field} (supports: ${impl.supports.join(", ") || "none"})`;
     }
-    if (field === "readOnly" || field === "force") {
+    if (field === "allowCommands") {
+      if (!Array.isArray(lane[field]) || lane[field].some(value => typeof value !== "string" || !/^[A-Za-z][A-Za-z0-9._-]*$/.test(value))) {
+        return `${label}: lane ${name}.allowCommands must be an array of bare command names`;
+      }
+      continue;
+    }
+    if (field === "readOnly" || field === "force" || field === "autoGrant") {
       if (typeof lane[field] !== "boolean") {
         return `${label}: lane ${name}.${field} must be a boolean`;
       }

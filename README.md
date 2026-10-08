@@ -65,7 +65,7 @@ Skip setup when you want one implementer or one-off dials. Pick the skill for a 
 | Skill | Implementer CLI | Write access (default) | Read-only run | Resume |
 | --- | --- | --- | --- | --- |
 | [`aider-delegate`](skills/aider-delegate/SKILL.md) | [Aider](https://aider.chat) (`aider`) — any OpenAI-compatible endpoint, including a local or self-hosted model via `--api-base` | `--yes-always` with `--no-suggest-shell-commands`; no sandbox or permission modes; commits force-disabled [^aider] | `--read-only` (`--dry-run`) | `--resume-last` (chat history, per-worktree) |
-| [`agy-delegate`](skills/agy-delegate/SKILL.md) | Google Antigravity (`agy`) | Antigravity's own `permissions`; bypass opt-in | `--read-only` (`plan` mode) | `--resume-last`, `--conversation <id>` |
+| [`agy-delegate`](skills/agy-delegate/SKILL.md) | Google Antigravity (`agy`) | Antigravity permissions; project approvals and bypass opt-in | `--read-only` (Windows: fresh plan mode; other platforms: sandbox) | `--resume-last`, `--conversation <id>` |
 | [`claude-delegate`](skills/claude-delegate/SKILL.md) | [Claude Code](https://code.claude.com/docs/en/overview) (`claude`) | `acceptEdits` + explicit tool surface | `--read-only` (`plan` mode) | `--resume-last`, `--session <id>` |
 | [`cline-delegate`](skills/cline-delegate/SKILL.md) | [Cline](https://github.com/cline/cline) (`cline`) | `--auto-approve true` in act mode; upstream sandbox not configured by the relay | `--plan` + `--auto-approve false` (relay-enforced pair) | — (headless JSON resume unsupported) |
 | [`codex-delegate`](skills/codex-delegate/SKILL.md) | [OpenAI Codex](https://github.com/openai/codex) (`codex`) | `--sandbox workspace-write` | `--read-only` | `--resume-last`, `--session <id>` |
@@ -216,6 +216,8 @@ This package is intentionally inspectable:
   own services). Read the script before you run it.
 - None of the relays ever commit — committing is always the orchestrator's job, after review.
 
+AGY optionally writes persistent project permissions and a workspace registry with `--auto-grant`; it does not alter global permission settings. These approvals include shells and interpreters and are not a filesystem boundary. See its [dispatch reference](skills/agy-delegate/references/dispatch-and-poll.md) for policy and recovery.
+
 **Verification status** — claims here are backed by runs, not assumptions.
 
 True of every relay: argument handling, exit codes, `result.json` shape, supported resume mappings,
@@ -236,7 +238,8 @@ Per skill — platform, CLI version, and what the run exercised:
   modified `.aider.conf.yml` plus generated history and tags-cache warns about exactly the config
   file. Not run against a hosted provider model or a real local inference server, and not run on
   macOS or Linux.
-- `agy-delegate` — Windows 10, native, `agy` 1.1.12: headless `--print` write run editing one briefed
+- `agy-delegate` — Native Windows, `agy` 1.2.14: the same file-write/Node gate brief failed with headless auto-denial without project grants and completed with `--auto-grant` in a workspace containing spaces, Unicode and `#`. The orchestrator independently ran the generated Node assertions. A second dispatch reused the UUID and ran the gate; a fresh plan-mode file-read review completed with no observed change. An inherited-project plan-mode probe persisted a write, so Windows read-only now rejects explicit projects and resume flags before launch. Project schema support on other platforms/CLI versions is unverified. Unit/contract coverage includes BOM-free JSON, escaped resources, preservation/revocation, concurrent registry writers, interrupted-update recovery, dry-run, opt-in and logged project mismatch.
+  Earlier runs: Windows 10, native, `agy` 1.1.12: headless `--print` write run editing one briefed
   file; `--read-only` `--effort high` run whose brief ordered an immediate file write, in a directory
   the permission rules allowed: agy refused, wrote nothing, and `result.json` reported effort high,
   `readOnly` true, `readOnlyViolation` false; argument validation for a bad `--effort` value and for

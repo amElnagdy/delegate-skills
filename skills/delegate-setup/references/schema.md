@@ -51,7 +51,7 @@ later-edited project config fails closed until it is reviewed and written again 
 | `codex` | codex-delegate | `codex` | model, effort, sandbox, timeout, readOnly |
 | `commandcode` | commandcode-delegate | `cmd` | model, effort, timeout, readOnly |
 | `opencode` | opencode-delegate | `opencode` | model, **variant**, timeout, readOnly |
-| `agy` | agy-delegate | `agy` | model, effort, timeout, readOnly |
+| `agy` | agy-delegate | `agy` | model, effort, timeout, readOnly, autoGrant, allowCommands |
 | `grok` | grok-delegate | `grok` | model, effort, sandbox, timeout, readOnly |
 | `kimi` | kimi-delegate | `kimi` | model, timeout |
 | `qoder` | qoder-delegate | `qodercli` | model, permissionMode, timeout, readOnly |
@@ -76,7 +76,7 @@ OpenCode lanes **require** `model` in `provider/model` form, with a non-empty pr
 `/` and at least one non-`/` character after it. Cline accepts `provider` and `model` as separate
 dials and does not impose that shape.
 
-Boolean dials: `readOnly`, `force`. All other dials are non-empty strings. Duration strings for
+Boolean dials: `readOnly`, `force`, `autoGrant`. AGY `allowCommands` is an array of bare executable/cmdlet names. All remaining dials are non-empty strings. AGY `autoGrant` defaults off; opt-in permits project writes and common commands, including shells/interpreters. Read-only, permission-bypass and resume dispatches skip preparing grants. See the AGY dispatch reference before enabling this policy. Duration strings for
 `timeout` use `h`/`m`/`s` (e.g. `30m`) and must fit the relay watchdog ceiling (~24.8 days).
 Do not combine `readOnly: true` with a write-capable `sandbox` / `permissionMode` / `force`.
 `model` / `provider` / OpenCode `variant` must match the bound relay’s token rules (e.g. Claude
