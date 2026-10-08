@@ -22,9 +22,16 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
+      - name: verify Linux ownership compiler
+        if: runner.os == 'Linux'
+        run: /usr/bin/cc --version
       - run: node test/relay-parity.mjs
       - run: node test/relay-isolated.mjs
       - run: node test/event-scanner.mjs
+      - run: node --test --test-concurrency=1 skills/codex-background/scripts/server.test.mjs
+      - run: node --test --test-concurrency=1 skills/codex-background/scripts/bootstrap.test.mjs
+      - run: node --test test/codex-background-relays.mjs
+      - run: node --test test/codex-background-bootstrap-e2e.mjs
       - run: node test/relay-smoke.mjs
       - name: validate the skills package
         if: runner.os == 'Linux'

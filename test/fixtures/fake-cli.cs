@@ -24,6 +24,8 @@ class FakeCli {
       Console.WriteLine("fake-cli 0.0.0-smoke");
       return 0;
     }
+    var forwardedArgsFile = Environment.GetEnvironmentVariable("SMOKE_FORWARD_ARGS_FILE");
+    if (!String.IsNullOrEmpty(forwardedArgsFile)) File.WriteAllLines(forwardedArgsFile, args);
     if (Environment.GetEnvironmentVariable("SMOKE_MODE") == "capture") {
       File.WriteAllLines(Environment.GetEnvironmentVariable("SMOKE_ARGS_FILE"), args);
       return 0;

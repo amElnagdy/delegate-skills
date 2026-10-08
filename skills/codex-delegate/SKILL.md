@@ -52,7 +52,20 @@ the project's **actual** gate commands (discover them from the repo's CLAUDE.md/
 do not assume), and a report contract. Tell Codex it will **not** commit (you will). Keep one task per
 brief. Full guidance and a template: [references/writing-the-brief.md](references/writing-the-brief.md).
 
+This skill selects Codex as the **implementer**. Codex as the **orchestrator** is a separate role:
+background waiting requires codex-background and its configured MCP server. Installing
+codex-delegate does not automatically install or configure that support utility. See the
+[codex-background setup guide](../codex-background/references/configuration.md).
+
 ### 2. Dispatch
+
+For **Codex orchestration of background work**, install and configure the separate
+**codex-background** support utility first. If its MCP tools or registry are missing, stop and
+report the setup requirement; do not silently fall back to model-driven polling. Then invoke its
+registered `delegate_run` MCP tool once in place of the shell example below.
+Follow that skill for structured common arguments, unchanged provider flags and reattachment by
+runId. Keep the request pending until completion, then continue this skill's review and landing
+steps. Other orchestrators keep the shell workflow below.
 
 Send the brief to Codex with the bundled helper. It wraps `codex exec`, captures the run, and writes a
 structured `result.json` — so your only job is "run a command, read a file." (`<skill-dir>` below is
@@ -76,6 +89,9 @@ dir, so the repo under review stays clean. It **never commits** — see step 5. 
 `result.json` shape: [references/dispatch-and-poll.md](references/dispatch-and-poll.md).
 
 ### 3. Wait for completion
+
+Codex using codex-background keeps the original MCP request pending: no model-driven sleep,
+status or log polling. Use `delegate_wait` only to reattach after an interrupted request.
 
 The helper blocks until Codex finishes, so back it with whatever your orchestrator offers and resume
 when it returns:

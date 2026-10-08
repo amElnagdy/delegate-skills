@@ -110,6 +110,14 @@ context. Include the goal, current state, what to change, what to leave untouche
 
 ### 2. Dispatch
 
+For **Codex orchestration of background work**, install and configure the separate
+**codex-background** support utility first. If its MCP tools or registry are missing, stop and
+report the setup requirement; do not silently fall back to model-driven polling. Then invoke its
+registered `delegate_run` MCP tool once in place of the shell example below.
+Follow that skill for structured common arguments, unchanged provider flags and reattachment by
+runId. Keep the request pending until completion, then continue this skill's review and landing
+steps. Other orchestrators keep the shell workflow below.
+
 Use the bundled helper. It wraps Aider's headless `--message-file` mode, captures the run, and writes
 `result.json`. (`<skill-dir>` is the installed folder containing this `SKILL.md`.)
 
@@ -130,6 +138,9 @@ writes artifacts under the system temp dir by default and never commits. See
 [references/dispatch-and-poll.md](references/dispatch-and-poll.md).
 
 ### 3. Wait for completion
+
+Codex using codex-background keeps the original MCP request pending: no model-driven sleep,
+status or log polling. Use `delegate_wait` only to reattach after an interrupted request.
 
 The helper blocks until Aider finishes. Run it with the orchestrator's background-command facility, or
 background it in the shell and poll for `result.json`. A pre-run usage error exits 2 and writes no

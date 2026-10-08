@@ -30,6 +30,13 @@
       "skills": [
         "delegate-setup"
       ]
+    },
+    {
+      "title": "Codex orchestration",
+      "description": "Keep Codex delegation pending until a registered implementer relay completes.",
+      "skills": [
+        "codex-background"
+      ]
     }
   ]
 }

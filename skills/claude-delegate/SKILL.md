@@ -59,6 +59,14 @@ Template and details: [references/writing-the-brief.md](references/writing-the-b
 
 ### 2. Dispatch
 
+For **Codex orchestration of background work**, install and configure the separate
+**codex-background** support utility first. If its MCP tools or registry are missing, stop and
+report the setup requirement; do not silently fall back to model-driven polling. Then invoke its
+registered `delegate_run` MCP tool once in place of the shell example below.
+Follow that skill for structured common arguments, unchanged provider flags and reattachment by
+runId. Keep the request pending until completion, then continue this skill's review and landing
+steps. Other orchestrators keep the shell workflow below.
+
 ```bash
 node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 # review/diagnosis only:                 add --read-only
@@ -79,6 +87,9 @@ never commits. See [references/dispatch-and-poll.md](references/dispatch-and-pol
 `--autocompact <auto|tokens>` passes Claude Code's auto-compact window setting on every new or resumed invocation, and needs Claude Code `2.1.221` or newer — older builds fail the dispatch with `unknown option '--autocompact'`. The installed CLI owns the accepted range (`auto`, or 100k–1M tokens); the relay records the requested value but does not claim that Claude applied or enforced it.
 
 ### 3. Wait
+
+Codex using codex-background keeps the original MCP request pending: no model-driven sleep,
+status or log polling. Use `delegate_wait` only to reattach after an interrupted request.
 
 The relay blocks until Claude exits. Use the orchestrator's background-command facility, or run it in
 the foreground and wait. Completion means the process exited and `result.json` exists.

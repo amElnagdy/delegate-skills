@@ -110,6 +110,14 @@ model's context window still does. Full guidance and a template:
 
 ### 2. Dispatch
 
+For **Codex orchestration of background work**, install and configure the separate
+**codex-background** support utility first. If its MCP tools or registry are missing, stop and
+report the setup requirement; do not silently fall back to model-driven polling. Then invoke its
+registered `delegate_run` MCP tool once in place of the shell example below.
+Follow that skill for structured common arguments, unchanged provider flags and reattachment by
+runId. Keep the request pending until completion, then continue this skill's review and landing
+steps. Other orchestrators keep the shell workflow below.
+
 ```bash
 node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 # read-only (review/diagnosis, no edits):   add --read-only
@@ -128,6 +136,9 @@ commits** — see step 5. Mechanics, flags, and the `result.json` shape:
 [references/dispatch-and-poll.md](references/dispatch-and-poll.md).
 
 ### 3. Wait for completion
+
+Codex using codex-background keeps the original MCP request pending: no model-driven sleep,
+status or log polling. Use `delegate_wait` only to reattach after an interrupted request.
 
 The relay blocks until ZCode finishes, so back it with whatever your orchestrator offers:
 
