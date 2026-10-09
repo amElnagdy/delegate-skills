@@ -380,6 +380,25 @@ export const IMPLEMENTERS = Object.freeze([
     winShell: false,
 
   },
+  {
+    key: "dsh",
+    skill: "dsh-delegate",
+    binary: "dsh",
+    versionArgs: ["--version"],
+    // No auth-status command; credentials resolve from the environment
+    // (DEEPSEEK_API_KEY, or the apiKeyEnv named by a provider in
+    // $DSH_HOME/settings.yaml) and the Harness credential files.
+    authProbe: null,
+    // No --model flag or model-list command on the headless surface: a lane's
+    // provider/model pair rides a generated agent-default-model patch overlay,
+    // and a stored settings.yaml selection outranks it.
+    modelProbe: null,
+    // Sessions persist under $DSH_HOME/sessions; the relay harvests the record
+    // per run, but there is no CLI usage query to probe here.
+    usageProbe: null,
+    supports: ["provider", "model", "timeout", "readOnly", "permissionMode"],
+    winShell: true,
+  },
 ]);
 
 /** Prototype-free map so names like "toString" cannot pass as implementers. */
@@ -411,6 +430,12 @@ export const QODER_PERMISSION = Object.freeze([
  * the same reason, so a lane must not be able to select one either.
  */
 export const ZCODE_MODE = Object.freeze(["plan", "yolo"]);
+/**
+ * dsh's DSH_PERMISSION_MODE, carried as the `permissionMode` dial. These are the
+ * harness's own preset names; the relay rejects anything else with exit 2, so a
+ * lane must not be able to select one either.
+ */
+export const DSH_PERMISSION = Object.freeze(["read-only", "workspace-write", "danger-full-access"]);
 /** Positive h/m/s duration, same shape relays accept. */
 export const TIMEOUT_RE = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/;
 

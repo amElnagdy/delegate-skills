@@ -21,7 +21,8 @@
         "copilot-delegate",
         "warp-delegate",
         "zcode-delegate",
-        "commandcode-delegate"
+        "commandcode-delegate",
+        "dsh-delegate"
       ]
     },
     {
