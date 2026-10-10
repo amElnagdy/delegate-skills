@@ -109,7 +109,8 @@ import { constants, tmpdir } from "node:os";
 import { StringDecoder } from "node:string_decoder";
 
 const DEFAULT_TIMEOUT = "30m";
-const VERSION_PROBE_TIMEOUT_MS = 10_000;
+// A loaded Windows host made a 10s ceiling abort healthy dispatches; allow 60s (see #149).
+const VERSION_PROBE_TIMEOUT_MS = 60_000;
 const MAX_TIMER_MS = 2_147_483_647;
 
 const IMPLEMENTER_KEY = "aider";
