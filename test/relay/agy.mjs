@@ -63,6 +63,46 @@ export async function runAgy(h) {
     silent.value.exitCode === 1 &&
     silent.value.error?.includes("without a final message"));
 
+  for (const [name, mode, preexistingFile] of [
+    ["clean", "agy-abandoned-background", null],
+    ["pre-dirty", "agy-abandoned-background", "pre-existing.txt"],
+    ["uppercase", "agy-abandoned-background-uppercase", null],
+  ]) {
+    const abandoned = run(`abandoned-${name}`, mode, preexistingFile);
+    h.check(`agy abandoned background ${name}: a waiting report without edits is failed`,
+      abandoned.result.status === 1 &&
+      abandoned.value.schema === "delegate-relay.result.v1" &&
+      abandoned.value.status === "failed" &&
+      abandoned.value.exitCode === 1 &&
+      abandoned.value.signal === null &&
+      abandoned.value.finalMessage === "Waiting for the test run to finish." &&
+      abandoned.value.error?.includes("background task(s) still pending") &&
+      abandoned.value.stderrTail?.some((line) => /terminating \d+ background task\(s\) on exit/i.test(line)) &&
+      JSON.stringify(abandoned.value.touchedFiles) === JSON.stringify(preexistingFile ? ["?? pre-existing.txt"] : []));
+  }
+
+  const abandonedEdited = run("abandoned-edit", "agy-abandoned-background-edit", "pre-existing.txt");
+  h.check("agy abandoned background: editing pre-existing dirt remains completed",
+    abandonedEdited.result.status === 0 &&
+    abandonedEdited.value.status === "completed" &&
+    abandonedEdited.value.exitCode === 0 &&
+    abandonedEdited.value.signal === null &&
+    abandonedEdited.value.finalMessage === "Waiting for the test run to finish." &&
+    abandonedEdited.value.error === undefined &&
+    JSON.stringify(abandonedEdited.value.touchedFiles) === JSON.stringify(["?? pre-existing.txt"]));
+
+  const abandonedReadOnly = run("abandoned-read-only", "agy-abandoned-background", null, undefined, ["--read-only"]);
+  h.check("agy abandoned background: read-only report without edits remains completed",
+    abandonedReadOnly.result.status === 0 &&
+    abandonedReadOnly.value.status === "completed" &&
+    abandonedReadOnly.value.exitCode === 0 &&
+    abandonedReadOnly.value.signal === null &&
+    abandonedReadOnly.value.finalMessage === "Waiting for the test run to finish." &&
+    abandonedReadOnly.value.readOnly === true &&
+    abandonedReadOnly.value.readOnlyViolation === false &&
+    abandonedReadOnly.value.error === undefined &&
+    JSON.stringify(abandonedReadOnly.value.touchedFiles) === "[]");
+
   const silentReadOnly = run("silent-read-only-noop", "agy-silent-noop", null, undefined, ["--read-only"]);
   h.check("agy read-only silent no-op: no final message cannot report completed",
     silentReadOnly.result.status === 1 &&

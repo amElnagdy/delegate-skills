@@ -87,7 +87,7 @@
  * Exit codes: a pre-run usage error (bad/missing args, empty brief) exits 2
  * before any run and writes no result file; a missing `agy` binary exits 127;
  * otherwise the exit code mirrors Antigravity's own, except that an exit-zero
- * permission denial or silent write-dispatch no-op is forced to exit 1.
+ * permission denial, silent no-op, or abandoned background tasks without edits is forced to exit 1.
  * If the child dies on a signal, the exit code is 128 plus the signal number and
  * `result.json` records the signal.
  * Once the brief validates, `result.json` is written on every outcome -
@@ -722,9 +722,11 @@ function dispatchToAgy(opts, brief, run, writeResult, watchdogMs) {
     const worktreeChanged = beforeState !== null && afterState !== null && beforeState !== afterState;
     const readOnlyViolation = readOnlyVerdict(opts, beforeState, afterState);
     const silentNoop = code === 0 && !finalMessage && !worktreeChanged;
+    const abandonedBackground = code === 0 && !opts.readOnly && !worktreeChanged &&
+      /terminating\s+\d+\s+background task\(s\) on exit/i.test(stderr);
     // A timed-out run is failed even if agy handles SIGTERM by exiting 0 -
     // orchestrators key off status and the relay exit code.
-    const succeeded = code === 0 && !watchdogFired && !permissionDenied && !silentNoop;
+    const succeeded = code === 0 && !watchdogFired && !permissionDenied && !silentNoop && !abandonedBackground;
     const mapped = code ?? (constants.signals[signal] ? 128 + constants.signals[signal] : 1);
     const result = writeResult({
       status: succeeded ? "completed" : watchdogFired ? "timeout" : "failed",
@@ -744,7 +746,9 @@ function dispatchToAgy(opts, brief, run, writeResult, watchdogMs) {
           ? { error: `Antigravity auto-denied the ${permissionDenied[1]} permission because headless --print cannot prompt; ask the human whether to re-dispatch with --dangerously-skip-permissions and treat that run as full access` }
           : silentNoop
             ? { error: "agy exited 0 without a final message or observable working-tree changes; the relay cannot confirm this dispatch completed" }
-            : {}),
+            : abandonedBackground
+              ? { error: "agy exited 0 after ending its turn with background task(s) still pending and no observable working-tree changes; the relay cannot confirm this dispatch completed" }
+              : {}),
     });
     printSummary(result, run.resultPath);
     process.exit(result.exitCode);

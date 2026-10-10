@@ -69,11 +69,15 @@ touched-files report shows only Antigravity's edits and nothing of the helper's 
   `sandbox`, `readOnly`, `dangerouslySkipPermissions`, `resumed` (true for a `--resume-last` or `--conversation`
   run), `startedAt`, `finishedAt`
 - `stderrTail` - last ~20 stderr lines; present on every run that did not complete (`failed`, `timeout`, `aborted`), except a launch failure, which reports `failed` with no `stderrTail`; also present when `finalMessage` is empty so diagnostics are not discarded
-- `error` - present on a launch failure, `timeout`, `aborted`, headless permission denial, or silent no-op
+- `error` - present on a launch failure, `timeout`, `aborted`, headless permission denial, silent no-op, or abandoned background tasks without edits
 
 The helper also prints a summary to stdout and normally exits with Antigravity's exit code. It forces
 exit 1 when Antigravity exits 0 after a detected headless permission denial or with neither a final
 message nor observable working-tree changes, so a wrapping script can branch on success/failure directly.
+It also forces exit 1 for a write-capable run that terminates pending background tasks on exit without
+observable working-tree changes, even if `finalMessage` says it is waiting. Read `error` and `stderrTail`,
+then re-dispatch with a brief requiring synchronous commands and a reply only after they finish
+(see [writing-the-brief.md](writing-the-brief.md)).
 
 ## Waiting for completion
 

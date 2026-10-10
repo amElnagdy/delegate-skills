@@ -66,6 +66,11 @@ a report you can read.
 
 ## Discover the real gates
 
+Headless `agy --print` ends the turn when the reply ends and kills pending background tasks on exit.
+In the brief, instruct Antigravity to run commands synchronously, wait for them to finish, and never
+end its reply while waiting on a task. A write-capable run that terminates pending background tasks
+without observable working-tree changes is reported by the relay as `failed`, even with a final message.
+
 `<verification_loop>` is only useful if it names the project's *actual* commands. Read the repo's
 `AGENTS.md` / `CLAUDE.md` / `Makefile` / `package.json` first and copy the real ones in (`make test`,
 `npm run lint`, `cargo test`, `pytest -q`, whatever it is). A brief that says "run the tests" without

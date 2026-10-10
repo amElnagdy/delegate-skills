@@ -49,6 +49,16 @@ class FakeCli {
       Console.Error.WriteLine("jetski: no output produced — a tool required the \"write_file\" permission that headless\nmode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow\nin settings.json (e.g. write_file(<target>)). Alternatively, re-run with\n--dangerously-skip-permissions to auto-approve all tools.");
       return 0;
     }
+    if (mode.StartsWith("agy-abandoned-background")) {
+      if (mode == "agy-abandoned-background-edit") {
+        File.AppendAllText(Environment.GetEnvironmentVariable("SMOKE_EDIT_FILE"), "dispatch edit\n");
+      }
+      Console.WriteLine("Waiting for the test run to finish.");
+      Console.Error.WriteLine(mode == "agy-abandoned-background-uppercase"
+        ? "Terminating 2 Background Task(s) on Exit"
+        : "terminating 1 background task(s) on exit");
+      return 0;
+    }
     if (mode == "agy-analysis") {
       var argsFile = Environment.GetEnvironmentVariable("SMOKE_ARGS_FILE");
       if (!String.IsNullOrEmpty(argsFile)) File.WriteAllLines(argsFile, args);
