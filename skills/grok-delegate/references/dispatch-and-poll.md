@@ -120,7 +120,7 @@ process has exited and `result.json` is written — not when a status line says 
 - **`status: grok_unavailable` (exit 127):** `grok` isn't on PATH or isn't found. Install with
   `npm i -g @xai-official/grok` and `grok login`, then re-dispatch.
 - **an `error` mentioning `version preflight` (`failed`, or `timeout` at exit 124):** the bounded
-  `grok version` probe exited non-zero or hung past its cap (10s, or `--timeout` when shorter), so
+  `grok version` probe exited non-zero or hung past its cap (60s, or `--timeout` when shorter), so
   grok was never dispatched; only the relay's own artifacts may already exist under `--out-dir`.
   Check the install by running `grok version` yourself.
 - **`status: timeout`:** the `--timeout` watchdog killed the run. The working tree may hold a
