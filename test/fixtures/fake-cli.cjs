@@ -158,6 +158,16 @@ if (process.env.SMOKE_MODE === "agy-permission-denied") {
   console.error('jetski: no output produced — a tool required the "write_file" permission that headless\nmode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow\nin settings.json (e.g. write_file(<target>)). Alternatively, re-run with\n--dangerously-skip-permissions to auto-approve all tools.');
   process.exit(0);
 }
+if (process.env.SMOKE_MODE?.startsWith("agy-abandoned-background")) {
+  if (process.env.SMOKE_MODE === "agy-abandoned-background-edit") {
+    fs.appendFileSync(process.env.SMOKE_EDIT_FILE, "dispatch edit\n");
+  }
+  console.log("Waiting for the test run to finish.");
+  console.error(process.env.SMOKE_MODE === "agy-abandoned-background-uppercase"
+    ? "Terminating 2 Background Task(s) on Exit"
+    : "terminating 1 background task(s) on exit");
+  process.exit(0);
+}
 if (process.env.SMOKE_MODE === "agy-analysis") {
   if (process.env.SMOKE_ARGS_FILE) fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify(args));
   const logAt = args.indexOf("--log-file");
