@@ -380,6 +380,20 @@ export const IMPLEMENTERS = Object.freeze([
     winShell: false,
 
   },
+  {
+    key: "workbuddy",
+    skill: "workbuddy-delegate",
+    binary: "codebuddy",
+    versionArgs: ["--version"],
+    // CodeBuddy has no non-interactive auth-status command; keep auth unknown.
+    authProbe: null,
+    // CodeBuddy exposes model and session details through authenticated service
+    // calls rather than a stable local discovery command.
+    modelProbe: null,
+    usageProbe: null,
+    supports: ["model", "effort", "timeout", "readOnly"],
+    winShell: true,
+  },
 ]);
 
 /** Prototype-free map so names like "toString" cannot pass as implementers. */
@@ -394,6 +408,7 @@ export const CLAUDE_EFFORT = Object.freeze(["low", "medium", "high", "xhigh", "m
 export const AGY_EFFORT = Object.freeze(["low", "medium", "high"]);
 export const COPILOT_EFFORT = Object.freeze(["low", "medium", "high", "xhigh", "max"]);
 export const OMP_THINKING = Object.freeze(["off", "auto", "minimal", "low", "medium", "high", "xhigh", "max"]);
+export const WORKBUDDY_EFFORT = Object.freeze(["minimal", "low", "medium", "high", "xhigh", "max"]);
 export const CODEX_SANDBOX = Object.freeze(["read-only", "workspace-write", "danger-full-access"]);
 export const GROK_SANDBOX = Object.freeze(["workspace", "read-only", "off"]);
 export const QODER_PERMISSION = Object.freeze([

@@ -53,6 +53,24 @@ if (process.env.SMOKE_MODE === "capture") {
   if (process.env.SMOKE_ENV_FILE) fs.writeFileSync(process.env.SMOKE_ENV_FILE, JSON.stringify(capturedEnv()));
   process.exit(0);
 }
+if (["workbuddy-success", "workbuddy-error", "workbuddy-read-only-append"].includes(process.env.SMOKE_MODE)) {
+  let brief = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (chunk) => { brief += chunk; });
+  process.stdin.on("end", () => {
+    if (process.env.SMOKE_MODE === "workbuddy-read-only-append") {
+      fs.appendFileSync(process.env.SMOKE_APPEND_FILE ?? "already-dirty.txt", "appended by fake workbuddy\n");
+    }
+    if (process.env.SMOKE_ARGS_FILE) fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify({ args, brief, cwd: process.cwd() }));
+    const failed = process.env.SMOKE_MODE === "workbuddy-error";
+    console.log(JSON.stringify({
+      session_id: "workbuddy-session-1",
+      result: failed ? "fake workbuddy failed" : "fake workbuddy completed",
+      metadata: { model: "fake-model" },
+    }));
+    process.exit(failed ? 1 : 0);
+  });
+} else {
 if (process.env.SMOKE_WRITE_FILE) {
   fs.writeFileSync(process.env.SMOKE_WRITE_FILE, "written by fake cli\n");
 }
@@ -485,4 +503,5 @@ if (["omp-success", "omp-error"].includes(process.env.SMOKE_MODE)) {
     process.on("SIGTERM", () => {}); // ignore, so the relay's SIGKILL escalation is what ends it
   }
   setInterval(() => {}, 1000);
+}
 }

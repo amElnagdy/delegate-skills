@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { join } from "node:path";
 
 export async function runPreflight(h) {
-for (const skill of ["codex", "opencode", "grok", "kimi", "warp"]) {
+for (const skill of ["codex", "opencode", "grok", "kimi", "warp", "workbuddy"]) {
   const workDir = h.freshRepo(`work-preflight-${skill}`);
   for (const [suffix, expectedStatus, expectedExit] of [
     ["version-hang", "timeout", 124],
@@ -62,7 +62,7 @@ if (!h.WIN) {
 // Node 24 warns for shell:true plus an args array. Exercise both each .cmd
 // version probe and its dispatch through the native Windows shim harness.
 if (h.WIN && Number(process.versions.node.split(".")[0]) >= 24) {
-  for (const skill of ["cline", "codex", "commandcode", "copilot", "grok", "opencode", "pi", "zcode"]) {
+  for (const skill of ["cline", "codex", "commandcode", "copilot", "grok", "opencode", "pi", "zcode", "workbuddy"]) {
     const workDir = h.freshRepo(`work-dep0190-${skill}`);
     const outDir = join(h.scratch, `out-dep0190-${skill}`);
     const argsPath = join(h.scratch, `args-dep0190-${skill}.json`);

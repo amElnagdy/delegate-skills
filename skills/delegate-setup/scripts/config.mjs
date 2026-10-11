@@ -32,6 +32,7 @@ import {
   CLAUDE_EFFORT,
   COPILOT_EFFORT,
   OMP_THINKING,
+  WORKBUDDY_EFFORT,
   CODEX_SANDBOX,
   CONFIG_VERSION,
   GROK_SANDBOX,
@@ -230,6 +231,9 @@ function validateDialValue(implementer, field, value, laneName, label) {
     }
     if (implementer === "omp" && !OMP_THINKING.includes(value)) {
       return `${label}: lane ${laneName}.effort must be one of: ${OMP_THINKING.join(", ")}`;
+    }
+    if (implementer === "workbuddy" && !WORKBUDDY_EFFORT.includes(value)) {
+      return `${label}: lane ${laneName}.effort must be one of: ${WORKBUDDY_EFFORT.join(", ")}`;
     }
     if (
       (implementer === "codex" || implementer === "grok" || implementer === "commandcode") &&
