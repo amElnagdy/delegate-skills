@@ -273,8 +273,7 @@ function buildCodebuddyArgs(opts, isResume) {
     args.push('-y');
   }
 
-  // Read-only mode - WorkBuddy doesn't have a direct equivalent yet
-  // but we can pass a system prompt to restrict behavior
+  // CodeBuddy's native plan permission mode is the read-only mapping.
   if (opts.readOnly) args.push('--permission-mode', 'plan');
   if (opts.effort) args.push('--effort', opts.effort);
 

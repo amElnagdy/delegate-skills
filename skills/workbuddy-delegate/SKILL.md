@@ -33,8 +33,8 @@ treat other orchestrators as designed-for, not yet proven.)
 - The task is small enough to just do inline — delegation overhead is not worth it.
 - The `codebuddy` CLI is not installed or not authenticated (run `codebuddy` and follow the login
   flow, or see the quickstart at https://www.codebuddy.ai/docs/cli/quickstart).
-- You want to write the code yourself, or you only need a review (use the plan agent via
-  `--read-only` uses CodeBuddy's native `--permission-mode plan`.
+- You want to write the code yourself, or you only need a review (use `--read-only`, which
+  uses CodeBuddy's native `--permission-mode plan`).
 
 ## Prerequisites (check once)
 
