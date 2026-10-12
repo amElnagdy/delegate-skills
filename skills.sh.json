@@ -22,7 +22,8 @@
         "warp-delegate",
         "zcode-delegate",
         "commandcode-delegate",
-        "codebuddy-delegate"
+        "codebuddy-delegate",
+        "omniroute-delegate"
       ]
     },
     {

@@ -1,6 +1,6 @@
 import { join } from "node:path";
 
-export const SKILLS = ["claude", "cline", "codex", "opencode", "agy", "grok", "kimi", "qoder", "vibe", "cursor", "pi", "omp", "aider", "copilot", "warp", "zcode", "commandcode", "codebuddy"];
+export const SKILLS = ["claude", "cline", "codex", "opencode", "agy", "grok", "kimi", "qoder", "vibe", "cursor", "pi", "omp", "aider", "copilot", "warp", "zcode", "commandcode", "codebuddy", "omniroute"];
 
 export const EXTRA_ARGS = {
   claude: [],
@@ -21,6 +21,7 @@ export const EXTRA_ARGS = {
   zcode: [],
   commandcode: [],
   codebuddy: ["--model", "fake-model"],
+  omniroute: ["--model", "fake-model"],
 };
 
 export const WIN = process.platform === "win32";
@@ -31,6 +32,7 @@ export const binaryName = (skill) =>
       : skill === "warp" ? "oz"
         : skill === "commandcode" ? (WIN ? "cmdc" : "cmd")
           : skill === "codebuddy" ? "codebuddy"
+            : skill === "omniroute" ? "omniroute"
           : skill;
 
 export const relayPath = (testDir, skill) =>

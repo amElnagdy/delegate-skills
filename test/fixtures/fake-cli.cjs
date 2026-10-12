@@ -70,6 +70,20 @@ if (["codebuddy-success", "codebuddy-error", "codebuddy-read-only-append"].inclu
     }));
     process.exit(failed ? 1 : 0);
   });
+} else if (["omniroute-success", "omniroute-error"].includes(process.env.SMOKE_MODE)) {
+  let brief = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (chunk) => { brief += chunk; });
+  process.stdin.on("end", () => {
+    if (process.env.SMOKE_ARGS_FILE) fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify({ args, brief, cwd: process.cwd() }));
+    const failed = process.env.SMOKE_MODE === "omniroute-error";
+    console.log(JSON.stringify({
+      type: "result",
+      session_id: "omniroute-session-1",
+      result: failed ? "fake omniroute failed" : "fake omniroute completed",
+    }));
+    process.exit(failed ? 1 : 0);
+  });
 } else {
 if (process.env.SMOKE_WRITE_FILE) {
   fs.writeFileSync(process.env.SMOKE_WRITE_FILE, "written by fake cli\n");

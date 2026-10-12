@@ -81,6 +81,7 @@ Skip setup when you want one implementer or one-off dials. Pick the skill for a 
 | [`copilot-delegate`](skills/copilot-delegate/SKILL.md) | [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-cli) (`copilot`) | `--allow-all-tools` opt-in; headless auto-deny otherwise | `--read-only` (`--mode plan`) | `--resume-last`, `--session <id>` |
 | [`warp-delegate`](skills/warp-delegate/SKILL.md) | [Warp Agent CLI](https://docs.warp.dev/cli/) (`oz`) | full local tools — no sandbox, no permission modes [^none] | — [^none] | `--conversation <id>` |
 | [`codebuddy-delegate`](skills/codebuddy-delegate/SKILL.md) | [CodeBuddy](https://www.codebuddy.ai/docs/cli/cli-reference) (`codebuddy`) | `-y` / `--dangerously-skip-permissions` | `--permission-mode plan` | `--resume-last`, `--session <id>` |
+| [`omniroute-delegate`](skills/omniroute-delegate/SKILL.md) | [OmniRoute](https://github.com/diegosouzapw/OmniRoute) → Claude Code (`omniroute`) | `acceptEdits` + explicit Claude tool surface | `--read-only` (`plan` + read-only tools) | `--resume-last`, `--session <id>` |
 | [`zcode-delegate`](skills/zcode-delegate/SKILL.md) | [Z.AI ZCode](https://zcode.z.ai) (`zcode`) [^zcode] | `--mode yolo` | `--read-only` (`plan` mode) | `--resume-last`, `--session <id>` |
 
 [^commandcode]: Command Code's headless mode has two states and nothing between them: a `-p` run
@@ -390,6 +391,10 @@ Per skill — platform, CLI version, and what the run exercised:
   launch shape, stdin brief delivery, JSON result parsing, model/effort forwarding, native
   `--permission-mode plan` read-only mapping, clean-tree verdict handling, and non-zero failure
   propagation. A live authenticated delegated run is not recorded yet.
+- `omniroute-delegate` — contract-tested against the OmniRoute launch shape: direct
+  `run claude --model` routing, Claude write/read-only permission mapping, stdin brief delivery,
+  structured result capture, and non-zero failure propagation. A live authenticated delegated run
+  depends on the active OmniRoute gateway and context.
 
 Not yet verified: native Windows launches for a directly spawned `claude.exe` (the npm `claude.cmd`
 shim path has a run above), exact-head `cline`, `grok`, `kimi`,

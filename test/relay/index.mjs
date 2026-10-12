@@ -24,6 +24,7 @@ import { runCommandcode } from "./commandcode.mjs";
 import { runZcode } from "./zcode.mjs";
 import { runGrokGitTrust } from "./grok-git-trust.mjs";
 import { runCodebuddy } from "./codebuddy.mjs";
+import { runOmniroute } from "./omniroute.mjs";
 
 export const runners = [
   ["package-shape", runPackageShape],
@@ -47,6 +48,7 @@ export const runners = [
   ["read-only-tripwire", runReadOnlyTripwire],
   ["grok-git-trust", runGrokGitTrust],
   ["codebuddy", runCodebuddy],
+  ["omniroute", runOmniroute],
   ["timeout-tree", runTimeoutTree],
   ["abort", runAbort],
   ["orphan-stdio", runOrphanStdio],
