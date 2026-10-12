@@ -48,7 +48,7 @@ touched-files report shows only CodeBuddy's edits and nothing of the helper's ow
 `<out-dir>/result.json` is the contract. Fields:
 
 - `schema` — the result-format version (currently `delegate-relay.result.v1`)
-- `tool` — `workbuddy`
+- `tool` — `codebuddy`
 - `status` — `completed` | `failed` | `timeout` | `aborted` | `codebuddy_unavailable`
 - `exitCode` — mirrors CodeBuddy's exit code; `128` plus the signal number if the child was killed; `127` if `codebuddy` isn't on PATH; on a `timeout` the relay forces a non-zero code even when the child exited `0` after the watchdog's SIGTERM
 - `signal` — the signal that killed the child, otherwise `null`

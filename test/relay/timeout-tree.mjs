@@ -18,7 +18,7 @@ const TIMEOUT_CASES = [
   { skill: "agy", flags: ["--timeout", "6s"], exitDeadline: 45_000 },
   { skill: "aider", flags: ["--timeout", "6s"], exitDeadline: 45_000 },
   { skill: "warp", flags: ["--timeout", "6s"], exitDeadline: 45_000 },
-  { skill: "workbuddy", flags: ["--timeout", "6s"], exitDeadline: 45_000 },
+  { skill: "codebuddy", flags: ["--timeout", "6s"], exitDeadline: 45_000 },
 ];
 async function driveTimeout({ skill, flags, exitDeadline }, mode, extraEnv, tag) {
   const outDir = join(h.scratch, `out-${tag}-${skill}`);

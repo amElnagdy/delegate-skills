@@ -150,7 +150,7 @@ async function resolveLane(opts) {
       'resolve',
       '--cwd', opts.cd,
       '--lane', opts.lane,
-      '--implementer', 'workbuddy',
+      '--implementer', 'codebuddy',
     ]);
     const lines = stdout.trim().split(/\r?\n/).filter(Boolean);
     const resolved = JSON.parse(lines[lines.length - 1]);
@@ -326,7 +326,7 @@ async function main() {
   if (!codebuddyPath) {
     const result = {
       schema: RESULT_SCHEMA,
-      tool: 'workbuddy',
+      tool: 'codebuddy',
       status: 'codebuddy_unavailable',
       exitCode: 127,
       signal: null,
@@ -501,7 +501,7 @@ async function main() {
 function buildResult(core, opts, outDir, briefPath, eventsPath, finalPath) {
   return {
     schema: RESULT_SCHEMA,
-    tool: 'workbuddy',
+    tool: 'codebuddy',
     ...core,
     agent: opts.readOnly ? 'review' : 'implement',
     model: opts.model || null,

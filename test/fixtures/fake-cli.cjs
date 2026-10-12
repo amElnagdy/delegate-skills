@@ -53,19 +53,19 @@ if (process.env.SMOKE_MODE === "capture") {
   if (process.env.SMOKE_ENV_FILE) fs.writeFileSync(process.env.SMOKE_ENV_FILE, JSON.stringify(capturedEnv()));
   process.exit(0);
 }
-if (["workbuddy-success", "workbuddy-error", "workbuddy-read-only-append"].includes(process.env.SMOKE_MODE)) {
+if (["codebuddy-success", "codebuddy-error", "codebuddy-read-only-append"].includes(process.env.SMOKE_MODE)) {
   let brief = "";
   process.stdin.setEncoding("utf8");
   process.stdin.on("data", (chunk) => { brief += chunk; });
   process.stdin.on("end", () => {
-    if (process.env.SMOKE_MODE === "workbuddy-read-only-append") {
-      fs.appendFileSync(process.env.SMOKE_APPEND_FILE ?? "already-dirty.txt", "appended by fake workbuddy\n");
+    if (process.env.SMOKE_MODE === "codebuddy-read-only-append") {
+      fs.appendFileSync(process.env.SMOKE_APPEND_FILE ?? "already-dirty.txt", "appended by fake codebuddy\n");
     }
     if (process.env.SMOKE_ARGS_FILE) fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify({ args, brief, cwd: process.cwd() }));
-    const failed = process.env.SMOKE_MODE === "workbuddy-error";
+    const failed = process.env.SMOKE_MODE === "codebuddy-error";
     console.log(JSON.stringify({
-      session_id: "workbuddy-session-1",
-      result: failed ? "fake workbuddy failed" : "fake workbuddy completed",
+      session_id: "codebuddy-session-1",
+      result: failed ? "fake codebuddy failed" : "fake codebuddy completed",
       metadata: { model: "fake-model" },
     }));
     process.exit(failed ? 1 : 0);

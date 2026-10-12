@@ -1,6 +1,6 @@
 import { join } from "node:path";
 
-export const SKILLS = ["claude", "cline", "codex", "opencode", "agy", "grok", "kimi", "qoder", "vibe", "cursor", "pi", "omp", "aider", "copilot", "warp", "zcode", "commandcode", "workbuddy"];
+export const SKILLS = ["claude", "cline", "codex", "opencode", "agy", "grok", "kimi", "qoder", "vibe", "cursor", "pi", "omp", "aider", "copilot", "warp", "zcode", "commandcode", "codebuddy"];
 
 export const EXTRA_ARGS = {
   claude: [],
@@ -20,7 +20,7 @@ export const EXTRA_ARGS = {
   warp: [],
   zcode: [],
   commandcode: [],
-  workbuddy: ["--model", "fake-model"],
+  codebuddy: ["--model", "fake-model"],
 };
 
 export const WIN = process.platform === "win32";
@@ -30,8 +30,8 @@ export const binaryName = (skill) =>
     : skill === "cursor" ? "cursor-agent"
       : skill === "warp" ? "oz"
         : skill === "commandcode" ? (WIN ? "cmdc" : "cmd")
-          : skill === "workbuddy" ? "codebuddy"
+          : skill === "codebuddy" ? "codebuddy"
           : skill;
 
 export const relayPath = (testDir, skill) =>
-  join(testDir, "..", "skills", skill === "workbuddy" ? "codebuddy-delegate" : `${skill}-delegate`, "scripts", "relay.mjs");
+  join(testDir, "..", "skills", `${skill}-delegate`, "scripts", "relay.mjs");
