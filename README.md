@@ -80,6 +80,7 @@ Skip setup when you want one implementer or one-off dials. Pick the skill for a 
 | [`vibe-delegate`](skills/vibe-delegate/SKILL.md) | [Mistral Vibe](https://github.com/mistralai/mistral-vibe) (`vibe`) | `accept-edits`; `--full-access` opt-in | `--plan-only` (`plan` agent) | `--resume-last`, `--session <id>` |
 | [`copilot-delegate`](skills/copilot-delegate/SKILL.md) | [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-cli) (`copilot`) | `--allow-all-tools` opt-in; headless auto-deny otherwise | `--read-only` (`--mode plan`) | `--resume-last`, `--session <id>` |
 | [`warp-delegate`](skills/warp-delegate/SKILL.md) | [Warp Agent CLI](https://docs.warp.dev/cli/) (`oz`) | full local tools — no sandbox, no permission modes [^none] | — [^none] | `--conversation <id>` |
+| [`omniroute-delegate`](skills/omniroute-delegate/SKILL.md) | [OmniRoute](https://github.com/diegosouzapw/OmniRoute) → Claude Code (`omniroute`) | `acceptEdits` + explicit Claude tool surface | `--read-only` (`plan` + read-only tools) | `--resume-last`, `--session <id>` |
 | [`zcode-delegate`](skills/zcode-delegate/SKILL.md) | [Z.AI ZCode](https://zcode.z.ai) (`zcode`) [^zcode] | `--mode yolo` | `--read-only` (`plan` mode) | `--resume-last`, `--session <id>` |
 
 [^commandcode]: Command Code's headless mode has two states and nothing between them: a `-p` run
@@ -372,6 +373,10 @@ Per skill — platform, CLI version, and what the run exercised:
   project overlay, global write without creating `.delegate/`, and `--lane` resolve / wrong-skill /
   flag-override against relays. The smoke suite runs live discovery against installed CLIs
   (versions vary by machine). Native Windows discover smoke not yet claimed.
+- `omniroute-delegate` — contract-tested against the OmniRoute launch shape: direct
+  `run claude --model` or `launch` routing, Claude write/read-only permission mapping, stdin brief delivery,
+  structured result capture, and non-zero failure propagation. A live authenticated delegated run
+  depends on the active OmniRoute gateway and context.
 
 Not yet verified: native Windows launches for `claude`, exact-head `cline`, `grok`, `kimi`,
 `pi`, `qoder`, `vibe`, and `omp` (`codex`/`opencode`/`grok`/`commandcode` have contract-tested `.cmd` shim handling;
