@@ -380,6 +380,19 @@ export const IMPLEMENTERS = Object.freeze([
     winShell: false,
 
   },
+  {
+    key: "omniroute",
+    skill: "omniroute-delegate",
+    binary: "omniroute",
+    versionArgs: ["--version"],
+    // Server reachability and credentials depend on the active OmniRoute context.
+    authProbe: null,
+    // The live model catalog may require a running gateway and management credential.
+    modelProbe: null,
+    usageProbe: null,
+    supports: ["model", "timeout", "readOnly"],
+    winShell: true,
+  },
 ]);
 
 /** Prototype-free map so names like "toString" cannot pass as implementers. */
