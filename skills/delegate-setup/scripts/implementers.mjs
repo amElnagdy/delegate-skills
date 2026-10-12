@@ -382,7 +382,7 @@ export const IMPLEMENTERS = Object.freeze([
   },
   {
     key: "workbuddy",
-    skill: "workbuddy-delegate",
+    skill: "codebuddy-delegate",
     binary: "codebuddy",
     versionArgs: ["--version"],
     // CodeBuddy has no non-interactive auth-status command; keep auth unknown.

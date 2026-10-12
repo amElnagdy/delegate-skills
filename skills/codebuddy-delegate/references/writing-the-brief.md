@@ -1,18 +1,18 @@
 # Writing the brief
 
-A brief is the entire task as WorkBuddy will see it. WorkBuddy runs in a fresh session with **no memory of
+A brief is the entire task as CodeBuddy will see it. CodeBuddy runs in a fresh session with **no memory of
 your conversation, no access to your prior notes, and no shared context** — only the text you send and
 whatever it can read from the working tree (including the repo's own `AGENTS.md`, which it picks up
 automatically). If a constraint isn't in the brief or discoverable in the repo, it doesn't exist for
-WorkBuddy. The single most common failure is a brief that assumes context WorkBuddy doesn't have.
+CodeBuddy. The single most common failure is a brief that assumes context CodeBuddy doesn't have.
 
 ## Match the model to the brief
 
-WorkBuddy requires a model to be specified via `--model` flag. Which model is a two-owner decision: the
+CodeBuddy requires a model to be specified via `--model` flag. Which model is a two-owner decision: the
 **human** owns which models are allowed to run; **you, the orchestrator**, pick one of them to fit the
 task in front of you.
 
-- **The allowed set is the human's to state.** WorkBuddy supports various models (OpenAI GPT-4o, GPT-5,
+- **The allowed set is the human's to state.** CodeBuddy supports various models (OpenAI GPT-4o, GPT-5,
   Anthropic Claude, local via Ollama, etc.); only the human knows which are their subscriptions or
   available endpoints. So they name their usable models — ideally once, in the target repo's `AGENTS.md`
   or their `CLAUDE.md` (e.g. "delegate mechanical work to `gpt-4o-mini`, hard logic to `gpt-5`"). If
@@ -27,14 +27,14 @@ task in front of you.
 
 ## The shape that works
 
-WorkBuddy responds well to compact, block-structured prompts with XML tags rather than long prose. State
+CodeBuddy responds well to compact, block-structured prompts with XML tags rather than long prose. State
 the task, what "done" looks like, how to behave by default, and the few constraints that actually
 matter. Add a block only when the task needs it — don't ship empty ceremony.
 
 ```xml
 <task>
 One or two sentences: the concrete job and where it lives. Then the specifics — current state, what to
-change, and explicitly what to leave untouched. The "leave untouched" list is what keeps WorkBuddy from
+change, and explicitly what to leave untouched. The "leave untouched" list is what keeps CodeBuddy from
 wandering into unrelated refactors.
 </task>
 
@@ -68,36 +68,36 @@ profile calls for them:
   first plausible fix) and `<missing_context_gating>` (don't guess missing repo facts; find them or
   state what's unknown).
 - **Review / diagnosis (read-only)** — add `<grounding_rules>` (ground every claim in evidence; label
-  inferences) and dispatch with `--read-only` so WorkBuddy runs in review mode and can't edit.
+  inferences) and dispatch with `--read-only` so CodeBuddy runs in review mode and can't edit.
 - **Research / recommendations** — add `<research_mode>` (separate observed facts, inferences, open
   questions).
 
 ## Always ask for the report explicitly
 
-The relay assembles WorkBuddy's final message from the text it emits when it stops. If the agent finishes
+The relay assembles CodeBuddy's final message from the text it emits when it stops. If the agent finishes
 a task purely through tool calls and stops without a closing summary, `finalMessage` comes back empty —
 not a relay defect, just nothing said. The `<structured_output_contract>` block is what guarantees a
-report you can read: it tells WorkBuddy to end with a written summary, so the result file carries one.
+report you can read: it tells CodeBuddy to end with a written summary, so the result file carries one.
 
 ## Discover the real gates — don't hardcode
 
 `<verification_loop>` is only useful if it names the project's *actual* commands. Read the repo's
 `AGENTS.md` / `CLAUDE.md` / `Makefile` / `package.json` first and copy the real ones in (`make test`,
 `npm run lint`, `cargo test`, `pytest -q`, whatever it is). A brief that says "run the tests" without
-naming them gets you a WorkBuddy that guesses — or skips.
+naming them gets you a CodeBuddy that guesses — or skips.
 
 ## Honor the repo's conventions
 
-WorkBuddy reads the repo's `AGENTS.md` automatically, so house rules there (style, forbidden patterns,
+CodeBuddy reads the repo's `AGENTS.md` automatically, so house rules there (style, forbidden patterns,
 commit conventions) already apply. If the project forbids certain things in code — say, spec/ticket IDs
 in comments, process language like "MVP"/"for now"/"phase N", or specific test conventions, whatever the
-repo's own conventions ban — restate the load-bearing ones in the brief too, because WorkBuddy's
+repo's own conventions ban — restate the load-bearing ones in the brief too, because CodeBuddy's
 compliance is only as reliable as what's in front of it.
 
 ## One task per brief
 
 Keep each brief to a single, bounded job. "Review this, fix what you find, update the docs, and suggest
-a roadmap" produces a muddled run; split it into separate dispatches. One brief → one WorkBuddy run →
+a roadmap" produces a muddled run; split it into separate dispatches. One brief → one CodeBuddy run →
 one commit keeps review and rollback clean, and lets a later task assume the earlier one landed.
 
 ## Premises freeze at dispatch

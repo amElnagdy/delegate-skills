@@ -1,6 +1,6 @@
 # Multi-task queues
 
-Sometimes you want to run a sequence of tasks through WorkBuddy without babysitting each one. This
+Sometimes you want to run a sequence of tasks through CodeBuddy without babysitting each one. This
 reference describes a lightweight queue discipline that keeps the orchestrator in control without
 turning into a framework.
 
@@ -33,7 +33,7 @@ Fields:
 - `resultDir` — filled in after dispatch; the relay's `--out-dir` for this task.
 - `notes` — free-form; capture review findings, scope changes, rework reasons.
 
-Keep this file in the repo root (or a `.workbuddy-queue/` subdir) so it survives across sessions.
+Keep this file in the repo root (or a `.codebuddy-queue/` subdir) so it survives across sessions.
 
 ## The progress file
 
@@ -52,7 +52,7 @@ A separate JSON file tracking aggregate state:
     "globalNoAuto": false
   },
   "findings": [
-    { "taskId": "task-1", "type": "scope_creep", "detail": "WorkBuddy refactored unrelated util file" },
+    { "taskId": "task-1", "type": "scope_creep", "detail": "CodeBuddy refactored unrelated util file" },
     { "taskId": "task-3", "type": "design_decision", "detail": "Chose strategy pattern over visitor; defensible but unasked" }
   ]
 }

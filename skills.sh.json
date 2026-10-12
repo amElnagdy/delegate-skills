@@ -22,7 +22,7 @@
         "warp-delegate",
         "zcode-delegate",
         "commandcode-delegate",
-        "workbuddy-delegate"
+        "codebuddy-delegate"
       ]
     },
     {

@@ -80,7 +80,7 @@ Skip setup when you want one implementer or one-off dials. Pick the skill for a 
 | [`vibe-delegate`](skills/vibe-delegate/SKILL.md) | [Mistral Vibe](https://github.com/mistralai/mistral-vibe) (`vibe`) | `accept-edits`; `--full-access` opt-in | `--plan-only` (`plan` agent) | `--resume-last`, `--session <id>` |
 | [`copilot-delegate`](skills/copilot-delegate/SKILL.md) | [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-cli) (`copilot`) | `--allow-all-tools` opt-in; headless auto-deny otherwise | `--read-only` (`--mode plan`) | `--resume-last`, `--session <id>` |
 | [`warp-delegate`](skills/warp-delegate/SKILL.md) | [Warp Agent CLI](https://docs.warp.dev/cli/) (`oz`) | full local tools — no sandbox, no permission modes [^none] | — [^none] | `--conversation <id>` |
-| [`workbuddy-delegate`](skills/workbuddy-delegate/SKILL.md) | [WorkBuddy/CodeBuddy](https://www.codebuddy.ai/docs/cli/cli-reference) (`codebuddy`) | `-y` / `--dangerously-skip-permissions` | `--permission-mode plan` | `--resume-last`, `--session <id>` |
+| [`codebuddy-delegate`](skills/codebuddy-delegate/SKILL.md) | [CodeBuddy](https://www.codebuddy.ai/docs/cli/cli-reference) (`codebuddy`) | `-y` / `--dangerously-skip-permissions` | `--permission-mode plan` | `--resume-last`, `--session <id>` |
 | [`zcode-delegate`](skills/zcode-delegate/SKILL.md) | [Z.AI ZCode](https://zcode.z.ai) (`zcode`) [^zcode] | `--mode yolo` | `--read-only` (`plan` mode) | `--resume-last`, `--session <id>` |
 
 [^commandcode]: Command Code's headless mode has two states and nothing between them: a `-p` run
@@ -386,7 +386,7 @@ Per skill — platform, CLI version, and what the run exercised:
   project overlay, global write without creating `.delegate/`, and `--lane` resolve / wrong-skill /
   flag-override against relays. The smoke suite runs live discovery against installed CLIs
   (versions vary by machine). Native Windows discover smoke not yet claimed.
-- `workbuddy-delegate` — Windows, CodeBuddy 2.164.0: contract-tested against the native `.cmd`
+- `codebuddy-delegate` — Windows, CodeBuddy 2.164.0: contract-tested against the native `.cmd`
   launch shape, stdin brief delivery, JSON result parsing, model/effort forwarding, native
   `--permission-mode plan` read-only mapping, clean-tree verdict handling, and non-zero failure
   propagation. A live authenticated delegated run is not recorded yet.

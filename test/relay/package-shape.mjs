@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 /** Utility skills: not *-delegate, no relay.mjs / four-reference contract. */
 const UTILITY_SKILLS = ["delegate-setup"];
+const IMPLEMENTER_SKILL_DIR = { workbuddy: "codebuddy-delegate" };
 
 function metadataVersion(source) {
   const lines = source.split(/\r?\n/);
@@ -33,7 +34,8 @@ export function runPackageShape(h) {
 
   h.check("skills/ is not empty", onDiskDelegate.length > 0);
   for (const dir of onDiskDelegate) {
-    const name = dir.replace(/-delegate$/, "");
+    const name = Object.entries(IMPLEMENTER_SKILL_DIR).find(([, folder]) => folder === dir)?.[0]
+      ?? dir.replace(/-delegate$/, "");
     h.check(`${name}: in the smoke matrix`, h.SKILLS.includes(name));
     h.check(`${name}: SKILL.md`, existsSync(join(skillsDir, dir, "SKILL.md")));
     h.check(`${name}: scripts/relay.mjs`, existsSync(join(skillsDir, dir, "scripts", "relay.mjs")));
@@ -72,7 +74,10 @@ export function runPackageShape(h) {
     "all skill metadata.version values are present and in lockstep",
     !metadataVersions.includes("(missing)") && new Set(metadataVersions).size === 1,
   );
-  h.check("smoke matrix has no entry without a directory", h.SKILLS.every((s) => onDiskDelegate.includes(`${s}-delegate`)));
+  h.check(
+    "smoke matrix has no entry without a directory",
+    h.SKILLS.every((s) => onDiskDelegate.includes(IMPLEMENTER_SKILL_DIR[s] ?? `${s}-delegate`)),
+  );
   h.check(
     "skills.sh.json has no entry without a directory",
     [...registered].every((s) => existsSync(join(skillsDir, s))),

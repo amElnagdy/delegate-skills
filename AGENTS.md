@@ -8,7 +8,7 @@ and land the result. Eighteen implementer skills ship today: `claude-delegate` (
 `qoder-delegate` (Qoder CLI), `vibe-delegate` (Mistral Vibe), `cursor-delegate` (Cursor Agent CLI),
 `pi-delegate` (Pi CLI), `omp-delegate` (Oh My Pi), `aider-delegate` (Aider), `copilot-delegate` (GitHub Copilot CLI),
 `warp-delegate` (Warp Agent CLI), `zcode-delegate` (Z.AI ZCode), `commandcode-delegate` (Command Code), and
-`workbuddy-delegate` (WorkBuddy/CodeBuddy CLI); siblings like
+`codebuddy-delegate` (CodeBuddy CLI); siblings like
 `gemini-delegate` can be added
 later without renaming the repo. One **utility** skill
 ships alongside them: `delegate-setup` (configure fleet lanes — setup only, never dispatches).
@@ -22,7 +22,7 @@ jargon. Use these terms; don't invent synonyms.
 | --- | --- | --- |
 | **delegate** / **delegation** | the activity, and this skill family | "relay" (as the activity), "hand-off", "offload" |
 | **orchestrator** | the driving agent (Claude Code, …) | "controller", "driver" |
-| **implementer** | the separate agent (Claude, Cline, Codex, OpenCode, Antigravity, Grok, Kimi, Qoder, Vibe, Cursor, Pi, Oh My Pi, Aider, Copilot, Warp, ZCode, Command Code, WorkBuddy) | "worker", "sub-agent", "executor" |
+| **implementer** | the separate agent (Claude, Cline, Codex, OpenCode, Antigravity, Grok, Kimi, Qoder, Vibe, Cursor, Pi, Oh My Pi, Aider, Copilot, Warp, ZCode, Command Code, CodeBuddy) | "worker", "sub-agent", "executor" |
 | **brief** | the self-contained task spec sent to the implementer | "task file", "the prompt", "the spec" |
 | **gates** | the project's test/lint/build commands | "checks", "CI" |
 | **dispatch** | sending the brief to the implementer | "fire off", "kick off" |

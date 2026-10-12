@@ -62,6 +62,7 @@ later-edited project config fails closed until it is reviewed and written again 
 | `aider` | aider-delegate | `aider` | model, timeout, readOnly |
 | `copilot` | copilot-delegate | `copilot` | model, effort, timeout, readOnly |
 | `warp` | warp-delegate | `oz` | model, timeout |
+| `workbuddy` | codebuddy-delegate | `codebuddy` | model, effort, timeout, readOnly |
 | `zcode` | zcode-delegate | `zcode` | permissionMode, timeout, readOnly |
 
 ZCode carries its `--mode` as `permissionMode`, and only `plan` and `yolo` are accepted: ZCode also

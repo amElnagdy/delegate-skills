@@ -1,11 +1,11 @@
 ---
-name: workbuddy-delegate
+name: codebuddy-delegate
 description: >-
-  Delegate a coding task to the WorkBuddy/CodeBuddy CLI as a background implementer, then review its diff
-  and land it yourself. Use this whenever the user wants to hand implementation work to WorkBuddy —
-  phrasings like "have WorkBuddy do X", "delegate this to WorkBuddy", "run it through CodeBuddy",
-  or "use WorkBuddy to implement/fix/refactor" — or wants to run a queue of coding tasks through
-  WorkBuddy while staying the reviewer. Prefer it when the user will review the diff and commit it
+  Delegate a coding task to the CodeBuddy CLI as a background implementer, then review its diff
+  and land it yourself. Use this whenever the user wants to hand implementation work to CodeBuddy —
+  phrasings like "have CodeBuddy do X", "delegate this to CodeBuddy", "run it through CodeBuddy",
+  or "use CodeBuddy to implement/fix/refactor" — or wants to run a queue of coding tasks through
+  CodeBuddy while staying the reviewer. Prefer it when the user will review the diff and commit it
   themselves. DO NOT USE for tasks small enough to do inline, or when the user wants the code written
   directly without delegating.
 license: MIT
@@ -16,11 +16,11 @@ metadata:
   version: 0.5.0
 ---
 
-# WorkBuddy Delegate
+# CodeBuddy Delegate
 
 You are the **orchestrator**. This skill lets you hand a bounded coding task to a separate
-**implementer** — the WorkBuddy/CodeBuddy CLI — then review what it produced and land it yourself.
-You write the brief and own the judgment; WorkBuddy does the typing in its own session; you verify
+**implementer** — the CodeBuddy CLI — then review what it produced and land it yourself.
+You write the brief and own the judgment; CodeBuddy does the typing in its own session; you verify
 and commit.
 
 Nothing here is specific to one orchestrating agent. The loop needs only the ability to run a shell
@@ -49,11 +49,11 @@ treat other orchestrators as designed-for, not yet proven.)
 
 ## Choose the implementer model
 
-WorkBuddy uses model identifiers like `gpt-5`, `gpt-4`, etc., configured via `--model` flag or
+CodeBuddy uses model identifiers like `gpt-5`, `gpt-4`, etc., configured via `--model` flag or
 through its config system. The model is the one decision a single-model backend never had, and it
 has two owners:
 
-- **The human owns which models are allowed.** WorkBuddy supports various models (OpenAI, Anthropic,
+- **The human owns which models are allowed.** CodeBuddy supports various models (OpenAI, Anthropic,
   local via Ollama, etc.); only the human knows which are their subscriptions or available
   endpoints. So the usable set is theirs — ideally stated once in the repo's `AGENTS.md` or their
   `CLAUDE.md` (e.g. "delegate mechanical work to `gpt-4o-mini`, hard logic to `gpt-5`").
@@ -72,21 +72,21 @@ Run these five steps per task. Steps 1, 4, and 5 are your judgment; 2 and 3 are 
 
 ### 1. Write the brief
 
-WorkBuddy sees **only** the text you send plus what it can read from the working tree — no chat
+CodeBuddy sees **only** the text you send plus what it can read from the working tree — no chat
 history, no shared context. Everything the task needs goes in the brief: the goal, the current
 state, what to change, what to leave untouched, the project's **actual** gate commands (discover
 them from the repo's AGENTS.md/CLAUDE.md/Makefile — do not assume), and a report contract. Tell
-WorkBuddy it will **not** commit (you will). Keep one task per brief. Full guidance and a template:
+CodeBuddy it will **not** commit (you will). Keep one task per brief. Full guidance and a template:
 [references/writing-the-brief.md](references/writing-the-brief.md).
 
 ### 2. Dispatch
 
-Send the brief to WorkBuddy with the bundled helper. It wraps `codebuddy -p`, captures the run,
+Send the brief to CodeBuddy with the bundled helper. It wraps `codebuddy -p`, captures the run,
 and writes a structured `result.json` — so your only job is "run a command, read a file."
 (`<skill-dir>` below is this skill's installed directory — the folder containing this `SKILL.md`.
 Claude Code prints it as "Base directory for this skill" when the skill loads; on other orchestrators
 use that same directory — if unsure where it landed, run `find ~ -name relay.mjs -path
-'*delegate-workbuddy*'` and substitute the directory above it.)
+'*codebuddy-delegate*'` and substitute the directory above it.)
 
 ```bash
 node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --model <model-name> --cd /path/to/repo
@@ -94,7 +94,7 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --model <model-name> --cd
 # fleet lane from delegate-setup:           add --lane <name>  (dials apply; flags still win)
 # read-only (review/diagnosis, no edits):   add --read-only   (maps to --permission-mode plan)
 # reasoning effort:                        add --effort high
-# continue the previous WorkBuddy session:  add --resume-last  (delta brief only; keeps the model)
+# continue the previous CodeBuddy session:  add --resume-last  (delta brief only; keeps the model)
 # hard time limit (watchdog):               add --timeout 2h  (default: off; implementation runs routinely need 1-2h)
 # see all options:                          node .../relay.mjs --help
 ```
@@ -105,7 +105,7 @@ shape: [references/dispatch-and-poll.md](references/dispatch-and-poll.md).
 
 ### 3. Wait for completion
 
-The helper blocks until WorkBuddy finishes, so back it with whatever your orchestrator offers and
+The helper blocks until CodeBuddy finishes, so back it with whatever your orchestrator offers and
 resume when it returns:
 
 - **Claude Code:** run the Bash call with `run_in_background: true`; you are notified on completion.
@@ -122,12 +122,12 @@ process has exited. Read the working tree, not a status line. The implementer's 
 
 ### 4. Review — do not trust the self-report
 
-WorkBuddy's `result.json` includes its own final message and any gate claims. **Re-verify, don't
+CodeBuddy's `result.json` includes its own final message and any gate claims. **Re-verify, don't
 accept:**
 
 - **Re-run the project's gates yourself** (the test/lint/build commands from step 1). Never take
   "gates passed" on faith.
-- **Read the diff** against the brief: did WorkBuddy do what was asked, nothing more (scope creep)
+- **Read the diff** against the brief: did CodeBuddy do what was asked, nothing more (scope creep)
   and nothing less? `touchedFiles` in the result is your starting point.
 - **Run the relevant guard skills** on the diff if you have them installed (clean-code-guard,
   test-guard, etc. from `guard-skills`) — this skill produces the work; those skills judge it.
@@ -146,7 +146,7 @@ of the party that verified the work. Only after the gates pass and the diff hold
 
 ## Autonomy model
 
-WorkBuddy's autonomy is governed by the **mode** and **permissions**:
+CodeBuddy's autonomy is governed by the **mode** and **permissions**:
 
 - **Interactive/Print mode** (the relay default: `codebuddy -p`) — write-capable when given file
   operation permissions; edits files in the working dir headlessly. The equivalent of "let it
@@ -155,7 +155,7 @@ WorkBuddy's autonomy is governed by the **mode** and **permissions**:
   plan mode. It also records `readOnlyViolation` from the before/after Git status; inspect that
   field because the orchestrator remains the final safety boundary.
 
-Permissions: WorkBuddy uses a permission system for file operations. The relay passes `-y`
+Permissions: CodeBuddy uses a permission system for file operations. The relay passes `-y`
 (auto-approve file operations) by default so a headless run never blocks on a prompt no one can
 answer. That is the point of unattended delegation — the orchestrator's diff review and the
 implementer sweep (step 4) are the safety net, not a per-action prompt. Pass `--no-auto` to honor
@@ -168,7 +168,7 @@ Read-only runs never get `-y` — auto-approving would let edit permissions thro
 
 Delegation is something the human opts into. Once they have ("run this queue", "proceed"), committing
 verified, gate-passing work is the agreed contract — that is the whole point. Two limits on that
-mandate: **surface, don't absorb** (report WorkBuddy's design decisions, defensible-but-unasked
+mandate: **surface, don't absorb** (report CodeBuddy's design decisions, defensible-but-unasked
 turns, and non-blocking nitpicks rather than silently keeping them) and **stop for scope changes**
 (if correct completion needs going beyond the brief, ask — don't expand the mandate yourself). The
 full treatment is in [references/review-and-land.md](references/review-and-land.md).
@@ -176,7 +176,7 @@ full treatment is in [references/review-and-land.md](references/review-and-land.
 ## References
 
 - [references/writing-the-brief.md](references/writing-the-brief.md) — how to write a brief
-  WorkBuddy can execute blind: structure, XML blocks, the report contract, embedding the real gate
+  CodeBuddy can execute blind: structure, XML blocks, the report contract, embedding the real gate
   commands.
 - [references/dispatch-and-poll.md](references/dispatch-and-poll.md) — `relay.mjs` flags, the
   `result.json` contract, backgrounding per orchestrator, and recovery when a run misbehaves.

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * WorkBuddy Delegate Relay
+ * CodeBuddy Delegate Relay
  * Wraps `codebuddy -p`, captures the run, and writes a structured result.json
  */
 
@@ -118,7 +118,7 @@ function parseArgs() {
 
 function printHelp() {
   console.log(`
-WorkBuddy Delegate Relay
+CodeBuddy Delegate Relay
 
 Usage:
   node relay.mjs --brief <file> --model <model> [options]
@@ -311,7 +311,7 @@ async function main() {
     process.exit(2);
   }
 
-  const outDir = opts.outDir || join(tmpdir(), `workbuddy-delegate-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const outDir = opts.outDir || join(tmpdir(), `codebuddy-delegate-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(outDir, { recursive: true });
   const briefPath = join(outDir, 'brief.txt');
   const eventsPath = join(outDir, 'events.jsonl');
@@ -474,7 +474,7 @@ async function main() {
   writeResult(outDir, result);
 
   // Print summary
-  console.log(`\n=== WorkBuddy Delegate Result ===`);
+  console.log(`\n=== CodeBuddy Delegate Result ===`);
   console.log(`Status: ${result.status}`);
   console.log(`Exit code: ${result.exitCode}`);
   console.log(`Version: ${result.codebuddyVersion}`);
@@ -514,7 +514,7 @@ function buildResult(core, opts, outDir, briefPath, eventsPath, finalPath) {
     briefPath,
     eventsPath,
     finalPath,
-    cost: null, // WorkBuddy doesn't report cost in CLI output
+    cost: null, // CodeBuddy doesn't report cost in CLI output
   };
 }
 

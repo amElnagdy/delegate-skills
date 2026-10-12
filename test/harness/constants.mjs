@@ -34,4 +34,4 @@ export const binaryName = (skill) =>
           : skill;
 
 export const relayPath = (testDir, skill) =>
-  join(testDir, "..", "skills", `${skill}-delegate`, "scripts", "relay.mjs");
+  join(testDir, "..", "skills", skill === "workbuddy" ? "codebuddy-delegate" : `${skill}-delegate`, "scripts", "relay.mjs");
