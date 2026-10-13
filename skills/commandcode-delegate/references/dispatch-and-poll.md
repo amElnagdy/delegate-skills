@@ -37,7 +37,7 @@ Options:
 | --- | --- |
 | `--brief <file>` | The brief. Omit it to read the brief from stdin (`node relay.mjs … < brief.txt`). |
 | `--cd <dir>` | Working root for Command Code (default: current directory). It is the child's working directory — Command Code has no `--cd` of its own, and under `--yolo` it is a starting point, not a boundary. |
-| `--lane <name>` | Fleet lane from `delegate-setup` config. Applies that lane's dials; fails if the lane's `implementer` is not this relay. Explicit dial flags win. |
+| `--lane <name>` | Fleet lane from `delegate-setup` config. Applies that lane's dials; fails if the lane's `implementer` is not this relay. Explicit dial flags win. Per-orchestrator global fleets: export `DELEGATE_ORCHESTRATOR=<identity>` with the dispatch — the relay passes its environment to the fleet resolver, never guessing the identity from the implementer key, and an invalid or unconfigured selector exits 2 before the implementer starts. See the delegate-setup fleet schema. |
 | `--model <name>` | Model for this run, e.g. `vendor/model` (default: Command Code's own). `cmd --list-models` lists what your account can use. |
 | `--effort <level>` | Reasoning effort — `low` \| `medium` \| `high`, model-dependent. The relay accepts a bare token; Command Code and the model own the supported levels. |
 | `--read-only` | Withhold the write, edit, and shell tools: no `--yolo`, plus `--permission-mode plan`. For review and diagnosis, followed by a Git-visible `readOnlyViolation` tripwire. |

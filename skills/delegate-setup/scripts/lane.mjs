@@ -3,8 +3,15 @@
  * lane.mjs — resolve a fleet lane for a relay (or print help).
  *
  * Usage:
- *   node lane.mjs resolve --cwd <dir> --lane <name> --implementer <key>
+ *   node lane.mjs resolve --cwd <dir> --lane <name> --implementer <key> [--agent <identity>]
  *   node lane.mjs --help
+ *
+ * `--agent <identity>` selects a per-orchestrator fleet from the global config's
+ * `agents` map (agent lanes override same-name shared lanes before the project
+ * overlay). Absent flag falls back to a non-empty DELEGATE_ORCHESTRATOR env var,
+ * which relays pass through unchanged — an orchestrator declares its own seat by
+ * exporting that variable; it is never guessed from the implementer key. A
+ * selector naming an identity with no fleet fails closed.
  *
  * On success, prints JSON:
  *   { "lane", "source", "implementer", "skill", "dials": { ...relay-native fields } }
@@ -23,13 +30,21 @@ import {
   IMPLEMENTER_BY_KEY,
   LANE_NAME,
 } from "./implementers.mjs";
-import { loadEffective } from "./config.mjs";
+import { loadEffective, selectAgentIdentity } from "./config.mjs";
 
 const HELP = `lane.mjs — resolve a delegate-fleet.v1 lane for a relay
 
 Usage:
-  node lane.mjs resolve --cwd <dir> --lane <name> --implementer <key>
+  node lane.mjs resolve --cwd <dir> --lane <name> --implementer <key> [--agent <identity>]
   node lane.mjs --help
+
+Selector:
+  --agent <identity>   resolve per-orchestrator lanes from the global agents map
+                       (same shape as lane names). Absent flag falls back to a
+                       non-empty DELEGATE_ORCHESTRATOR env var; a selector naming
+                       an agent with no fleet fails closed.
+  DELEGATE_ORCHESTRATOR=__shared__ deliberately selects a shared lane overridden
+                       by an agent fleet (without a selector, that lane fails closed).
 `;
 
 function fail(message) {
@@ -41,17 +56,30 @@ function fail(message) {
  * Map a stored lane onto dials the named relay can apply directly.
  * @returns {{ lane: string, source: string, implementer: string, skill: string, dials: Record<string, unknown> }}
  */
-export function resolveLaneForRelay(cwd, laneName, implementerKey) {
+export function resolveLaneForRelay(cwd, laneName, implementerKey, agentIdentity = null, explicitShared = false) {
   if (!LANE_NAME.test(laneName)) {
     throw new Error(`invalid lane name ${JSON.stringify(laneName)}`);
   }
   if (IMPLEMENTER_BY_KEY[implementerKey] == null) {
     throw new Error(`unknown implementer ${JSON.stringify(implementerKey)}`);
   }
-  const effective = loadEffective(cwd);
-  const entry = effective.lanes[laneName];
+  const effective = loadEffective(cwd, agentIdentity);
+  if (agentIdentity === null && !explicitShared) {
+    const owners = effective.agentLaneOwners?.[laneName];
+    if (owners?.length) {
+      throw new Error(`fleet lane ${JSON.stringify(laneName)} differs by orchestrator (${owners.join(", ")}); set DELEGATE_ORCHESTRATOR to an identity, or __shared__ to deliberately use the shared lane`);
+    }
+  }
+  const entry = Object.hasOwn(effective.lanes, laneName) ? effective.lanes[laneName] : null;
   if (!entry) {
-    throw new Error(`fleet lane not found: ${laneName}`);
+    // Without a selector, per-orchestrator-only lanes are invisible; say which
+    // seat has them when the lane name exists only inside `agents` fleets.
+    const owners = agentIdentity === null ? effective.agentOnlyLanes?.[laneName] : undefined;
+    throw new Error(
+      owners && owners.length > 0
+        ? `fleet lane not found: ${laneName} (it is only defined for orchestrator ${owners.length === 1 ? `agent ${JSON.stringify(owners[0])}` : `agents ${owners.map((o) => JSON.stringify(o)).join(", ")}`}; dispatch with --agent or DELEGATE_ORCHESTRATOR set to one of them)`
+        : `fleet lane not found: ${laneName}`,
+    );
   }
   const { source, implementer, ...rest } = entry;
   if (source === "project" && !effective.projectTrusted) {
@@ -154,6 +182,7 @@ function parseResolveArgs(argv) {
   let cwd = process.cwd();
   let lane = null;
   let implementer = null;
+  let agent = null;
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     const next = () => {
@@ -164,11 +193,12 @@ function parseResolveArgs(argv) {
     if (arg === "--cwd") cwd = resolvePath(next());
     else if (arg === "--lane") lane = next();
     else if (arg === "--implementer") implementer = next();
+    else if (arg === "--agent") agent = next();
     else fail(`unknown option: ${arg}`);
   }
   if (!lane) fail("resolve requires --lane");
   if (!implementer) fail("resolve requires --implementer");
-  return { cwd, lane, implementer };
+  return { cwd, lane, implementer, agent };
 }
 
 function main(argv) {
@@ -179,8 +209,10 @@ function main(argv) {
   const cmd = argv[0];
   if (cmd !== "resolve") fail(`unknown command ${JSON.stringify(cmd)}`);
   try {
-    const { cwd, lane, implementer } = parseResolveArgs(argv.slice(1));
-    const result = resolveLaneForRelay(cwd, lane, implementer);
+    const { cwd, lane, implementer, agent } = parseResolveArgs(argv.slice(1));
+    const selected = selectAgentIdentity(agent, process.env.DELEGATE_ORCHESTRATOR);
+    if (!selected.ok) fail(selected.error);
+    const result = resolveLaneForRelay(cwd, lane, implementer, selected.agent, selected.explicitShared === true);
     process.stdout.write(`${JSON.stringify(result)}\n`);
   } catch (error) {
     fail(error.message || String(error));

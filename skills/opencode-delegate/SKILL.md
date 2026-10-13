@@ -85,6 +85,8 @@ substitute the directory above it.)
 node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --model <provider/model> --cd /path/to/repo
 # --model (or a --lane that sets model) is required on a fresh run
 # fleet lane from delegate-setup:           add --lane <name>  (dials apply; flags still win)
+# per-orchestrator fleet (delegate-setup):  export DELEGATE_ORCHESTRATOR=<identity>  (identifies
+#                                           this orchestrating agent; relays never guess it)
 # read-only (review/diagnosis, no edits):   add --read-only   (uses the plan agent)
 # continue the previous OpenCode session:   add --resume-last  (delta brief only; keeps the model)
 # hard time limit (watchdog):               add --timeout 2h  (default: off; implementation runs routinely need 1-2h)

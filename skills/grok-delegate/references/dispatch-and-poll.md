@@ -35,7 +35,7 @@ Options:
 | `--brief <file>` | The brief. Omit it to read the brief from stdin (`node relay.mjs … < brief.txt`). |
 | `--cd <dir>` | Working root for Grok (default: current directory); passed as `--cwd`. |
 | `--trust-git-root <dir>` | Opt in to command-scoped Git trust for this exact worktree root. Applies only to relay Git checks; defaults off. |
-| `--lane <name>` | Fleet lane from `delegate-setup` config. Applies that lane's dials; fails if the lane's `implementer` is not this relay. Explicit dial flags win. |
+| `--lane <name>` | Fleet lane from `delegate-setup` config. Applies that lane's dials; fails if the lane's `implementer` is not this relay. Explicit dial flags win. Per-orchestrator global fleets: export `DELEGATE_ORCHESTRATOR=<identity>` with the dispatch — the relay passes its environment to the fleet resolver, never guessing the identity from the implementer key, and an invalid or unconfigured selector exits 2 before the implementer starts. See the delegate-setup fleet schema. |
 | `--model <name>` | Grok model (default: Grok's own configured default). |
 | `--effort <level>` | Reasoning effort for this run (`--effort`). |
 | `--max-turns <n>` | Maximum number of agent turns for this run (`--max-turns`). |
