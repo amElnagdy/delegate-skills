@@ -36,10 +36,12 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 | `--resume-last` | Resume the most recent session (`--continue`). |
 | `--session <id>` | Resume a specific session (`--resume=<id>`). Mutually exclusive with `--resume-last`. |
 | `--timeout <dur>` | Relay watchdog (default: `30m`; h/m/s strings). Copilot has no timeout flag. |
-| `--out-dir <dir>` | Artifact directory (default: a fresh directory under the system temp dir). |
+| `--out-dir <dir>` | Artifact directory (default: a fresh directory under the system temp dir). Passed to copilot as `--add-dir`. |
 | `-h`, `--help` | Print the relay's header help. |
 
-The child cwd pins the workspace. The relay does not pass copilot's `--add-dir`.
+The child cwd pins the workspace. Copilot reads files only under its cwd, the system temp dir, and
+`--add-dir` paths, so the relay always passes the run's artifact directory as `--add-dir`. Without
+it, an `--out-dir` outside both left `brief.txt` unreadable and the run did nothing (copilot 1.0.83).
 
 ## Artifacts and result fields
 
@@ -68,7 +70,7 @@ Artifacts live outside the repo by default, so they do not appear in `touchedFil
 - `stderrTail` — the last 20 non-empty stderr lines on any run that did not complete (`failed`,
   `timeout`, `aborted`).
 - `error` — present on denial failures (with the CLI's own denial message plus a hint to pass
-  `--allow-all-tools`), preflight failures, when the relay watchdog fires (`timeout`), and on an
+  `--allow-all-tools`, or a path-permission note when it was already passed), preflight failures, when the relay watchdog fires (`timeout`), and on an
   `aborted` run.
 
 ## Waiting for completion
@@ -86,7 +88,9 @@ A pre-run usage error exits 2 and writes no result. A missing `copilot` exits 12
   and re-dispatch.
 - **`status: "failed"` with a denial error:** copilot auto-denied a tool call in headless mode.
   The error message includes the CLI's own denial text and a hint to pass `--allow-all-tools`.
-  Re-dispatch with `--allow-all-tools` to grant full tool permissions.
+  Re-dispatch with `--allow-all-tools` to grant full tool permissions. If `--allow-all-tools` was
+  already passed, the error says so instead: the denial is a path or URL permission, typically a
+  brief or task file outside the working directory, the system temp dir, and `--add-dir` paths.
 - **`status: "failed"`:** read `stderrTail`, `stderrPath`, and the tail of `events.jsonl`. Common
   causes: an unknown `--model`, expired credentials, or a provider error.
 - **`status: "failed"` with an `error` mentioning `version preflight`:** the bounded
@@ -117,10 +121,11 @@ copilot --output-format json --no-color --stream off \
   [--mode plan] [--allow-all-tools] \
   [--continue | --resume=<id>] \
   [--model <name>] [--effort <level>] \
+  --add-dir <out-dir> \
   -p @<brief.txt>
 ```
 
-The child process cwd pins the workspace. Only token-validated model/effort/session values and
+The child process cwd pins the workspace; `--add-dir <out-dir>` keeps the brief readable. Only token-validated model/effort/session values and
 fixed text reach the `shell:true` launch on native Windows; the brief is delivered via `-p @<file>`
 (the CLI's @-prefixed file prompt channel), with the brief path quoted for the shell on Windows.
 On resume (`--continue` / `--resume=<id>`) the relay wraps the reference in a fixed directive —

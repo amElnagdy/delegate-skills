@@ -76,6 +76,7 @@ for (const scenario of [
   h.check(`copilot ${scenario.name}: relay exits zero`, run.status === 0);
   const expectedArgv = [
     ...scenario.forwarded,
+    "--add-dir", outDir,
     "-p", scenario.resumed
       ? `${RESUME_DIRECTIVE}@${join(outDir, "brief.txt")}`
       : `@${join(outDir, "brief.txt")}`,
@@ -112,6 +113,30 @@ for (const scenario of [
     h.result(outDir).status === "failed" &&
     h.result(outDir).error?.includes("auto-denied") &&
     h.result(outDir).error?.includes("--allow-all-tools"));
+}
+// A denial despite --allow-all-tools is a path/URL permission: the error must not
+// tell the caller to pass the flag they already passed.
+{
+  const outDir = join(h.scratch, "out-denied-allow-all-copilot");
+  const workDir = h.freshRepo("work-denied-allow-all-copilot");
+  const argsFile = join(h.scratch, "args-denied-allow-all-copilot");
+  const run = spawnSync(process.execPath, [
+    h.relayPath("copilot"),
+    "--brief", h.briefPath,
+    "--cd", workDir,
+    "--out-dir", outDir,
+    "--allow-all-tools",
+  ], {
+    env: { ...h.baseEnv, SMOKE_MODE: "copilot-denied", SMOKE_ARGS_FILE: argsFile },
+    encoding: "utf8",
+  });
+  const value = existsSync(join(outDir, "result.json")) ? h.result(outDir) : {};
+  h.check("copilot denied with --allow-all-tools: failed with a path-permission error, no flag hint",
+    run.status !== 0 &&
+    value.status === "failed" &&
+    value.error?.includes("despite --allow-all-tools") &&
+    value.error?.includes("--add-dir") &&
+    !value.error?.includes("Pass --allow-all-tools"));
 }
 // --read-only and --allow-all-tools conflict → exit 2
 {
