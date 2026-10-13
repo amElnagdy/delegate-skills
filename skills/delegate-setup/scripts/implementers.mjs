@@ -12,7 +12,7 @@
  * Node built-ins only. No network, credentials, or telemetry.
  */
 
-/** @typedef {"model"|"effort"|"variant"|"timeout"|"readOnly"|"sandbox"|"permissionMode"|"force"|"provider"} Dial */
+/** @typedef {"model"|"effort"|"variant"|"timeout"|"readOnly"|"sandbox"|"permissionMode"|"force"|"provider"|"autoGrant"|"allowCommands"} Dial */
 
 /**
  * @type {readonly {
@@ -166,7 +166,7 @@ export const IMPLEMENTERS = Object.freeze([
       entry: "file",
       match: /\.db$/,
     },
-    supports: ["model", "effort", "timeout", "readOnly"],
+    supports: ["model", "effort", "timeout", "readOnly", "autoGrant", "allowCommands"],
     winShell: false,
   },
   {
@@ -458,6 +458,8 @@ export const MODEL_TOKEN = Object.freeze({
 export const CONFIG_VERSION = "delegate-fleet.v1";
 export const LANE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 export const ALL_DIALS = Object.freeze([
+  "autoGrant",
+  "allowCommands",
   "model",
   "effort",
   "variant",

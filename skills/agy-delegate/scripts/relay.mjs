@@ -24,26 +24,9 @@
  * Antigravity owns its own permission policy. This helper does not pass
  * --dangerously-skip-permissions by default; opt into that flag only when the
  * human explicitly accepts it. Pass --sandbox to enable Antigravity's terminal
- * sandbox for the run.
- *
- * `--read-only` composes both: `--sandbox --dangerously-skip-permissions`. That
- * pairing looks alarming and is deliberate — the sandbox is the enforcement and
- * the auto-approve only lets tools run *inside* it. Plan mode alone cannot do
- * the job: headless `--print` has no way to answer a permission prompt, so agy
- * auto-denies the first tool that needs one and the run returns nothing at all
- * ("a tool required the \"command\" permission that headless mode cannot prompt
- * for"). Verified on agy 1.1.28, macOS: under --sandbox, writes to the working
- * tree are overlaid and discarded, and every path outside the workspace fails
- * with EPERM for read *and* write.
- *
- * Two consequences worth knowing before choosing this lane:
- *   - The sandbox confines READS to the workspace too. A brief that cites an
- *     absolute path outside --cd cannot be followed; keep briefs self-contained
- *     or add the path with agy's own --add-dir.
- *   - Inside the workspace a write appears to succeed to the agent — it reads
- *     its own overlay back — and is then discarded. The tree is safe, but a
- *     confused run may report edits it did not make. Trust `touchedFiles`, not
- *     the agent's account of itself.
+ * sandbox for the run. Windows --read-only uses --mode plan without bypass;
+ * other platforms retain upstream sandbox + internal approval. Fingerprints
+ * detect working-tree changes and fail a read-only run when a violation is proven.
  *
  * Usage:
  *   node relay.mjs --brief <file> [options]
@@ -56,16 +39,17 @@
  *   --model <name>          Antigravity model label (default: agy's configured default).
  *   --effort <level>        Reasoning effort: low, medium, or high (passed as agy's own --effort).
  *   --project <id>          Use an existing Antigravity project.
- *   --new-project           Force a fresh Antigravity project (default for fresh runs).
+ *   --new-project           Force a fresh project (with --auto-grant: replace workspace registration).
+ *   --auto-grant            Prepare project write/command approvals. Opt-in; default is off.
+ *   --no-auto-grant         Disable managed project permissions (fresh agy project by default).
+ *   --allow-command <name>  Add a bare command/cmdlet name to project approvals. Repeatable.
+ *   --auto-grant-dry-run    Print proposed grants as JSON and exit; no brief or writes needed.
  *   --resume-last           Continue the most recent Antigravity conversation; send only the delta brief.
  *   --conversation <id>     Continue a specific Antigravity conversation; send only the delta brief.
  *   --sandbox               Enable Antigravity's terminal sandbox for this run.
- *   --read-only             Review/diagnosis with no edits: runs under agy's sandbox with
- *                           tool approval auto-granted inside it (`--sandbox
- *                           --dangerously-skip-permissions`). Reads and writes are both
- *                           confined to the workspace. Mutually exclusive with
- *                           --dangerously-skip-permissions as a flag: that alone, without
- *                           the sandbox, is full access.
+ *   --read-only             Windows: plan mode with no permission bypass. Other platforms:
+ *                           upstream sandbox + tool approval. Mutually exclusive
+ *                           with a user-passed --dangerously-skip-permissions flag.
  *   --dangerously-skip-permissions
  *                           Auto-approve Antigravity tool permission requests. Use only with human approval.
  *                           Mutually exclusive with --read-only.
@@ -104,6 +88,7 @@ import {join, resolve, basename, dirname, relative, isAbsolute } from "node:path
 import { fileURLToPath } from "node:url";
 import { constants, tmpdir } from "node:os";
 import { StringDecoder } from "node:string_decoder";
+import { prepareAutoGrant } from "./auto-grant.mjs";
 
 const DEFAULT_PRINT_TIMEOUT = "30m";
 const MAX_TIMER_MS = 2_147_483_647;
@@ -169,6 +154,9 @@ function parseArgs(argv) {
     sandbox: false,
     readOnly: false,
     dangerouslySkipPermissions: false,
+    autoGrant: false,
+    autoGrantDryRun: false,
+    allowCommands: [],
     printTimeout: DEFAULT_PRINT_TIMEOUT,
     timeout: null,
     addDirs: [],
@@ -194,6 +182,10 @@ function parseArgs(argv) {
       case "--model": opts.model = next(); flagged.add("model"); break;
       case "--effort": opts.effort = next(); flagged.add("effort"); break;
       case "--project": opts.project = next(); break;
+      case "--auto-grant": opts.autoGrant = true; flagged.add("autoGrant"); break;
+      case "--no-auto-grant": opts.autoGrant = false; flagged.add("autoGrant"); break;
+      case "--auto-grant-dry-run": opts.autoGrantDryRun = true; break;
+      case "--allow-command": opts.allowCommands.push(next()); flagged.add("allowCommands"); break;
       case "--new-project": opts.newProject = true; break;
       case "--resume-last": opts.resumeLast = true; break;
       case "--conversation": opts.conversation = next(); break;
@@ -212,6 +204,13 @@ function parseArgs(argv) {
     }
   }
   applyFleetLane(opts, flagged);
+  if (opts.autoGrantDryRun && !flagged.has("autoGrant")) opts.autoGrant = true;
+  if (!opts.autoGrant && flagged.has("allowCommands") && !opts.readOnly && !opts.resumeLast && !opts.conversation && !opts.dangerouslySkipPermissions) {
+    fail("--allow-command requires --auto-grant (or an autoGrant fleet lane)");
+  }
+  if (process.platform === "win32" && opts.readOnly && (opts.project || opts.resumeLast || opts.conversation)) {
+    fail("Windows --read-only requires a fresh project; existing projects and conversations can inherit write grants. Pass --cd without --project or resume flags");
+  }
   if (opts.effort !== null && !["low", "medium", "high"].includes(opts.effort)) {
     fail(`invalid --effort "${opts.effort}" (expected: low, medium, high)`);
   }
@@ -463,12 +462,14 @@ function buildArgv(opts, brief, run) {
   if (opts.model) argv.push("--model", opts.model);
   if (opts.effort) argv.push("--effort", opts.effort);
   if (opts.readOnly) {
-    // The sandbox is the enforcement; the auto-approve only lets tools run
-    // inside it. `--mode plan` was the old mapping and could not work headless:
-    // agy auto-denies any tool needing a permission prompt, so the first
-    // command ended the run with nothing returned. See the header for what the
-    // sandbox does and does not cover.
-    argv.push("--sandbox", "--dangerously-skip-permissions");
+    // Windows live proof: sandbox + bypass DOES persist write_to_file changes.
+    // Use plan mode without internally auto-approving tool permissions there.
+    if (process.platform === "win32") {
+      argv.push("--mode", "plan");
+      if (opts.sandbox) argv.push("--sandbox");
+    } else {
+      argv.push("--sandbox", "--dangerously-skip-permissions");
+    }
   } else {
     if (opts.sandbox) argv.push("--sandbox");
     if (opts.dangerouslySkipPermissions) argv.push("--dangerously-skip-permissions");
@@ -486,9 +487,9 @@ function parseIdsFromLog(logPath) {
   if (!existsSync(logPath)) return { projectId: null, conversationId: null };
   const text = readFileSync(logPath, "utf8");
   const projectMatches = [
-    /project: created project "[^"]*" \(id=([0-9a-f-]+)\)/i,
-    /Conversation using project ID: ([0-9a-f-]+)/i,
-    /Backend project ID updated dynamically to: ([0-9a-f-]+)/i,
+    /Conversation using project ID: ([a-z0-9_-]+)/i,
+    /Backend project ID updated dynamically to: ([a-z0-9_-]+)/i,
+    /project: created project "[^"]*" \(id=([a-z0-9_-]+)\)/i,
   ];
   const conversationMatches = [
     /Print mode: conversation=([0-9a-f-]+)/i,
@@ -519,6 +520,7 @@ function makeResultWriter(opts, version, run) {
       model: opts.model,
       effort: opts.effort,
       project: opts.project,
+      autoGrant: opts.autoGrantResult || { enabled: false, reason: "not-prepared" },
       sandbox: opts.sandbox,
       readOnly: opts.readOnly,
       readOnlyViolation: null,
@@ -722,9 +724,11 @@ function dispatchToAgy(opts, brief, run, writeResult, watchdogMs) {
     const worktreeChanged = beforeState !== null && afterState !== null && beforeState !== afterState;
     const readOnlyViolation = readOnlyVerdict(opts, beforeState, afterState);
     const silentNoop = code === 0 && !finalMessage && !worktreeChanged;
+    const actualProject = parseIdsFromLog(run.logPath).projectId;
+    const projectMismatch = opts.autoGrantResult?.enabled && actualProject !== null && actualProject !== opts.project;
     // A timed-out run is failed even if agy handles SIGTERM by exiting 0 -
     // orchestrators key off status and the relay exit code.
-    const succeeded = code === 0 && !watchdogFired && !permissionDenied && !silentNoop;
+    const succeeded = code === 0 && !watchdogFired && !permissionDenied && !silentNoop && readOnlyViolation !== true && !projectMismatch;
     const mapped = code ?? (constants.signals[signal] ? 128 + constants.signals[signal] : 1);
     const result = writeResult({
       status: succeeded ? "completed" : watchdogFired ? "timeout" : "failed",
@@ -740,8 +744,14 @@ function dispatchToAgy(opts, brief, run, writeResult, watchdogMs) {
               ? `agy did not finish within --timeout ${opts.timeout}; killed by the relay watchdog`
               : `agy did not exit within --print-timeout ${opts.printTimeout} plus 60s grace; killed by the relay watchdog`,
           }
+        : projectMismatch
+          ? { error: `agy used project ${actualProject} instead of the managed project ${opts.project}; project grants could not be confirmed` }
+        : readOnlyViolation === true
+          ? { error: "agy changed the working tree during a read-only run; inspect and restore the changes before proceeding" }
         : permissionDenied
-          ? { error: `Antigravity auto-denied the ${permissionDenied[1]} permission because headless --print cannot prompt; ask the human whether to re-dispatch with --dangerously-skip-permissions and treat that run as full access` }
+          ? { error: opts.readOnly
+              ? `Antigravity auto-denied the ${permissionDenied[1]} permission during read-only review; use direct read tools or targeted read grants, and keep permission bypass disabled on Windows`
+              : `Antigravity auto-denied the ${permissionDenied[1]} permission because headless --print cannot prompt; inspect autoGrant and add a targeted --allow-command if appropriate; permission bypass requires explicit human approval` }
           : silentNoop
             ? { error: "agy exited 0 without a final message or observable working-tree changes; the relay cannot confirm this dispatch completed" }
             : {}),
@@ -753,6 +763,11 @@ function dispatchToAgy(opts, brief, run, writeResult, watchdogMs) {
 
 function main() {
   const opts = parseArgs(process.argv.slice(2));
+  if (opts.autoGrantDryRun) {
+    try { process.stdout.write(`${JSON.stringify(prepareAutoGrant(opts, { dryRun: true }), null, 2)}\n`); }
+    catch (error) { fail(error.message); }
+    return;
+  }
   const brief = readBrief(opts);
   if (!brief.trim()) fail("empty brief (pass --brief <file> or pipe the brief on stdin)");
 
@@ -785,6 +800,15 @@ function main() {
     return;
   }
 
+  try {
+    opts.autoGrantResult = prepareAutoGrant(opts);
+    if (opts.autoGrantResult.enabled) opts.project = opts.autoGrantResult.projectId;
+  } catch (error) {
+    const result = writeResult({ status: "failed", exitCode: 1, signal: null, finalMessage: "",
+      touchedFiles: null, error: `auto-grant failed: ${error.message}` });
+    printSummary(result, run.resultPath);
+    process.exit(1);
+  }
   dispatchToAgy(opts, brief, run, writeResult, watchdogMs);
 }
 

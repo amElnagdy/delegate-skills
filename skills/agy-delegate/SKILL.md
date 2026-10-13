@@ -70,7 +70,9 @@ below is this skill's installed directory - the folder containing this `SKILL.md
 node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 # choose a model label:                 add --model "<label from agy models>"
 # reasoning effort (low, medium, high): add --effort high
-# read-only (sandbox — no edits):       add --read-only
+# project write/command approvals:      add --auto-grant
+# preview approvals without dispatch:    add --auto-grant-dry-run
+# read-only review:                      add --read-only
 # enable Antigravity terminal sandbox:  add --sandbox
 # resume the most recent conversation:  add --resume-last  (delta brief only)
 # see all options:                      node .../relay.mjs --help
@@ -78,6 +80,9 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 
 The helper starts a fresh Antigravity project by default and passes `--add-dir <repo>` (the `--cd`
 path, absolute) so `agy` has an explicit workspace. It does **not** pass `--dangerously-skip-permissions` by default.
+For trusted implementation work, inspect `--auto-grant-dry-run`, then opt in with `--auto-grant`
+(or an approved AGY fleet lane with `autoGrant: true`). This prepares per-project approvals without
+changing global permission settings. Without opt-in, the default dispatch is unchanged.
 Mechanics, flags, and the `result.json` shape: [references/dispatch-and-poll.md](references/dispatch-and-poll.md).
 
 ### 3. Wait for completion
@@ -116,36 +121,20 @@ diff holds:
 
 ## Permission model
 
-Antigravity owns its own permission policy. The relay does not bypass it by default. Use
-`--dangerously-skip-permissions` only when the human explicitly accepts that Antigravity may
-auto-approve tool permission requests. `--read-only` composes `--sandbox` with
-`--dangerously-skip-permissions`: the sandbox is the enforcement — writes inside the workspace
-are overlaid and discarded, and paths outside it fail with EPERM — while the auto-approve only
-lets tools run inside it. As a user-facing flag it stays mutually exclusive with
-`--dangerously-skip-permissions`, which alone (without the sandbox) is full access. Use
-`--sandbox` on its own when you want the terminal sandbox enabled for a write run.
-If headless `--print` auto-denies a write, the relay reports `status: "failed"` and exits non-zero.
-The relay fingerprints the working tree before and after a `--read-only` run to report
-`readOnlyViolation` in `result.json`. Settings allow-rules do apply to headless `--print` runs, but
-their matching rules and config location vary by `agy` version and platform, so treat a denial as
-something to measure on your install rather than assume. Two traps have been measured. First,
-exact-match behavior: on Windows with agy 1.2.5, `command(<name>)` matched only a bare command with
-no arguments — `command(git)` never allowed a real `git status`, and `command(regex:git .+)` was
-required ([issue #614 comment](https://github.com/google-antigravity/antigravity-cli/issues/614#issuecomment-5466617752)).
-On macOS with agy 1.2.0, that same bare `command(git)` rule *did* allow `git status`, so the
-exact-match trap is not a constant across versions. Second, on Windows, an open
-upstream defect in Antigravity's permission engine
-([issue #614](https://github.com/google-antigravity/antigravity-cli/issues/614)) splits resolved paths
-on whitespace, so a binary under `C:\Program Files\...` — which is where `git` itself commonly lives,
-making this the single most common trigger for delegated coding tasks, not just node/npm — is matched
-as its first fragment and no `command(<name>)` rule can match it. On which file agy reads: verified
-live on Windows with agy 1.2.5, the effective rules were `userSettings.globalPermissionGrants.allow`
-in `~/.gemini/config/config.json`, not the `permissions.allow` in
-`~/.gemini/antigravity-cli/settings.json` that agy's own denial message points at; verified live on
-macOS with agy 1.2.0, rules in `antigravity-cli/settings.json` took effect. Recheck both on your
-version before relying on either file. See
-[references/dispatch-and-poll.md](references/dispatch-and-poll.md) for the full writeup. Do not add
-the bypass flag without explicit human approval.
+Antigravity owns its permission policy. Headless print mode cannot answer permission prompts.
+Optional `--auto-grant` prepares persistent project write/command approvals for trusted coding
+work. Shells and interpreters are included, so these approvals do not confine access to the working
+tree. Preview the rules first; `--no-auto-grant` skips preparation without revoking existing grants.
+
+Windows `--read-only` uses a fresh project in plan mode without bypass and rejects explicit
+projects/resumed conversations, which could inherit write approvals. Global grants can still apply.
+Other platforms retain the existing sandbox plus internal approval launch. The relay fingerprints
+the working tree and fails when a change is proven; incomplete coverage returns `null`.
+Neither plan mode nor this detection is an OS-enforced boundary.
+
+Use `--dangerously-skip-permissions` only with explicit human approval. It remains mutually
+exclusive with `--read-only`. Full policy, storage, recovery and compatibility limits are in
+[references/dispatch-and-poll.md](references/dispatch-and-poll.md).
 
 ## Authorization model
 
