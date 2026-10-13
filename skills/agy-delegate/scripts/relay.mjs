@@ -10,9 +10,10 @@
  *
  * Trust posture: relay.mjs itself makes no network calls, reads or writes no
  * credentials, and sends no telemetry; it has no dependencies (Node built-ins
- * only). It shells out only to `agy` and `git`. The `agy` process it launches
- * does authenticate - exactly as you do at the terminal. Read this file before
- * you run it.
+ * only). It shells out only to `agy` and `git` - or, with --account, to the
+ * launcher script you name in AGY_ACCOUNT_LAUNCHER, run by this same Node binary.
+ * The `agy` process it launches does authenticate - exactly as you do at the
+ * terminal. Read this file, and any launcher you point it at, before you run it.
  *
  * Note: `agy --print` takes the prompt as a command-line argument, so the brief is
  * visible in the host process list (`ps`, /proc). On a shared machine keep secrets
@@ -74,6 +75,13 @@
  *                           plus a 60s grace). On expiry the agy process tree is killed and
  *                           result.json gets status "timeout". Set it explicitly when agy
  *                           may hang past its own print timeout.
+ *   --account <name>        Run agy through a user-supplied launcher for one of several
+ *                           Antigravity accounts. The relay spawns
+ *                           `node $AGY_ACCOUNT_LAUNCHER <agy argv>` with AGY_ACCOUNT=<name>
+ *                           in its environment instead of `agy`; the launcher decides how
+ *                           that account's agy runs (for example as a separate OS user,
+ *                           since agy keeps one fixed OS-credential login per user). The
+ *                           relay itself never reads or passes credentials.
  *   --add-dir <dir>         Add an extra workspace directory. Repeatable.
  *   --out-dir <dir>         Where to write run artifacts (default: a fresh dir under
  *                           the system temp dir, so the repo under review stays clean).
@@ -173,6 +181,7 @@ function parseArgs(argv) {
     timeout: null,
     addDirs: [],
     outDir: null,
+    account: null,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -207,6 +216,7 @@ function parseArgs(argv) {
       case "--timeout": opts.timeout = next(); flagged.add("timeout"); break;
       case "--add-dir": opts.addDirs.push(next()); break;
       case "--out-dir": opts.outDir = resolve(next()); break;
+      case "--account": opts.account = next(); flagged.add("account"); break;
       default:
         fail(`unknown option: ${arg}`);
     }
@@ -220,6 +230,15 @@ function parseArgs(argv) {
   }
   if (opts.resumeLast && opts.conversation) {
     fail("--resume-last and --conversation are mutually exclusive; pass only one");
+  }
+  if (opts.account !== null) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$/.test(opts.account)) {
+      fail(`invalid --account "${opts.account}" (letters, digits, . _ - ; at most 32 characters)`);
+    }
+    const launcher = process.env.AGY_ACCOUNT_LAUNCHER;
+    if (!launcher || !isAbsolute(launcher) || !/\.m?js$/i.test(launcher) || !existsSync(launcher)) {
+      fail("--account needs AGY_ACCOUNT_LAUNCHER set to the absolute path of an existing .mjs/.js launcher script");
+    }
   }
   // A malformed --timeout must fail loudly: parseDuration returns null for it, and a null
   // delay makes setTimeout fire on the next tick - a silent instant "timeout", the worst
@@ -515,6 +534,7 @@ function makeResultWriter(opts, version, run) {
       lane: opts.lane,
       laneSource: opts.laneSource,
       tool: "agy",
+      account: opts.account,
       workdir: opts.cd,
       model: opts.model,
       effort: opts.effort,
@@ -575,9 +595,14 @@ function dispatchToAgy(opts, brief, run, writeResult, watchdogMs) {
   const argv = buildArgv(opts, brief, run);
   // Antigravity's installer provides a native `agy` binary. Launch directly so
   // multi-line briefs and paths with spaces are passed as argv, not shell text.
-  const child = spawn("agy", argv, {
+  // With --account the same argv goes to the user's launcher script, run by this
+  // Node binary (still no shell), which owns how that account's agy is started.
+  const [command, commandArgs, extraEnv] = opts.account
+    ? [process.execPath, [process.env.AGY_ACCOUNT_LAUNCHER, ...argv], { AGY_ACCOUNT: opts.account }]
+    : ["agy", argv, {}];
+  const child = spawn(command, commandArgs, {
     cwd: opts.cd,
-    env: { ...process.env, PWD: opts.cd },
+    env: { ...process.env, ...extraEnv, PWD: opts.cd },
     stdio: ["ignore", "pipe", "pipe"],
     detached: process.platform !== "win32", // POSIX: lead a new process group so killChild can fell the whole tree
   });

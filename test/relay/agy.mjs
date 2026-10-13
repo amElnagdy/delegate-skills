@@ -170,4 +170,46 @@ export async function runAgy(h) {
     analysis.value.status === "completed" &&
     analysis.value.exitCode === 0 &&
     analysis.value.finalMessage === "fake agy analysis completed");
+
+  // --account hands the agy argv to a user-supplied launcher instead of `agy`.
+  const launcherPath = join(h.scratch, "fake-agy-launcher.mjs");
+  const launcherRecord = join(h.scratch, "fake-agy-launcher.json");
+  writeFileSync(launcherPath, [
+    'import { writeFileSync } from "node:fs";',
+    `writeFileSync(${JSON.stringify(launcherRecord)}, JSON.stringify({ account: process.env.AGY_ACCOUNT, argv: process.argv.slice(2), cwd: process.cwd() }));`,
+    'process.stdout.write("launched as " + process.env.AGY_ACCOUNT + "\\n");',
+  ].join("\n"));
+  const accountWork = h.freshRepo("work-account-agy");
+  const account = run("account", "agy-analysis", null, accountWork, ["--account", "work2"]);
+  h.check("agy --account without AGY_ACCOUNT_LAUNCHER is a usage error before any run",
+    account.result.status === 2 &&
+    account.result.stderr.includes("AGY_ACCOUNT_LAUNCHER") &&
+    !existsSync(launcherRecord));
+
+  const accountOut = join(h.scratch, "out-account-launcher-agy");
+  const launched = spawnSync(process.execPath, [
+    h.relayPath("agy"), "--brief", h.briefPath, "--cd", accountWork, "--out-dir", accountOut,
+    "--account", "work2", "--model", "m1",
+  ], {
+    env: { ...h.baseEnv, SMOKE_MODE: "agy-analysis", AGY_ACCOUNT_LAUNCHER: launcherPath },
+    encoding: "utf8",
+    timeout: 15_000,
+  });
+  const launchedValue = existsSync(join(accountOut, "result.json")) ? h.result(accountOut) : {};
+  const launchedRecord = existsSync(launcherRecord) ? JSON.parse(readFileSync(launcherRecord, "utf8")) : {};
+  h.check("agy --account: the launcher gets AGY_ACCOUNT, the workspace cwd, and agy's own argv",
+    launched.status === 0 &&
+    launchedValue.status === "completed" &&
+    launchedValue.account === "work2" &&
+    launchedValue.finalMessage === "launched as work2" &&
+    launchedRecord.account === "work2" &&
+    launchedRecord.argv?.includes("--model") &&
+    launchedRecord.argv?.includes("m1") &&
+    launchedRecord.argv?.some((arg) => arg.startsWith("--print=")) &&
+    launchedRecord.argv?.includes("--log-file"));
+
+  const badAccount = run("bad-account", "agy-analysis", null, undefined, ["--account", "a b"]);
+  h.check("agy --account rejects a non-token name",
+    badAccount.result.status === 2 &&
+    badAccount.result.stderr.includes("invalid --account"));
 }

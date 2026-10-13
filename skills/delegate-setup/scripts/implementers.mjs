@@ -166,7 +166,7 @@ export const IMPLEMENTERS = Object.freeze([
       entry: "file",
       match: /\.db$/,
     },
-    supports: ["model", "effort", "timeout", "readOnly"],
+    supports: ["model", "effort", "timeout", "readOnly", "account"],
     winShell: false,
   },
   {
@@ -467,4 +467,5 @@ export const ALL_DIALS = Object.freeze([
   "permissionMode",
   "force",
   "provider",
+  "account",
 ]);
