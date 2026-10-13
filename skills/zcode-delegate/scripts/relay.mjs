@@ -83,7 +83,8 @@ import { constants, tmpdir, homedir } from "node:os";
 import { StringDecoder } from "node:string_decoder";
 import { createHash } from "node:crypto";
 
-const VERSION_PROBE_TIMEOUT_MS = 10_000;
+// A loaded Windows host made a 10s ceiling abort healthy dispatches; allow 60s (see #149).
+const VERSION_PROBE_TIMEOUT_MS = 60_000;
 const MAX_BUFFERED_CHARS = 1_048_576;
 const MAX_TIMER_MS = 2_147_483_647;
 const SCHEMA = "delegate-relay.result.v1";

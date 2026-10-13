@@ -108,7 +108,8 @@ import { StringDecoder } from "node:string_decoder";
 const DEFAULT_PRINT_TIMEOUT = "30m";
 const MAX_TIMER_MS = 2_147_483_647;
 const MAX_TIMER_DURATION = "596h31m23s";
-const VERSION_PROBE_TIMEOUT_MS = 10_000;
+// A loaded Windows host made a 10s ceiling abort healthy dispatches; allow 60s (see #149).
+const VERSION_PROBE_TIMEOUT_MS = 60_000;
 
 const IMPLEMENTER_KEY = "agy";
 

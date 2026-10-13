@@ -133,7 +133,8 @@ const MAX_BUFFERED_CHARS = 1_048_576;
 // Batch size for the event log; small enough to bound memory, large enough that the
 // stdout pipe keeps draining while we write.
 const EVENT_FLUSH_CHARS = 262_144;
-const VERSION_PROBE_TIMEOUT_MS = 10_000;
+// A loaded Windows host made a 10s ceiling abort healthy dispatches; allow 60s (see #149).
+const VERSION_PROBE_TIMEOUT_MS = 60_000;
 const MAX_TIMER_MS = 2_147_483_647;
 const SAFE_SESSION = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 const SAFE_ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;

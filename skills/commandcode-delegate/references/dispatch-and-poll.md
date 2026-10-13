@@ -170,7 +170,7 @@ process has exited and `result.json` is written — not when a status line says 
 - **`status: commandcode_unavailable` (exit 127):** the binary isn't on PATH. Install Command Code, run
   `cmd login` (`cmdc login` on Windows), or set `COMMANDCODE_BIN`, then re-dispatch.
 - **an `error` mentioning `version preflight` (`failed`, or `timeout` at exit 124):** the bounded
-  `cmd --version` probe exited non-zero or hung past its cap (10s, or `--timeout` when shorter), so
+  `cmd --version` probe exited non-zero or hung past its cap (60s, or `--timeout` when shorter), so
   Command Code was never dispatched; only the relay's own artifacts may already exist under
   `--out-dir`. Check the install by running `cmd --version` yourself.
 - **`status: failed` at exit 3:** not authenticated. `cmd login`, then re-dispatch.

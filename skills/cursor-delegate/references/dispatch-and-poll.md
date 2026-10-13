@@ -100,7 +100,7 @@ A pre-run usage error exits 2 and writes no result. A missing `cursor-agent` exi
   message is in `finalMessage`. An unknown `--model` name fails fast — re-check against
   `cursor-agent models`.
 - **A version-preflight failure:** the relay writes `failed` with the probe's exit code, or `timeout`
-  with exit 124 when the probe exceeds the smaller of the run watchdog and 10 seconds. Cursor is not
+  with exit 124 when the probe exceeds the smaller of the run watchdog and 60 seconds. Cursor is not
   dispatched.
 - **`status: "aborted"`:** the relay itself was killed (its parent's timeout, a stopped task, a
   closed terminal) and forwarded the kill to cursor-agent. The result is written before the relay

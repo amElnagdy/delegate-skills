@@ -86,7 +86,7 @@ A pre-run usage error exits 2 and writes no result. A missing `kimi` exits 127 a
 - **`status: "kimi_unavailable"` (exit 127):** install the native Kimi Code CLI, authenticate with
   `kimi login`, and re-dispatch.
 - **an `error` mentioning `version preflight` (`failed`, or `timeout` at exit 124):** the bounded
-  `kimi --version` probe exited non-zero or hung past its cap (10s, or `--timeout` when shorter), so
+  `kimi --version` probe exited non-zero or hung past its cap (60s, or `--timeout` when shorter), so
   kimi was never dispatched; only the relay's own artifacts may already exist under `--out-dir`.
   Check the install by running `kimi --version` yourself.
 - **`status: "failed"`:** read `stderrTail`, `stderrPath`, and the tail of `events.jsonl`. A common
