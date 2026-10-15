@@ -53,6 +53,7 @@ later-edited project config fails closed until it is reviewed and written again 
 | `opencode` | opencode-delegate | `opencode` | model, **variant**, timeout, readOnly |
 | `agy` | agy-delegate | `agy` | model, effort, timeout, readOnly |
 | `grok` | grok-delegate | `grok` | model, effort, sandbox, timeout, readOnly |
+| `hermes` | hermes-delegate | `hermes` | model, timeout, readOnly |
 | `kimi` | kimi-delegate | `kimi` | model, timeout |
 | `muse` | muse-delegate | `muse` | model, effort, timeout, readOnly |
 | `qoder` | qoder-delegate | `qodercli` | model, permissionMode, timeout, readOnly |
