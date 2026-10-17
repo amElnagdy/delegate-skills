@@ -78,6 +78,7 @@ orchestrators use that same directory — if unsure where it landed, run
 node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 # read-only (review/diagnosis, no edits):   add --read-only
 # isolated review (skip ambient MCP/user config): add --ignore-user-config
+# untrusted checkout (skip project AGENTS.md):  add --no-project-doc  (again on every resume)
 # subagent defaults:                        add --subagent-model <name> --subagent-effort <level>  (again on every resume)
 # web search mode (disabled|cached|indexed|live): add --web-search live  (again on every resume)
 # network inside the sandbox (gh, curl, installs): add --network-access  (on resume: --sandbox workspace-write --network-access)

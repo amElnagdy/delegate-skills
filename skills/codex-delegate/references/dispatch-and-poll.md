@@ -47,6 +47,7 @@ Options:
 | `--session <id>` | Continue one specific thread by id (the `threadId` from a prior `result.json`); send only the delta brief. Mutually exclusive with `--resume-last`; an empty id is rejected. |
 | `--clean-env` | Pass only runtime basics (`PATH`, home, locale, temp, `CODEX_HOME`, and Windows equivalents) to Codex and its version preflight. This changes inherited variables only; it does not protect files or other same-user secrets. |
 | `--keep-env <name>` | Keep one additional variable under `--clean-env`; repeat for each required environment-backed auth, custom-provider credential, proxy, certificate, or MCP variable. The name must be set and use portable environment-variable syntax. |
+| `--no-project-doc` | Do not load project `AGENTS.md` docs (including `AGENTS.override.md` and fallback filenames), passed as `-c project_doc_max_bytes=0`. Codex's user-level instructions in `CODEX_HOME` still load. Use it to review an untrusted checkout whose own `AGENTS.md` could steer the reviewer. Pass it again on every resume: Codex does not carry it into a resumed turn. |
 | `--skip-git-repo-check` | Allow running outside a git repo. |
 | `--timeout <dur>` | Relay-side watchdog (e.g. `30m`, `2h`); on expiry the child is killed and `result.json` gets `status: "timeout"`. Off by default. |
 | `--out-dir <dir>` | Where artifacts go (default: a fresh dir under the system temp dir). |
@@ -139,7 +140,7 @@ sandbox's write limits, so reach for it before `--sandbox danger-full-access`, w
 - `touchedFiles` — `git status --porcelain` lines in the working root: your review starting point. `null` (not `[]`) when git can't report — `git` missing, or a non-repo run under `--skip-git-repo-check`; `[]` means git ran and the tree is clean
 - `briefPath` / `eventsPath` / `finalPath` — the exact brief relay sent, the raw JSONL event stream, and the final-message file
 - `stderrPath` — the complete stderr stream in `stderr.txt`, including diagnostics omitted from the summary
-- `workdir`, `sandbox`, `model`, `effort`, `webSearch`, `networkAccess`, `resumeLast`, `session`, `cleanEnv`, `keepEnv`, `startedAt`, `finishedAt` — `sandbox` is the applied mode, or a note that Codex used its active config on an unqualified resume; `session` is the explicit session id, or `null` for fresh and `--resume-last` runs; `keepEnv` records names only, never values; `webSearch` is the mode the relay passed, or `null` when Codex used its configured mode (which may still search); `subagentModel` and `subagentEffort` are the values the relay passed, or `null` when subagents used Codex's own defaults
+- `workdir`, `sandbox`, `model`, `effort`, `webSearch`, `networkAccess`, `resumeLast`, `session`, `cleanEnv`, `keepEnv`, `noProjectDoc`, `startedAt`, `finishedAt` — `sandbox` is the applied mode, or a note that Codex used its active config on an unqualified resume; `session` is the explicit session id, or `null` for fresh and `--resume-last` runs; `keepEnv` records names only, never values; `noProjectDoc` is `true` when the relay passed `-c project_doc_max_bytes=0`; `webSearch` is the mode the relay passed, or `null` when Codex used its configured mode (which may still search); `subagentModel` and `subagentEffort` are the values the relay passed, or `null` when subagents used Codex's own defaults
 - `stderrTail` — up to 20 nonblank lines from the final 64 KiB of stderr; a partial first line is marked as truncated. Present on every run that did not complete (`failed`, `timeout`, `aborted`), absent on `completed`, `codex_unavailable`, and launch failures. Read `stderrPath` for the complete diagnostics.
 - `error` — present on a launch failure, and on `timeout` and `aborted` runs
 
@@ -209,8 +210,8 @@ what was lost.
 Under the hood the helper runs roughly:
 
 ```bash
-codex exec --json -o <final.txt> -s workspace-write [-m model] [-c model_reasoning_effort=<level>] [-c agents.default_subagent_model=<name>] [-c agents.default_subagent_reasoning_effort=<level>] [-c web_search=<mode>] [-c sandbox_workspace_write.network_access=true] - < brief.txt   # fresh run
-codex exec [-s mode] resume --last --json -o <final.txt> [-m model] [-c model_reasoning_effort=<level>] [-c agents.default_subagent_model=<name>] [-c agents.default_subagent_reasoning_effort=<level>] [-c web_search=<mode>] [-c sandbox_workspace_write.network_access=true] - < delta-brief.txt  # resume
+codex exec --json -o <final.txt> -s workspace-write [-m model] [-c model_reasoning_effort=<level>] [-c agents.default_subagent_model=<name>] [-c agents.default_subagent_reasoning_effort=<level>] [-c web_search=<mode>] [-c sandbox_workspace_write.network_access=true] [-c project_doc_max_bytes=0] - < brief.txt   # fresh run
+codex exec [-s mode] resume --last --json -o <final.txt> [-m model] [-c model_reasoning_effort=<level>] [-c agents.default_subagent_model=<name>] [-c agents.default_subagent_reasoning_effort=<level>] [-c web_search=<mode>] [-c sandbox_workspace_write.network_access=true] [-c project_doc_max_bytes=0] - < delta-brief.txt  # resume
 ```
 
 On resume, the helper places an explicit `--sandbox`/`--read-only` or fleet-lane sandbox before the
