@@ -449,6 +449,44 @@ if (["omp-success", "omp-error"].includes(process.env.SMOKE_MODE)) {
     // The real CLI exits 0 for a clean run even when the task did not finish.
     process.exit(0);
   });
+} else if ([
+  "mcode-success",
+  "mcode-limit",
+  "mcode-no-completion",
+  "mcode-read-only-clean",
+  "mcode-read-only-append",
+].includes(process.env.SMOKE_MODE)) {
+  let brief = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (chunk) => { brief += chunk; });
+  process.stdin.on("end", () => {
+    const mode = process.env.SMOKE_MODE;
+    if (mode === "mcode-read-only-append") {
+      fs.appendFileSync(process.env.SMOKE_APPEND_FILE ?? "already-dirty.txt", "appended by fake mcode\n");
+    }
+    if (process.env.SMOKE_ARGS_FILE) fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify({ args, brief, cwd: process.cwd() }));
+    // Every mcode event carries schemaVersion, runId, and sessionId, as the real CLI's do.
+    const base = { schemaVersion: 1, runId: "exec_turn_fake", sessionId: "mvs_fake-session", turnId: "turn_fake" };
+    const emit = (value) => console.log(JSON.stringify({ ...base, ...value }));
+    emit({ type: "exec.started" });
+    emit({ type: "item.completed", item: { id: "m1:message", type: "agent_message", content: "fake mcode streamed report" } });
+    if (mode === "mcode-no-completion") process.exit(0);
+    const limited = mode === "mcode-limit";
+    emit({
+      type: "exec.completed",
+      result: {
+        ...base,
+        type: "exec.result",
+        status: limited ? "limit_exceeded" : "succeeded",
+        ...(limited ? {} : { output: "fake mcode completed" }),
+        model: { providerId: "minimax", modelId: "Fake-Model", variant: "thinking" },
+        usage: { inputTokens: 7, outputTokens: 2, totalTokens: 9 },
+        durationMs: 42,
+      },
+    });
+    // The real CLI exits 7 at the step limit.
+    process.exit(limited ? 7 : 0);
+  });
 } else if (process.env.SMOKE_MODE === "copilot-success") {
   fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify(args));
   console.log(JSON.stringify({ type: "assistant.message", data: { content: "working" }, ephemeral: false }));

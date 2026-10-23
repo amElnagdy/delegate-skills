@@ -4,8 +4,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const RELAYS = ["claude", "cline", "codex", "opencode", "agy", "grok", "kimi", "muse", "qoder", "vibe", "cursor", "pi", "omp", "aider", "copilot", "warp", "zcode", "commandcode"];
-const READ_ONLY_TRIPWIRE_RELAYS = ["claude", "grok", "zcode", "commandcode"];
+const RELAYS = ["claude", "cline", "codex", "opencode", "agy", "grok", "kimi", "muse", "qoder", "vibe", "cursor", "pi", "omp", "aider", "copilot", "warp", "zcode", "commandcode", "mcode"];
+const READ_ONLY_TRIPWIRE_RELAYS = ["claude", "grok", "zcode", "commandcode", "mcode"];
 const SYMBOLS = [
   ["MAX_TIMER_MS", "const", RELAYS],
   ["parseDuration", "function", RELAYS],
@@ -27,7 +27,7 @@ const SYMBOLS = [
   ["fingerprintDirtyPaths", "function", READ_ONLY_TRIPWIRE_RELAYS],
   ["changedDirtyPaths", "function", READ_ONLY_TRIPWIRE_RELAYS],
   ["readOnlyVerdict", "function", READ_ONLY_TRIPWIRE_RELAYS],
-  ["MAX_BUFFERED_CHARS", "const", ["claude", "cline", "copilot", "cursor", "grok", "kimi", "muse", "opencode", "pi", "omp", "qoder", "vibe", "warp", "zcode", "commandcode"]],
+  ["MAX_BUFFERED_CHARS", "const", ["claude", "cline", "copilot", "cursor", "grok", "kimi", "muse", "opencode", "pi", "omp", "qoder", "vibe", "warp", "zcode", "commandcode", "mcode"]],
   ["makeLineScanner", "function", ["vibe", "copilot", "muse"]],
   ["makeEventScanner", "function", ["claude", "cline", "cursor", "grok", "kimi", "opencode", "pi", "omp", "qoder", "warp"]],
 ];

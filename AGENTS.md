@@ -2,13 +2,14 @@
 
 This repo is a [Skills CLI](https://github.com/vercel-labs/skills) package of **delegation skills** —
 skills that let an orchestrating agent drive a separate CLI coding agent as an implementer, then review
-and land the result. Eighteen implementer skills ship today: `claude-delegate` (Claude Code),
+and land the result. Nineteen implementer skills ship today: `claude-delegate` (Claude Code),
 `cline-delegate` (Cline CLI), `codex-delegate` (OpenAI Codex), `opencode-delegate` (OpenCode),
 `agy-delegate` (Google Antigravity), `grok-delegate` (Grok Build), `kimi-delegate` (Kimi Code),
 `muse-delegate` (Muse Code),
 `qoder-delegate` (Qoder CLI), `vibe-delegate` (Mistral Vibe), `cursor-delegate` (Cursor Agent CLI),
 `pi-delegate` (Pi CLI), `omp-delegate` (Oh My Pi), `aider-delegate` (Aider), `copilot-delegate` (GitHub Copilot CLI),
-`warp-delegate` (Warp Agent CLI), `zcode-delegate` (Z.AI ZCode), and `commandcode-delegate` (Command Code); siblings like
+`warp-delegate` (Warp Agent CLI), `zcode-delegate` (Z.AI ZCode), `commandcode-delegate` (Command Code), and
+`mcode-delegate` (MiniMax Code); siblings like
 `gemini-delegate` can be added
 later without renaming the repo. One **utility** skill
 ships alongside them: `delegate-setup` (configure fleet lanes — setup only, never dispatches).
@@ -22,7 +23,7 @@ jargon. Use these terms; don't invent synonyms.
 | --- | --- | --- |
 | **delegate** / **delegation** | the activity, and this skill family | "relay" (as the activity), "hand-off", "offload" |
 | **orchestrator** | the driving agent (Claude Code, …) | "controller", "driver" |
-| **implementer** | the separate agent (Claude, Cline, Codex, OpenCode, Antigravity, Grok, Kimi, Muse, Qoder, Vibe, Cursor, Pi, Oh My Pi, Aider, Copilot, Warp, ZCode, Command Code) | "worker", "sub-agent", "executor" |
+| **implementer** | the separate agent (Claude, Cline, Codex, OpenCode, Antigravity, Grok, Kimi, Muse, Qoder, Vibe, Cursor, Pi, Oh My Pi, Aider, Copilot, Warp, ZCode, Command Code, MiniMax Code) | "worker", "sub-agent", "executor" |
 | **brief** | the self-contained task spec sent to the implementer | "task file", "the prompt", "the spec" |
 | **gates** | the project's test/lint/build commands | "checks", "CI" |
 | **dispatch** | sending the brief to the implementer | "fire off", "kick off" |
@@ -48,6 +49,7 @@ jargon. Use these terms; don't invent synonyms.
 | `session`, `--continue`, `--resume` / `--session`, `--print`, `--mode json`, `omp models`, `--thinking`, `approvalMode` (`always-ask`/`write`/`yolo`), `--yolo` / `--auto-approve`, `--tools`, `--no-extensions` / `--no-skills` / `--no-rules`, `--max-time`, `--profile` | Oh My Pi's own terms — use verbatim when discussing `omp` | never call `omp` "pi" in a launch context — `pi` is a different CLI (`pi-delegate`); don't invent an omp sandbox enum; `--yolo` is `tools.approvalMode: yolo`, not a permission-mode enum |
 | `--message-file`, `--yes-always`, `--suggest-shell-commands`, `--auto-commits`/`--dirty-commits`, `--dry-run`, `--edit-format`, `--architect`, `--file`/`--read`, `chat history` | Aider's own terms — use verbatim when discussing `aider` | Aider has no sandbox, no permission modes, and no session ids; don't imply any. `--file`/`--read` scope the chat context — never call them a boundary |
 | `session`, `-p`/`--prompt`, `--output-format json` (JSONL), `tools`, `--allow-all-tools`, `mode plan`, `--resume`/`--continue`, `--model`, `--effort`, `copilot login` / env tokens, `sandbox` (experimental, MXC) | GitHub Copilot CLI's own terms — use verbatim when discussing `copilot` | don't paraphrase them |
+| `exec`, `--input -`, `--output-format stream-json`, `--permission` (`smart`/`full`/`off`), `session` / `--session`, `--model` (`provider/model#variant`), `--effort`, `--append-system-prompt-file`, `exec.completed` | MiniMax Code's own terms — use verbatim when discussing `mcode` | never say `mcode exec` has a sandbox or a read-only/plan mode: the relay's `--read-only` is a prompt plus the tripwire, and `smart` already approves writes and deletes headlessly. `ask` is TUI/ACP-only |
 | `mode` (`build`/`edit`/`plan`/`yolo`), `session` (`sess_…`), `goal` (`--target`), `--attach`, `app-server`, `plugins`, `skills` | ZCode's own terms — use verbatim when discussing `zcode` | don't call `mode` a sandbox or a permission mode; never present `build`/`edit` as usable headlessly |
 
 Banned on sight: coined umbrella terms in user-facing surfaces (README headings, `skills.sh.json`
@@ -57,7 +59,7 @@ version a run was made against is what makes the claim checkable; and claims tha
 ("verified" without a run → hedge or cut). Every
 CLI flag, field, and command in the docs must match the installed implementer CLI (`claude` /
 `cline` / `codex` / `opencode` / `agy` / `grok` / `kimi` / `muse` / `qodercli` / `vibe` / `cursor-agent` / `pi` /
-`aider` / `copilot` / `oz` / `omp` / `zcode` / `cmd`) and the skill's `relay.mjs`.
+`aider` / `copilot` / `oz` / `omp` / `zcode` / `cmd` / `mcode`) and the skill's `relay.mjs`.
 
 ## Conventions
 
@@ -92,9 +94,10 @@ CLI flag, field, and command in the docs must match the installed implementer CL
 - Smoke-test any changed script directly (e.g. `node skills/<skill>/scripts/relay.mjs --help`, and a
   no-write or read-only run against a throwaway repo) before relying on it.
 - If you touch how a `relay.mjs` launches its implementer CLI, smoke-test on Windows too (native
-  PowerShell/cmd, not just Git Bash/WSL): the `codex`, `opencode`, `grok`, `pi`, `cline`, `copilot`, and `commandcode` launches
+  PowerShell/cmd, not just Git Bash/WSL): the `codex`, `opencode`, `grok`, `pi`, `cline`, `copilot`, `commandcode`, and `mcode` launches
   need `shell:true` on win32 to resolve the `.cmd` shim. Cline streams its brief on stdin and uses the
-  child process cwd; Command Code also streams its brief on stdin. The other launches quote spaceable
+  child process cwd; Command Code also streams its brief on stdin; `mcode` streams its brief on stdin
+  (`--input -`), uses the child process cwd, and quotes its one path value (the read-only prompt file). The other launches quote spaceable
   args, and all value flags are token-validated.
   The `claude` and `cursor-agent` launches serialize a pre-joined
   command string through the shell on win32 for the same shim reason; `agy`, `kimi`, current

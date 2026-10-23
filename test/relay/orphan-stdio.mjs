@@ -52,7 +52,7 @@ for (const skill of h.SKILLS) {
     });
   const result = existsSync(join(outDir, "result.json")) ? h.result(outDir) : null;
   h.check(`${skill} orphan-near-timeout: the relay exits`, run.signal === null);
-  if (skill === "claude" || skill === "cline" || skill === "muse") {
+  if (skill === "claude" || skill === "cline" || skill === "muse" || skill === "mcode") {
     // These relays treat a missing result event as failed even on a 0 child exit.
     h.check(`${skill} orphan-near-timeout: the watchdog does not relabel the run as timeout (got ${result?.status})`,
       result != null && result.status !== "timeout");

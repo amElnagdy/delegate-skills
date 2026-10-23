@@ -92,8 +92,8 @@ async function runScenario(h, skill, scenario) {
   const child = h.runRelay(skill, workDir, outDir, ["--read-only"], {
     SMOKE_MODE: skill === "grok"
       ? "grok-read-only"
-      : skill === "commandcode"
-        ? (appendFile ? "commandcode-read-only-append" : "commandcode-read-only-clean")
+      : skill === "commandcode" || skill === "mcode"
+        ? (appendFile ? `${skill}-read-only-append` : `${skill}-read-only-clean`)
         : appendFile ? "claude-read-only-append" : "claude-read-only-clean",
     ...(appendFile ? { SMOKE_APPEND_FILE: appendFile } : {}),
     ...(scenario.untrackedDirectory ? { SMOKE_WRITE_FILE: join("loose", "new.txt") } : {}),
@@ -109,10 +109,12 @@ async function runScenario(h, skill, scenario) {
     } : {}),
   });
   const outcome = await waitFor(child);
-  const expectedExit = skill === "commandcode" && scenario.commandcodeExit !== undefined
+  // mcode writes final.txt itself exactly as commandcode does, so it shares those overrides.
+  const finalWriter = skill === "commandcode" || skill === "mcode";
+  const expectedExit = finalWriter && scenario.commandcodeExit !== undefined
     ? scenario.commandcodeExit
     : 0;
-  const expectedResult = skill === "commandcode" && scenario.commandcodeResult !== undefined
+  const expectedResult = finalWriter && scenario.commandcodeResult !== undefined
     ? scenario.commandcodeResult
     : true;
   h.check(`${skill} ${scenario.name}: relay close wait did not time out`, outcome.exited);
@@ -121,14 +123,14 @@ async function runScenario(h, skill, scenario) {
     existsSync(join(outDir, "result.json")) === expectedResult);
   if (existsSync(join(outDir, "result.json"))) {
     const verdict = h.result(outDir).readOnlyViolation;
-    const expected = skill === "commandcode" && scenario.commandcodeExpected !== undefined
+    const expected = finalWriter && scenario.commandcodeExpected !== undefined
       ? scenario.commandcodeExpected
       : scenario.expected;
     h.check(`${skill} ${scenario.name}: verdict is ${String(expected)} (got ${String(verdict)})`,
       verdict === expected);
   }
-  if (skill === "commandcode" && scenario.artifactSymlink) {
-    h.check("commandcode artifact-symlink-target-write: final report does not overwrite the symlink target",
+  if (finalWriter && scenario.artifactSymlink) {
+    h.check(`${skill} artifact-symlink-target-write: final report does not overwrite the symlink target`,
       readFileSync(join(workDir, "already-dirty.txt"), "utf8") === "pre-existing\n");
   }
   if (outcome.exitCode !== 0) console.error(`${skill} ${scenario.name} relay stderr:\n${outcome.stderr}`);
@@ -176,8 +178,8 @@ export async function runReadOnlyTripwire(h) {
     ...(!h.WIN ? [{ name: "raw-symlink-target-write", rawSymlinkTarget: true, expected: true }] : []),
     ...(!h.WIN ? [{ name: "artifact-symlink-target-write", artifactsInside: true, artifactSymlink: true, expected: true, commandcodeExit: 2, commandcodeResult: false }] : []),
   ];
-  const tripwireSkills = ["claude", "grok", ...(!h.WIN ? ["commandcode"] : [])];
-  if (h.WIN) console.log("  skip  commandcode tripwire scenarios: Git-visible tripwire coverage is POSIX-only");
+  const tripwireSkills = ["claude", "grok", ...(!h.WIN ? ["commandcode", "mcode"] : [])];
+  if (h.WIN) console.log("  skip  commandcode and mcode tripwire scenarios: Git-visible tripwire coverage is POSIX-only");
   for (const skill of tripwireSkills) {
     for (const scenario of scenarios) await runScenario(h, skill, scenario);
   }

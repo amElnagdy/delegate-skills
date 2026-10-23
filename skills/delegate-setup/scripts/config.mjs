@@ -236,7 +236,7 @@ function validateDialValue(implementer, field, value, laneName, label) {
       return `${label}: lane ${laneName}.effort must be one of: ${MUSE_EFFORT.join(", ")}`;
     }
     if (
-      (implementer === "codex" || implementer === "grok" || implementer === "commandcode") &&
+      (implementer === "codex" || implementer === "grok" || implementer === "commandcode" || implementer === "mcode") &&
       !/^[a-z][a-z0-9-]*$/i.test(value)
     ) {
       return `${label}: lane ${laneName}.effort must be a bare token`;
@@ -286,6 +286,10 @@ function validateModelOrProvider(implementer, field, value, laneName, label) {
   } else if (implementer === "cursor") {
     pattern = MODEL_TOKEN.cursor;
     hint = "letters, digits, . _ : @ / [ ] , = -";
+  } else if (implementer === "mcode") {
+    // mcode refs carry the variant inside the model value as provider/model#variant.
+    pattern = MODEL_TOKEN.mcode;
+    hint = "letters, digits, . _ : / # -";
   } else if (implementer === "opencode") {
     // opencode 2.x carries the variant inside the model value as provider/model#variant.
     pattern = MODEL_TOKEN.opencode;
