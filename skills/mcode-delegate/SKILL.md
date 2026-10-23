@@ -8,7 +8,7 @@ description: >-
   tasks through MiniMax Code while staying the reviewer. DO NOT USE for tasks small enough to do
   inline, or when the user wants the code written directly without delegating.
 license: MIT
-compatibility: Requires the MiniMax Code CLI (`mcode`, from agent.minimax.io) installed and signed in, Node 22+, and git. The orchestrating agent must be able to run shell commands and read files. Shell examples assume bash/zsh (macOS/Linux).
+compatibility: Requires the MiniMax Code CLI (`mcode`, from agent.minimax.io) installed and signed in with `mcode login`, Node 22+, and git. The orchestrating agent must be able to run shell commands and read files. Shell examples assume bash/zsh (macOS/Linux).
 metadata:
   version: 0.5.0
 ---
