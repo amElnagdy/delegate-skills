@@ -208,6 +208,23 @@ export const IMPLEMENTERS = Object.freeze([
     winShell: false,
   },
   {
+    key: "minimax",
+    skill: "minimax-delegate",
+    binary: "mcode",
+    versionArgs: ["--version"],
+    // `mcode provider list --json` names the active credential source but not whether its
+    // OAuth sign-in is live, and there is no status command, so auth stays unknown.
+    authProbe: null,
+    // No listing command; `--model` takes provider/model, e.g. minimax/MiniMax-M3.
+    modelProbe: null,
+    usageProbe: null,
+    // permissionMode carries `mcode exec --permission`. No readOnly: smart, full, and off
+    // can all write.
+    supports: ["model", "effort", "permissionMode", "timeout"],
+    // npm installs a .cmd shim on Windows, which needs shell:true to launch.
+    winShell: true,
+  },
+  {
     key: "muse",
     skill: "muse-delegate",
     binary: "muse",
@@ -437,6 +454,8 @@ export const QODER_PERMISSION = Object.freeze([
  * the same reason, so a lane must not be able to select one either.
  */
 export const ZCODE_MODE = Object.freeze(["plan", "yolo"]);
+/** `mcode exec --permission`. `ask` is absent: it needs a human, so headless runs reject it. */
+export const MINIMAX_PERMISSION = Object.freeze(["smart", "full", "off"]);
 /** Positive h/m/s duration, same shape relays accept. */
 export const TIMEOUT_RE = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/;
 

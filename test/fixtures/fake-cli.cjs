@@ -545,6 +545,29 @@ if (["omp-success", "omp-error"].includes(process.env.SMOKE_MODE)) {
     emit({ type: "step_finish", sessionID: sid, part: { type: "step-finish", cost: 0.0025 } });
     process.exit(0);
   });
+} else if (["minimax-success", "minimax-failed"].includes(process.env.SMOKE_MODE)) {
+  let brief = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (chunk) => { brief += chunk; });
+  process.stdin.on("end", () => {
+    fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify({ args, brief, cwd: process.cwd() }));
+    const failed = process.env.SMOKE_MODE === "minimax-failed";
+    const base = { schemaVersion: 1, runId: "exec_smoke", sessionId: "mvs_smoke_minimax", turnId: "turn_smoke" };
+    const emit = (value) => fs.writeSync(1, `${JSON.stringify({ ...base, ...value })}
+`);
+    emit({ sequence: 1, type: "session.started" });
+    emit({ sequence: 2, type: "item.completed", item: { id: "m1", type: "agent_message", content: "fake mcode progress" } });
+    const model = { providerId: "minimax", modelId: "MiniMax-Smoke" };
+    emit({
+      sequence: 3,
+      type: "exec.completed",
+      result: failed
+        ? { ...base, type: "exec.result", status: "failed", error: { category: "runtime", message: "fake model unavailable", retryable: true }, model }
+        : { ...base, type: "exec.result", status: "succeeded", output: "fake mcode completed", model, usage: { inputTokens: 3, outputTokens: 2, totalTokens: 5 } },
+    });
+    // mcode exits 0 on a failed run; the relay must still report failed.
+    process.exit(0);
+  });
 } else if (["muse-success", "muse-unfinished"].includes(process.env.SMOKE_MODE)) {
   if (process.env.SMOKE_ARGS_FILE) fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify(args));
   console.log(JSON.stringify({

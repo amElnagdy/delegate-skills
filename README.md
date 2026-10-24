@@ -73,6 +73,7 @@ Skip setup when you want one implementer or one-off dials. Pick the skill for a 
 | [`cursor-delegate`](skills/cursor-delegate/SKILL.md) | [Cursor Agent](https://cursor.com/cli) (`cursor-agent`) | `--force`; `--no-force` withholds command approval | `--read-only` (plan mode) | `--resume-last`, `--session <id>` |
 | [`grok-delegate`](skills/grok-delegate/SKILL.md) | Grok Build (`grok`) | workspace-scoped; `--full-access` opt-in | `--read-only` — best-effort [^grok] | `--resume-last`, `--session <id>` |
 | [`kimi-delegate`](skills/kimi-delegate/SKILL.md) | [Kimi Code](https://moonshotai.github.io/kimi-code/en/) (`kimi`) | `auto permission mode`, always | — [^none] | `--resume-last`, `--session <id>` |
+| [`minimax-delegate`](skills/minimax-delegate/SKILL.md) | [MiniMax Code](https://agent.minimax.io/docs/cli/quick-start) (`mcode`) | `--permission smart` (mcode's default); `full` / `off` opt-in | — [^none] | `--resume-last`, `--session <id>` |
 | [`muse-delegate`](skills/muse-delegate/SKILL.md) | Muse Code (`muse`) | `--disable-approval` (sandbox on); not `--yolo` [^muse] | `--read-only` (`--disable-write` + `--disable-shell`) | `--session <id>` (no headless `--resume-last`) |
 | [`opencode-delegate`](skills/opencode-delegate/SKILL.md) | [OpenCode](https://opencode.ai) (`opencode`) | agent `build` (`--model` required) | `--read-only` (agent `plan`) | `--resume-last`, `--session <id>` |
 | [`pi-delegate`](skills/pi-delegate/SKILL.md) | [Pi](https://github.com/earendil-works/pi-mono) (`pi`) | full local tools — no sandbox, no permission modes [^none]; project trust opt-in | `--read-only` (`read,grep,find,ls`) | `--resume-last`, `--session <id>` |
@@ -309,6 +310,17 @@ Per skill — platform, CLI version, and what the run exercised:
 - `kimi-delegate` — macOS, `kimi` 0.24.0: headless `-p` edit run, stream-json parsing, and both
   resume paths — the relay's `--session`/`--resume-last`, which drive Kimi's own `--session` and
   `--continue`.
+- `minimax-delegate` — Windows 11, native, `mcode` 0.6.13 through the npm `mcode.cmd` shim (`shell:true`),
+  from Git Bash with the workspace and `--out-dir` paths containing a space: a default
+  (`--permission smart`) edit run fixed a bug, created and ran a test file, and reported both in
+  `touchedFiles` with nothing committed; a `--session <id>` resume applied a delta brief that named
+  only "the test file you just created"; a bad `--model` reported `failed` with mcode's own error in
+  `mcodeError` (mcode exits 4 there); an 8s `--timeout` reported `timeout` and left no `mcode`
+  process behind; a missing `mcode` wrote `mcode_unavailable` and exited 127; a `--lane` run applied
+  `effort` and `permissionMode` from a global lane; and `delegate-setup` discovery found the shim.
+  Contract-tested only: argv exactness, `--resume-last`, `--max-steps`, `--permission full`/`off`,
+  usage errors, and the timeout/abort matrix. The abort path is POSIX-only in the suite, and no macOS
+  or Linux run is recorded.
 - `pi-delegate` — macOS: stdin brief delivery, explicit provider and model selection, JSON
   session/provider/model/usage capture, and a `--read-only` run leaving a clean tree. Write,
   `--session`, and `--resume-last` runs are contributor-reported.
@@ -429,7 +441,7 @@ Per skill — platform, CLI version, and what the run exercised:
 
 Not yet verified: native Windows launches for a directly spawned `claude.exe` (the npm `claude.cmd`
 shim path has a run above), exact-head `cline`, `grok`, `kimi`, `muse`,
-`pi`, `qoder`, `vibe`, and `omp` (`codex`/`opencode`/`grok`/`commandcode` have contract-tested `.cmd` shim handling;
+`pi`, `qoder`, `vibe`, and `omp` (`codex`/`opencode`/`grok`/`commandcode`/`mcode` have contract-tested `.cmd` shim handling;
 Cursor serializes a pre-joined, quoted command; Qoder and Vibe target their documented native executables).
 Claude's own shell sandbox is unsupported on native Windows regardless of launch mechanics, upstream
 Vibe officially targets UNIX, and Muse's upstream launcher is UNIX-only. A native Linux `cursor-agent` run is unverified. The full delegate →

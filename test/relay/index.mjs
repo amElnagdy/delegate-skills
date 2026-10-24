@@ -24,6 +24,7 @@ import { runCommandcode } from "./commandcode.mjs";
 import { runZcode } from "./zcode.mjs";
 import { runGrokGitTrust } from "./grok-git-trust.mjs";
 import { runMuse } from "./muse.mjs";
+import { runMinimax } from "./minimax.mjs";
 
 export const runners = [
   ["package-shape", runPackageShape],
@@ -51,5 +52,6 @@ export const runners = [
   ["orphan-stdio", runOrphanStdio],
   ["zcode", runZcode],
   ["muse", runMuse],
+  ["minimax", runMinimax],
   ["delegate-setup", runDelegateSetup],
 ];

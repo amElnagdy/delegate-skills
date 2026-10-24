@@ -54,6 +54,7 @@ later-edited project config fails closed until it is reviewed and written again 
 | `agy` | agy-delegate | `agy` | model, effort, timeout, readOnly |
 | `grok` | grok-delegate | `grok` | model, effort, sandbox, timeout, readOnly |
 | `kimi` | kimi-delegate | `kimi` | model, timeout |
+| `minimax` | minimax-delegate | `mcode` | model, effort, permissionMode, timeout |
 | `muse` | muse-delegate | `muse` | model, effort, timeout, readOnly |
 | `qoder` | qoder-delegate | `qodercli` | model, permissionMode, timeout, readOnly |
 | `vibe` | vibe-delegate | `vibe` | timeout, readOnly |
@@ -71,6 +72,9 @@ write tool and exit 0 having changed nothing. ZCode has no `--model` flag — th
 the CLI's own config file — so `model` is not a dial for `zcode` lanes. ZCode also ships its CLI
 inside the desktop app rather than on PATH, so discovery falls back to the installed app bundle.
 
+MiniMax (`mcode`) carries `exec --permission` as `permissionMode`: `smart`, `full`, or `off` (`ask`
+needs a human). It has no `readOnly` dial because every policy can write. `effort` only applies to
+models that offer levels (MiniMax-M3.1-Flash yes, MiniMax-M3 no).
 OpenCode uses `variant` for reasoning intensity, not `effort`. Do not write `effort` on an `opencode` lane.
 Muse `effort` is `--reasoning-effort` (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`). Muse `--provider echo|meta` is relay-only — do not write `provider` on a `muse` lane.
 Oh My Pi (`omp`) uses the lane `effort` dial for omp's `--thinking` (`off`, `auto`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`). Do not write `thinking` as a lane field.

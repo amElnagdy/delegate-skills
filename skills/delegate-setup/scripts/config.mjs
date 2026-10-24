@@ -38,6 +38,7 @@ import {
   GROK_SANDBOX,
   IMPLEMENTER_BY_KEY,
   LANE_NAME,
+  MINIMAX_PERMISSION,
   MODEL_TOKEN,
   QODER_PERMISSION,
   TIMEOUT_RE,
@@ -236,7 +237,7 @@ function validateDialValue(implementer, field, value, laneName, label) {
       return `${label}: lane ${laneName}.effort must be one of: ${MUSE_EFFORT.join(", ")}`;
     }
     if (
-      (implementer === "codex" || implementer === "grok" || implementer === "commandcode") &&
+      (implementer === "codex" || implementer === "grok" || implementer === "commandcode" || implementer === "minimax") &&
       !/^[a-z][a-z0-9-]*$/i.test(value)
     ) {
       return `${label}: lane ${laneName}.effort must be a bare token`;
@@ -259,6 +260,9 @@ function validateDialValue(implementer, field, value, laneName, label) {
   // have no permission client, so they change nothing and still exit 0.
   if (field === "permissionMode" && implementer === "zcode" && !ZCODE_MODE.includes(value)) {
     return `${label}: lane ${laneName}.permissionMode must be one of: ${ZCODE_MODE.join(", ")}`;
+  }
+  if (field === "permissionMode" && implementer === "minimax" && !MINIMAX_PERMISSION.includes(value)) {
+    return `${label}: lane ${laneName}.permissionMode must be one of: ${MINIMAX_PERMISSION.join(", ")}`;
   }
   if (field === "variant") {
     // The variant may reach a win32 shell:true launch (opencode 1.x --variant); reject cmd metacharacters.
