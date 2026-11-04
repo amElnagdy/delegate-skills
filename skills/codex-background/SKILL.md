@@ -13,7 +13,20 @@ brief, provider arguments, permissions, result interpretation, review, gates and
 Claude's background Bash workflow stays unchanged. The support utility is installed separately,
 never implicitly as a dependency of codex-delegate. Details: [references/configuration.md](references/configuration.md).
 
-## First use / setup
+## Host support
+
+This adapter supports Windows and Linux only. On macOS, do not run bootstrap or retry installation;
+OpenCode's own availability is independent of this adapter. For Codex-to-OpenCode delegation, use
+[opencode-delegate's direct macOS workflow](../opencode-delegate/SKILL.md#2-dispatch) and its host
+execution/session wait. That workflow is explicitly authorized by the implementer skill, needs no
+MCP configuration, and does not provide this adapter's lifecycle or no-inference-wait guarantees.
+It does not change the required MCP workflow on supported hosts or the instructions of other
+implementer skills.
+
+## First use / setup (Windows/Linux only)
+
+The remaining instructions apply only to this adapter on supported hosts. On macOS, return to
+the OpenCode workflow linked above; do not apply the MCP setup or waiting requirements below.
 
 If the `delegate_run` tool is not available, setup is incomplete. Tell the user that bootstrap will
 update `$CODEX_HOME/config.toml` (default `~/.codex/config.toml`, backed up first) and write a registry of
@@ -29,7 +42,7 @@ output, then ask the user to restart Codex (or reload MCP servers); the tools ap
 If bootstrap fails, report the failure. Do not fall back to shell polling. Run it again after
 installing more delegate skills. `node "<skill-dir>/scripts/bootstrap.mjs" --check` validates the setup without writing.
 
-## Procedure
+## Procedure (Windows/Linux adapter)
 
 1. Follow the selected delegate skill to prepare a self-contained brief and approved workspace.
    Write the brief to the `briefs/` directory under the codex-background directory

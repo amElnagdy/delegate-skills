@@ -125,7 +125,7 @@ then see [CONTRIBUTING.md](CONTRIBUTING.md).
 ## Optional Codex waiting support
 
 Install [codex-background](skills/codex-background/SKILL.md) alongside the selected delegate skills
-when Codex is the orchestrator. It is a separate installation; codex-delegate does not install
+when Codex is the orchestrator on **Windows or Linux**. It is a separate installation; codex-delegate does not install
 or configure it automatically. If its MCP tools are missing, Codex runs the skill's
 `scripts/bootstrap.mjs` (after telling you it will update `$CODEX_HOME/config.toml`, with a backup);
 you can run it yourself with `node <skill-dir>/scripts/bootstrap.mjs`. It registers the installed
@@ -135,6 +135,11 @@ owns permissions, results, review and landing.
 Claude's background Bash workflow stays unchanged. See
 [configuration and recovery](skills/codex-background/references/configuration.md). Local protocol
 fixtures cover the waiting boundary; they do not measure Codex Desktop token usage.
+
+On **macOS**, this adapter is unsupported; do not bootstrap or reinstall it to enable OpenCode.
+Codex can use [OpenCode's direct relay workflow](skills/opencode-delegate/references/dispatch-and-poll.md#codex-on-macos)
+with host execution/session waits instead. The implementer skill explicitly permits that route;
+it does not provide the adapter's process-ownership or no-inference-wait guarantees.
 
 ## Install
 

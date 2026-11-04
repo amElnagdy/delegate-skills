@@ -11,11 +11,15 @@ npx skills add amElnagdy/delegate-skills --skill codex-background
 
 The first skill selects a Codex implementer; the second supports a Codex orchestrator using any
 registered implementer. A short foreground shell run does not require the support utility.
-For background work, missing MCP tools are a setup step, not a reason to start polling.
+On supported Windows/Linux hosts, missing MCP tools for background work are a setup step, not a
+reason to start polling. On macOS, skip this setup: the adapter cannot run there. Codex-to-OpenCode
+users should follow the [direct macOS workflow](../../opencode-delegate/references/dispatch-and-poll.md#codex-on-macos),
+which uses the existing relay and host execution/session waits without writing Codex configuration.
+That alternative does not supply the adapter's lifecycle or no-inference-wait guarantees.
 The scripts use Node built-ins only and make no network calls themselves. The selected relay
 continues to launch its own implementer CLI with its existing authentication and permissions.
 
-## Setup: install, bootstrap, restart, use
+## Setup on Windows/Linux: install, bootstrap, restart, use
 
 1. Install the delegate skills you want and codex-background (above).
 2. Bootstrap. Codex runs this itself when the MCP tools are missing (the SKILL.md tells it to);
