@@ -5,6 +5,24 @@ agent, captures everything, and writes a structured `result.json`. Your job coll
 command, then read one file. Everything OpenCode-specific lives in the helper, which is what keeps the
 loop portable across orchestrators.
 
+## Codex on macOS
+
+Use this relay directly on macOS, including when Codex is the orchestrator. The optional
+`codex-background` adapter cannot run on this host; that does not make OpenCode unavailable.
+No MCP registry, bootstrap, Codex configuration change or additional skill override is required.
+The user's delegation authorization covers this workflow.
+
+Run the command in the dispatch section with the approved model and workspace. Keep it in the
+host's foreground execution or resumable background task. If the execution tool yields a handle,
+resume that same execution with bounded waits until it exits; do not redispatch or busy-poll logs.
+For long work, give the host execution enough time for the relay's explicit `--timeout` budget.
+Only announce completion after process exit and inspection of `result.json` and the working tree.
+
+This is the existing relay's lifecycle, not a macOS implementation of the background adapter.
+It has no adapter process-ownership, detached-wait or no-inference-wait guarantees. If the host
+cannot keep or resume the execution, report the limitation before dispatch rather than launching
+an unmanaged detached process or promising an automatic completion notification.
+
 ## Before the first run: check the binary
 
 Two gotchas, both worth 30 seconds:
@@ -77,6 +95,10 @@ branch on success/failure directly.
 ## Waiting for completion
 
 The helper blocks until OpenCode finishes. Back it with whatever your orchestrator offers:
+
+- **Codex on macOS:** use the direct execution/session workflow above.
+- **Codex on Windows/Linux (background work):** use `codex-background`'s pending `delegate_run`
+  request and `delegate_wait` to reattach; do not substitute shell polling for that adapter.
 
 - **Claude Code:** run the `Bash` call with `run_in_background: true`; you're notified on completion,
   then read `result.json`.

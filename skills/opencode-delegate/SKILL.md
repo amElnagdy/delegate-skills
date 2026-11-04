@@ -74,13 +74,23 @@ commit (you will). Keep one task per brief. Full guidance and a template:
 
 ### 2. Dispatch
 
-For **Codex orchestration of background work**, install and configure the separate
-**codex-background** support utility first. If its MCP tools or registry are missing, stop and
-report the setup requirement; do not silently fall back to model-driven polling. Then invoke its
-registered `delegate_run` MCP tool once in place of the shell example below.
-Follow that skill for structured common arguments, unchanged provider flags and reattachment by
-runId. Keep the request pending until completion, then continue this skill's review and landing
-steps. Other orchestrators keep the shell workflow below.
+For **Codex orchestration**, choose the waiting method by host before attempting setup:
+
+- **macOS:** use the direct relay command below. Do not install or bootstrap `codex-background`:
+  its process-ownership adapter supports Windows and Linux only. Delegation authorization covers
+  this direct workflow; no separate override of this skill is needed. Keep the relay attached to
+  the host's foreground execution or resumable background task, then follow step 3.
+- **Windows/Linux background work:** install and configure the separate **codex-background**
+  support utility first. If its MCP tools or registry are missing, stop and report the setup
+  requirement; do not silently fall back to model-driven polling. Invoke its registered
+  `delegate_run` MCP tool once in place of the shell example below. Follow that skill for structured
+  common arguments, unchanged provider flags and reattachment by runId. Keep the request pending
+  until completion, then continue this skill's review and landing steps.
+
+The macOS direct workflow uses the existing relay's watchdog and signal handling. It does not
+provide the adapter's process-ownership, detached-wait or no-inference-wait guarantees. If the host
+cannot keep or resume the execution, report that limitation before dispatch; do not launch an
+unmanaged detached process and promise a completion notification.
 
 Send the brief to OpenCode with the bundled helper. It wraps `opencode run`, captures the run, and
 writes a structured `result.json` — so your only job is "run a command, read a file." (`<skill-dir>`
@@ -105,8 +115,15 @@ repo under review stays clean. It **never commits** — see step 5. Mechanics, f
 
 ### 3. Wait for completion
 
-Codex using codex-background keeps the original MCP request pending: no model-driven sleep,
-status or log polling. Use `delegate_wait` only to reattach after an interrupted request.
+**Codex on macOS:** wait for the direct relay through the host's execution tool. If the tool returns
+an execution/session handle, retain it and resume that same execution with bounded waits; do not
+redispatch, busy-poll logs or treat a yielded handle as completion. Continue until the process has
+exited and its `result.json` is available. If the execution is interrupted and its state cannot be
+recovered, inspect the preserved artifacts and working tree before attempting another dispatch.
+
+**Codex using codex-background on Windows/Linux:** keep the original MCP request pending: no
+model-driven sleep, status or log polling. Use `delegate_wait` only to reattach after an interrupted
+request.
 
 The helper blocks until OpenCode finishes, so back it with whatever your orchestrator offers and resume
 when it returns:

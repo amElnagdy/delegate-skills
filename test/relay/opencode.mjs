@@ -5,6 +5,29 @@ import { join } from "node:path";
 export async function runOpencode(h) {
   const workDir = h.freshRepo("work-opencode");
 
+  // Direct Codex delegation must not depend on a bootstrapped MCP adapter or write Codex config.
+  const directCodexHome = join(h.scratch, "absent-codex-home-opencode");
+  const directOutDir = join(h.scratch, "out-opencode-without-adapter");
+  const directEnv = { ...h.baseEnv, CODEX_HOME: directCodexHome, SMOKE_MODE: "opencode-success",
+    SMOKE_ARGS_FILE: join(h.scratch, "args-opencode-without-adapter"),
+  };
+  delete directEnv.CODEX_BACKGROUND_REGISTRY;
+  const directRun = spawnSync(process.execPath, [
+    h.relayPath("opencode"),
+    "--brief", h.briefPath,
+    "--cd", workDir,
+    "--out-dir", directOutDir,
+    "--model", "fake/model",
+    "--timeout", "30s",
+  ], { env: directEnv, encoding: "utf8", timeout: 35000 });
+  h.check("opencode direct: completes without a background registry or Codex config",
+    directRun.status === 0 &&
+    existsSync(join(directOutDir, "result.json")) &&
+    h.result(directOutDir).status === "completed" &&
+    h.result(directOutDir).sessionId === "ses_smoke_opencode" &&
+    h.result(directOutDir).finalMessage === "fake opencode completed — second segment" &&
+    !existsSync(directCodexHome));
+
   // Model + variant on opencode 2.x: 2.x replaced the --variant flag with a
   // provider/model#variant model value (2.0.11's run --help), so the relay joins the dials.
   const variantOutDir = join(h.scratch, "out-opencode-model-variant");
