@@ -278,6 +278,7 @@ function hostProblem(platform, exists, env) {
     const root = env.SystemRoot || env.WINDIR;
     return !root ? 'Windows system directory is unavailable (SystemRoot is not set)' : !exists(join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')) ? 'Windows ownership requires inbox Windows PowerShell' : null;
   }
+  if (platform === 'darwin') return 'Unsupported host (darwin): only the codex-background adapter requires Windows or Linux process ownership. OpenCode itself can run on macOS; use the direct relay workflow in opencode-delegate/SKILL.md instead. Nothing was written.';
   return `Unsupported host (${platform}): codex-background needs Windows or Linux process ownership. Nothing was written.`;
 }
 function resolvePaths(opts) {

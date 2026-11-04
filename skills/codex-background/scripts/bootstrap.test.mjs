@@ -190,12 +190,34 @@ test('conflicting or malformed code_mode/managed config is refused and left unto
 
 test('unsupported platform is refused before anything is written', async () => {
   const s = sandbox();
-  assert.throws(() => planBootstrap({ ...s.common, platform: 'darwin' }), /Unsupported host \(darwin\)/);
+  assert.throws(() => planBootstrap({ ...s.common, platform: 'freebsd' }), /Unsupported host \(freebsd\)/);
   assert.ok(!existsSync(s.codexHome));
   const out = [], err = [];
-  const code = await run(['--codex-home', s.codexHome, '--skills-dir', s.skills], { platform: 'darwin', homeDir: s.home, out: l => out.push(l), err: l => err.push(l) });
+  const code = await run(['--codex-home', s.codexHome, '--skills-dir', s.skills], { platform: 'freebsd', homeDir: s.home, out: l => out.push(l), err: l => err.push(l) });
   assert.equal(code, 1); assert.match(err.join('\n'), /Unsupported host/);
   assert.ok(!existsSync(s.codexHome));
+});
+
+test('macOS bootstrap points to the direct OpenCode workflow without writing config', async () => {
+  for (const flags of [[], ['--dry-run'], ['--check'], ['--json'], ['--check', '--json']]) {
+    const s = sandbox(['opencode']);
+    const out = [], err = [];
+    const code = await run(['--codex-home', s.codexHome, '--skills-dir', s.skills, ...flags], {
+      platform: 'darwin', homeDir: s.home, out: l => out.push(l), err: l => err.push(l),
+    });
+    assert.equal(code, 1);
+    let message = [...out, ...err].join('\n');
+    if (flags.includes('--json')) {
+      const report = JSON.parse(out.join('\n'));
+      assert.equal(report.ok, false);
+      message = report.error ?? report.checks[0].detail;
+    }
+    assert.match(message, /only the codex-background adapter/);
+    assert.match(message, /OpenCode itself can run on macOS/);
+    assert.match(message, /direct relay workflow in opencode-delegate\/SKILL\.md/);
+    assert.match(message, /Nothing was written/);
+    assert.ok(!existsSync(s.codexHome));
+  }
 });
 
 test('zero relays is a clear error and writes nothing', async () => {
