@@ -231,6 +231,53 @@ for (const [name, args, pattern] of [
   h.check(`mcode ${name}: exits 2 before dispatch`,
     bad.status === 2 && pattern.test(bad.stderr) && !existsSync(join(outDir, "result.json")));
 }
+// Session, model, and effort values reach cmd.exe on Windows (shell:true for the
+// mcode.cmd shim). Reject unsafe tokens before even the version probe.
+for (const [flag, prefix, pattern] of [
+  ["--session", "mvs_prior-1", /--session must be a session id/],
+  ["--model", "minimax/Fake-Model", /--model contains unsupported characters/],
+  ["--effort", "high", /invalid --effort/],
+]) {
+  for (const [name, value] of [
+    ["empty", ""],
+    ["option-like", "--help"],
+    ["space", `${prefix} extra`],
+    ["ampersand", `${prefix}&echo smoke`],
+    ["pipe", `${prefix}|echo smoke`],
+    ["output redirection", `${prefix}>smoke`],
+    ["input redirection", `${prefix}<smoke`],
+    ["caret", `${prefix}^smoke`],
+    ["double quote", `${prefix}"smoke`],
+    ["single quote", `${prefix}'smoke`],
+    ["percent expansion", `${prefix}%SMOKE_MODE%`],
+    ["delayed expansion", `${prefix}!SMOKE_MODE!`],
+    ["parentheses", `${prefix}(smoke)`],
+    ["newline", `${prefix}\nsmoke`],
+    ["trailing newline", `${prefix}\n`],
+    ["carriage return", `${prefix}\rsmoke`],
+    ["tab", `${prefix}\tsmoke`],
+  ]) {
+    const slug = `${flag.slice(2)}-${name.replaceAll(" ", "-")}`;
+    const workDir = h.freshRepo(`work-invalid-${slug}-mcode`);
+    const outDir = join(h.scratch, `out-invalid-${slug}-mcode`);
+    const argsFile = join(h.scratch, `args-invalid-${slug}-mcode`);
+    const probeFile = join(h.scratch, `probe-invalid-${slug}-mcode`);
+    const bad = spawnSync(process.execPath, [
+      h.relayPath("mcode"),
+      "--brief", h.briefPath,
+      "--cd", workDir,
+      "--out-dir", outDir,
+      flag, value,
+    ], {
+      env: { ...h.baseEnv, SMOKE_MODE: "mcode-success", SMOKE_ARGS_FILE: argsFile, SMOKE_PREFLIGHT_PID_FILE: probeFile },
+      encoding: "utf8",
+    });
+    h.check(`mcode ${flag} (${name}): usage error names the flag`,
+      bad.status === 2 && pattern.test(bad.stderr));
+    h.check(`mcode ${flag} (${name}): no preflight, dispatch, or artifacts`,
+      !existsSync(probeFile) && !existsSync(argsFile) && !existsSync(outDir));
+  }
+}
 for (const [mode, expectedStatus, expectedExit, timeout] of [
   ["mcode-version-hang", "timeout", 124, "1s"],
   ["mcode-version-fail", "failed", 7, "30s"],
