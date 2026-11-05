@@ -1,0 +1,5 @@
+#!/bin/sh
+# POSIX launch shim for the synthetic codex. Copied by the tests into a private bin directory as an
+# executable named `codex`, beside fake-codex.mjs. ${0%/*} avoids needing `dirname` on the
+# restricted test PATH; exec keeps signals aimed at the child landing on Node itself.
+exec node "${0%/*}/fake-codex.mjs" "$@"

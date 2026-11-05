@@ -218,6 +218,8 @@ This package is intentionally inspectable:
 - Those scripts make no network calls of their own, read or write no credentials, send no telemetry, and
   have no dependencies (Node built-ins only). Relays launch an implementer CLI and `git`, plus the
   platform process launcher/termination utility where a Windows shim or process-tree kill requires one.
+  `codex-delegate` also runs Windows `tasklist.exe` for a warn-only `node_repl.exe` check, and an
+  isolated Windows run reads the single `[windows] sandbox` value from Codex's `config.toml`, nothing else.
   Discover may invoke installed CLIs for `--version` / model list probes (those CLIs may contact their
   own services). Read the script before you run it.
 - None of the relays ever commit — committing is always the orchestrator's job, after review.
@@ -372,8 +374,16 @@ Per skill — platform, CLI version, and what the run exercised:
   Codex to run `winget`, which lives only under `WindowsApps`, and both the PATH lookup and the
   absolute path failed inside the sandbox with "The file cannot be accessed by the system" while
   the same binary ran normally outside it. No Store `pwsh` is installed here, so the shell-launch
-  form of that denial (`0xC0070005` on every command) rests on the report in issue #116. No Linux
-  run is recorded.
+  form of that denial (`0xC0070005` on every command) rests on the report in issue #116.
+  Isolated read-only lanes, Windows 11 with Codex Desktop open (`node_repl.exe` running): on
+  `codex` codex-cli 0.163.0 an isolated `--read-only` run (`--ignore-user-config`, `--disable apps`,
+  `-c windows.sandbox=elevated` passed back) completed with exit 0, no relay warnings and no MCP
+  calls, a write attempt was denied and the repo stayed clean; with codex-cli 0.162.1 first on PATH
+  the same command printed the upgrade-first `node_repl.exe` warning and, on the
+  `setup refresh had errors` signature, reported `sandbox_failed` (exit 1) although Codex exited 0.
+  Contract-tested in `test/codex-isolation.mjs` (hermetic fake `codex`): isolation precedence and
+  argument placement, the bounded `config.toml` scanner, sandbox-failure classification, MCP-call
+  accounting, the version-aware process check, and `--out-dir` locking. No Linux live run is recorded.
 - `muse-delegate` — macOS, Muse Code 1.4.7: a fresh write dispatch against a throwaway repo
   created only the briefed file (`touchedFiles` reported exactly it, `status: "completed"`, exit 0,
   a `sessionId` captured); a `--session <id>` continuation in that same session appended the briefed

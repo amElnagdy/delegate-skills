@@ -103,12 +103,18 @@ just the correction:
 
 ```bash
 echo "The fix is right, but the test mocks the DB session - use the real migrated fixture instead, and
-drop the now-unused import." | node "<skill-dir>/scripts/relay.mjs" --resume-last --cd /path/to/repo
+drop the now-unused import." | node "<skill-dir>/scripts/relay.mjs" --session <threadId> --cd /path/to/repo
 ```
 
 (`<skill-dir>` is this skill's install directory — see [dispatch-and-poll.md](dispatch-and-poll.md).)
 
-`--session <threadId>` (or `--resume-last`) keeps Codex's context from the first run, so a short delta is enough. Then review
+Isolation and sandbox are per invocation and are not inherited from the session you resume. Repeat the
+original `--lane <name>` (or `--read-only --isolated`) on every `--session`/`--resume-last` call, or the
+resumed turn runs with your user config, apps, and Codex's own sandbox.
+
+`--session <threadId>` keeps Codex's context from the first run, so a short delta is enough (use
+`--resume-last` only when no thread id exists and no other Codex run is active; it warns because "last"
+is global). Then review
 again — rework gets the same gate-rerun, test check, diff-read, and sweep as the original, no
 shortcuts. Repeat until it's right, then commit.
 

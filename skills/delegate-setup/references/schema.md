@@ -48,7 +48,7 @@ later-edited project config fails closed until it is reviewed and written again 
 | --- | --- | --- | --- |
 | `claude` | claude-delegate | `claude` | model, effort, timeout, readOnly |
 | `cline` | cline-delegate | `cline` | provider, model, timeout |
-| `codex` | codex-delegate | `codex` | model, effort, sandbox, timeout, readOnly |
+| `codex` | codex-delegate | `codex` | model, effort, sandbox, isolated, timeout, readOnly |
 | `commandcode` | commandcode-delegate | `cmd` | model, effort, timeout, readOnly |
 | `opencode` | opencode-delegate | `opencode` | model, **variant**, timeout, readOnly |
 | `agy` | agy-delegate | `agy` | model, effort, timeout, readOnly |
@@ -78,12 +78,27 @@ OpenCode lanes **require** `model` in `provider/model` form, with a non-empty pr
 `/` and at least one non-`/` character after it. Cline accepts `provider` and `model` as separate
 dials and does not impose that shape.
 
-Boolean dials: `readOnly`, `force`. All other dials are non-empty strings. Duration strings for
+Boolean dials: `readOnly`, `force`, `isolated`. All other dials are non-empty strings. Duration strings for
 `timeout` use `h`/`m`/`s` (e.g. `30m`) and must fit the relay watchdog ceiling (~24.8 days).
 Do not combine `readOnly: true` with a write-capable `sandbox` / `permissionMode` / `force`.
 `model` / `provider` / OpenCode `variant` must match the bound relay’s token rules (e.g. Claude
 rejects spaces; Grok/Pi/Oh My Pi/OpenCode/Codex/Command Code/Muse use a shell-safe token set — Windows `shell:true`
 launches, and Oh My Pi's and Muse's flag-injection defense even without a shell).
+
+### `isolated` (Codex only)
+
+`isolated` (boolean) makes the Codex relay ignore the user's Codex config and disable account
+connectors (`--ignore-user-config`, `--disable apps`; on Windows it also passes the configured
+`windows.sandbox` backend). It is never written for you: the relay decides at dispatch.
+
+- **Default:** when the dial is absent, a Codex lane whose resolved sandbox is `read-only`
+  (`sandbox: "read-only"` or `readOnly: true`) runs isolated; any other Codex lane does not.
+- **Opt out:** `"isolated": false` on the lane, or `--no-isolated` on the command line. An explicit
+  `"isolated": true` also isolates a write-capable lane. Explicit relay flags win over the lane value.
+- **Codex only:** `isolated` is a Codex dial. Adding it to a lane for any other implementer, even
+  `false`, fails validation of the **whole document**, so do not add it to every read-only lane.
+  Claude lanes are unchanged: Claude lanes load no configured MCP servers and disallow every `mcp__*` tool.
+- Existing Codex read-only lanes gain isolation at dispatch without any config edit or new approval hash.
 
 ## Helpers
 

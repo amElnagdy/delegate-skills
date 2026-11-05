@@ -75,7 +75,9 @@ export function resolveLaneForRelay(cwd, laneName, implementerKey) {
   };
 }
 
-function normalizeDials(implementerKey, raw) {
+// Pure: returns a new object. An explicit Codex `isolated` passes through unchanged;
+// no default is manufactured here — the relay owns runtime isolation defaults.
+export function normalizeDials(implementerKey, raw) {
   const dials = { ...raw };
   if (implementerKey === "grok") {
     if (typeof dials.sandbox === "string") {

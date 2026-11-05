@@ -149,7 +149,7 @@ function validateLane(name, lane, label) {
     if (!impl.supports.includes(field)) {
       return `${label}: lane ${name}: ${impl.key} does not support ${field} (supports: ${impl.supports.join(", ") || "none"})`;
     }
-    if (field === "readOnly" || field === "force") {
+    if (field === "readOnly" || field === "force" || field === "isolated") {
       if (typeof lane[field] !== "boolean") {
         return `${label}: lane ${name}.${field} must be a boolean`;
       }

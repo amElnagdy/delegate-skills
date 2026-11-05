@@ -40,6 +40,23 @@ as designed-for, not yet proven.)
    relay also records the version it ran into `result.json`, so a stale binary is visible after the fact.
 3. You are in (or will point `--cd` at) the target git repository.
 
+### Windows
+
+- **Run Codex from a normal workspace.** A sandboxed `--cd` under `%TEMP%` can be denied to the sandbox
+  user. The relay's own artifacts may still live under temp: the relay writes them, not the sandbox.
+- **Codex Desktop can stay open on a CLI with the Desktop ACL fix** (`openai/codex#51822`). Without it,
+  a running `node_repl.exe` made the elevated sandbox's setup refresh fail (`setup refresh had errors`):
+  upgrade first (`codex update`); quit Codex Desktop fully only if upgrading is unavailable. Codex can
+  still exit `0` then, so the relay reports such a run as `sandbox_failed` (exit 1), never `completed`.
+  Its `node_repl.exe` check is warn-only and skipped once the CLI is known fixed.
+- A sandboxed run gets a `PATH` without `WindowsApps` entries.
+- Read-only lanes run isolated by default on every platform. On Windows the relay then also reads only
+  the `[windows] sandbox` value from Codex's `config.toml` and passes it on: a missing value is a
+  warning, an invalid, duplicate, ambiguous or unreadable one stops the run (`failed`, exit 2, with a
+  `result.json`).
+
+Details for each: [references/dispatch-and-poll.md](references/dispatch-and-poll.md#environment-and-windows).
+
 ## The loop
 
 Run these five steps per task. Steps 1, 4, and 5 are your judgment; 2 and 3 are mechanical.
@@ -64,12 +81,12 @@ orchestrators use that same directory — if unsure where it landed, run
 ```bash
 node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 # read-only (review/diagnosis, no edits):   add --read-only
-# isolated review (skip ambient MCP/user config): add --ignore-user-config
+# isolated run (ignore user config, disable apps): add --isolated   (default only for a read-only --lane; --read-only alone does not isolate; --no-isolated opts out)
 # subagent defaults:                        add --subagent-model <name> --subagent-effort <level>  (again on every resume)
 # web search mode (disabled|cached|indexed|live): add --web-search live  (again on every resume)
 # network inside the sandbox (gh, curl, installs): add --network-access  (on resume: --sandbox workspace-write --network-access)
 # continue the exact Codex session:         add --session <threadId>  (from result.json; send only the delta brief)
-# fallback when no thread id is available:  add --resume-last
+# fallback when no thread id is available:  add --resume-last  (warns: "last" is global across parallel sessions)
 # hard time limit (watchdog):               add --timeout 2h  (default: off; implementation runs routinely need 1-2h)
 # see all options:                          node .../relay.mjs --help
 ```
@@ -77,6 +94,11 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 The helper defaults to a write-capable (`workspace-write`) sandbox and writes its artifacts to a temp
 dir, so the repo under review stays clean. It **never commits** — see step 5. Mechanics, flags, and the
 `result.json` shape: [references/dispatch-and-poll.md](references/dispatch-and-poll.md).
+
+An isolated run drops your Codex user config (default model, providers, profiles, approval settings),
+so pass `--model` or set a lane model. Callers must reject a read-only or isolated result with
+`mcpViolation: true`. Isolation and sandbox are per invocation: repeat `--lane <name>` (or
+`--read-only --isolated`) on every `--session` call. In parallel sessions use `--session <threadId>`, never `--resume-last`.
 
 ### 3. Wait for completion
 
@@ -87,9 +109,11 @@ when it returns:
 - **Plain shell / other agents:** run it in the foreground for short tasks, or background it and poll
   the result file — `… &` in bash/zsh (including Git Bash/WSL), or your shell's equivalent (`Start-Job`
   in PowerShell, `start /b` in cmd). The run is done when `result.json` exists with a `status`. (A
-  pre-run usage error — bad args or an empty brief — instead exits with code 2 and a stderr message and
-  writes no result file, so check the exit code too. A missing `codex` binary exits 127 but *does* write
-  a `result.json` with status `codex_unavailable`.)
+  pre-run usage error — bad args, an empty brief, or an `--out-dir` another relay holds — instead exits
+  with code 2 and a stderr message and writes no result file of its own, so check the exit code too; any
+  `result.json` in a busy `--out-dir` belongs to the other relay. A missing `codex` binary exits 127 but
+  *does* write a `result.json` with status `codex_unavailable`, and an invalid Windows isolation setting
+  exits 2 with a `result.json` of status `failed`.)
 
 Do not trust progress trackers over reality: a run is finished when `result.json` is written and the
 process has exited. Read the working tree, not a status line. The implementer's full report is

@@ -12,7 +12,7 @@
  * Node built-ins only. No network, credentials, or telemetry.
  */
 
-/** @typedef {"model"|"effort"|"variant"|"timeout"|"readOnly"|"sandbox"|"permissionMode"|"force"|"provider"} Dial */
+/** @typedef {"model"|"effort"|"variant"|"timeout"|"readOnly"|"sandbox"|"permissionMode"|"force"|"provider"|"isolated"} Dial */
 
 /**
  * @type {readonly {
@@ -107,7 +107,8 @@ export const IMPLEMENTERS = Object.freeze([
       entry: "file",
       match: /^rollout-.*\.jsonl$/,
     },
-    supports: ["model", "effort", "sandbox", "timeout", "readOnly"],
+    // isolated is Codex-only: the relay owns its runtime default (read-only lanes).
+    supports: ["model", "effort", "sandbox", "timeout", "readOnly", "isolated"],
     winShell: true,
   },
   {
@@ -467,4 +468,5 @@ export const ALL_DIALS = Object.freeze([
   "permissionMode",
   "force",
   "provider",
+  "isolated",
 ]);
