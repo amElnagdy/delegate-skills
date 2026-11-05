@@ -163,9 +163,9 @@ export const IMPLEMENTERS = Object.freeze([
     skill: "opencode-delegate",
     binary: "opencode",
     versionArgs: ["--version"],
-    // Exits 0 with an empty list too; a "●" row is the only auth signal, so a clean run
-    // without one is the logged-out state, not an ambiguous miss.
-    authProbe: { args: ["auth", "list"], successPattern: /^●\s/m, missMeansFalse: true },
+    // Exits 0 with an empty list too; match legacy "●" rows and credential rows ending
+    // in "stored". A clean run without either is the logged-out state.
+    authProbe: { args: ["auth", "list"], successPattern: /^●\s|\sstored\s*$/m, missMeansFalse: true },
     modelProbe: { args: ["models"], format: "lines" },
     // No usage probe: the session files under ~/.local/share/opencode/storage stopped
     // being written when OpenCode moved to opencode.db, and a session count from that
