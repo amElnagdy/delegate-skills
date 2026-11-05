@@ -5,6 +5,83 @@ import { join } from "node:path";
 export async function runOpencode(h) {
   const workDir = h.freshRepo("work-opencode");
 
+  // Agent and session values reach cmd.exe on Windows. Reject unsafe tokens before
+  // even the version probe, not just before dispatch or result.json publication.
+  for (const [flag, prefix] of [["--agent", "build"], ["--session", "ses_123"]]) {
+    for (const [name, value] of [
+      ["empty", ""],
+      ["option-like", "--help"],
+      ["space", `${prefix} extra`],
+      ["ampersand", `${prefix}&echo smoke`],
+      ["pipe", `${prefix}|echo smoke`],
+      ["output redirection", `${prefix}>smoke`],
+      ["input redirection", `${prefix}<smoke`],
+      ["caret", `${prefix}^smoke`],
+      ["double quote", `${prefix}\"smoke`],
+      ["single quote", `${prefix}'smoke`],
+      ["percent expansion", `${prefix}%SMOKE_MODE%`],
+      ["delayed expansion", `${prefix}!SMOKE_MODE!`],
+      ["parentheses", `${prefix}(smoke)`],
+      ["newline", `${prefix}\nsmoke`],
+      ["trailing newline", `${prefix}\n`],
+      ["carriage return", `${prefix}\rsmoke`],
+      ["tab", `${prefix}\tsmoke`],
+    ]) {
+      const slug = `${flag.slice(2)}-${name.replaceAll(" ", "-")}`;
+      const outDir = join(h.scratch, `out-opencode-invalid-${slug}`);
+      const argsFile = join(h.scratch, `args-opencode-invalid-${slug}`);
+      const probeFile = join(h.scratch, `probe-opencode-invalid-${slug}`);
+      const run = spawnSync(process.execPath, [
+        h.relayPath("opencode"),
+        "--brief", h.briefPath,
+        "--cd", workDir,
+        "--out-dir", outDir,
+        "--model", "fake/model",
+        flag, value,
+      ], {
+        env: {
+          ...h.baseEnv,
+          SMOKE_MODE: "opencode-success",
+          SMOKE_ARGS_FILE: argsFile,
+          SMOKE_PREFLIGHT_PID_FILE: probeFile,
+        },
+        encoding: "utf8",
+      });
+      h.check(`opencode ${flag} (${name}): usage error names the flag`,
+        run.status === 2 && run.stderr.includes(`${flag} contains unsupported characters`));
+      h.check(`opencode ${flag} (${name}): no preflight, dispatch, or artifacts`,
+        !existsSync(probeFile) && !existsSync(argsFile) && !existsSync(outDir));
+    }
+  }
+
+  // Keep custom agents and session resume working, including the session tokens
+  // emitted by the fake CLI and used by the fleet read-only lane fixture.
+  for (const session of ["ses_AbC123", "ses_review", "ses_smoke_opencode"]) {
+    const outDir = join(h.scratch, `out-opencode-session-${session}`);
+    const argsFile = join(h.scratch, `args-opencode-session-${session}`);
+    const run = spawnSync(process.execPath, [
+      h.relayPath("opencode"),
+      "--brief", h.briefPath,
+      "--cd", workDir,
+      "--out-dir", outDir,
+      "--agent", "reviewer.v2-custom_1",
+      "--session", session,
+    ], {
+      env: { ...h.baseEnv, SMOKE_MODE: "opencode-success", SMOKE_ARGS_FILE: argsFile },
+      encoding: "utf8",
+    });
+    const capture = existsSync(argsFile) ? JSON.parse(readFileSync(argsFile, "utf8")) : {};
+    h.check(`opencode session ${session}: custom agent and session forwarded verbatim`,
+      run.status === 0 &&
+      JSON.stringify(capture.args) === JSON.stringify([
+        "run", "--format", "json", "--session", session,
+        "--agent", "reviewer.v2-custom_1", "--auto",
+      ]) &&
+      existsSync(join(outDir, "result.json")) &&
+      h.result(outDir).agent === "reviewer.v2-custom_1" &&
+      h.result(outDir).resumed === true);
+  }
+
   // Model + variant on opencode 2.x: 2.x replaced the --variant flag with a
   // provider/model#variant model value (2.0.11's run --help), so the relay joins the dials.
   const variantOutDir = join(h.scratch, "out-opencode-model-variant");

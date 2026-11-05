@@ -81,7 +81,7 @@ const MAX_BUFFERED_CHARS = 1_048_576;
 
 const VERSION_PROBE_TIMEOUT_MS = 10_000;
 const MAX_TIMER_MS = 2_147_483_647;
-// model/variant reach cmd.exe on win32 (shell:true for the opencode.cmd shim). The
+// model/variant/agent/session reach cmd.exe on win32 (shell:true for the opencode.cmd shim). The
 // model token may carry a variant suffix (provider/model#variant on opencode 2.x), and
 // catalog ids carry '@' (Workers AI @cf/..., Vertex model@default, region@eu) and '~'
 // (OpenRouter/Kilo ~vendor/model-latest aliases). None of '#', '@' or '~' is a cmd.exe
@@ -248,8 +248,10 @@ function parseArgs(argv) {
   if (opts.model !== null && !MODEL_TOKEN.test(opts.model)) {
     fail("--model contains unsupported characters (allowed: letters, digits, . _ : @ ~ / # -)");
   }
-  if (opts.variant !== null && !SAFE_TOKEN.test(opts.variant)) {
-    fail("--variant contains unsupported characters (allowed: letters, digits, . _ : / -)");
+  for (const flag of ["variant", "agent", "session"]) {
+    if (opts[flag] !== null && !SAFE_TOKEN.test(opts[flag])) {
+      fail(`--${flag} contains unsupported characters (allowed: letters, digits, . _ : / -)`);
+    }
   }
   if (opts.model !== null && opts.model.includes("#") && opts.variant !== null) {
     fail("--model already carries a variant (provider/model#variant); pass either that or --model plus --variant, not both");
@@ -527,7 +529,7 @@ function dispatchToOpenCode(opts, brief, run, writeResult, version) {
   // shell quoting.
   // shell:true on Windows so the opencode.cmd shim resolves (see opencodeVersion).
   // Safe: the brief is fed via child.stdin below — never argv — and argv holds only
-  // flag names, an agent enum, a model string, and a session id, with no shell
+  // flag names and token-validated agent, model, variant, and session values, with no shell
   // metacharacters or spaceable paths.
   const child = spawnShellLaunch("opencode", argv, {
     cwd: opts.cd,
