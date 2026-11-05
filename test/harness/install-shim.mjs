@@ -14,7 +14,7 @@ export function installShim(h) {
   copyFileSync(join(fixturesDir, "fake-cli.cjs"), join(shimDir, "fake-cli.cjs"));
 
   if (WIN) {
-    for (const skill of ["claude", "cline", "codex", "opencode", "grok", "cursor", "pi", "copilot", "zcode", "commandcode"]) {
+    for (const skill of ["claude", "cline", "codex", "opencode", "grok", "cursor", "pi", "copilot", "zcode", "commandcode", "mcode"]) {
       writeFileSync(join(shimDir, `${binaryName(skill)}.cmd`), `@node "%~dp0fake-cli.cjs" %*\r\n`);
     }
     const windir = process.env.WINDIR || "C:\\Windows";
@@ -59,6 +59,8 @@ export function installShim(h) {
     PATH: shimDir + delimiter + process.env.PATH,
     SMOKE_NODE: process.execPath,
     COMMANDCODE_BIN: WIN ? "" : join(shimDir, "cmd"),
+    // The shim on PATH stands in for mcode; a host MCODE_CLI would otherwise win over it.
+    MCODE_CLI: "",
   };
 
   const slowWriteHook = join(h.scratch, "slow-result-write.cjs");

@@ -50,6 +50,7 @@ later-edited project config fails closed until it is reviewed and written again 
 | `cline` | cline-delegate | `cline` | provider, model, timeout |
 | `codex` | codex-delegate | `codex` | model, effort, sandbox, timeout, readOnly |
 | `commandcode` | commandcode-delegate | `cmd` | model, effort, timeout, readOnly |
+| `mcode` | mcode-delegate | `mcode` | model, effort, timeout, readOnly |
 | `opencode` | opencode-delegate | `opencode` | model, **variant**, timeout, readOnly |
 | `agy` | agy-delegate | `agy` | model, effort, timeout, readOnly |
 | `grok` | grok-delegate | `grok` | model, effort, sandbox, timeout, readOnly |
@@ -73,6 +74,7 @@ inside the desktop app rather than on PATH, so discovery falls back to the insta
 
 OpenCode uses `variant` for reasoning intensity, not `effort`. Do not write `effort` on an `opencode` lane.
 Muse `effort` is `--reasoning-effort` (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`). Muse `--provider echo|meta` is relay-only — do not write `provider` on a `muse` lane.
+MiniMax Code (`mcode`) `model` is `provider/model` or `provider/model#variant`; its `effort` levels are model-specific and `mcode` checks them at dispatch. An `mcode` lane `readOnly: true` is advisory — a prompt plus the Git-visible tripwire — because `mcode exec` has no read-only setting.
 Oh My Pi (`omp`) uses the lane `effort` dial for omp's `--thinking` (`off`, `auto`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`). Do not write `thinking` as a lane field.
 OpenCode lanes **require** `model` in `provider/model` form, with a non-empty provider before the first
 `/` and at least one non-`/` character after it. Cline accepts `provider` and `model` as separate
@@ -82,7 +84,7 @@ Boolean dials: `readOnly`, `force`. All other dials are non-empty strings. Durat
 `timeout` use `h`/`m`/`s` (e.g. `30m`) and must fit the relay watchdog ceiling (~24.8 days).
 Do not combine `readOnly: true` with a write-capable `sandbox` / `permissionMode` / `force`.
 `model` / `provider` / OpenCode `variant` must match the bound relay’s token rules (e.g. Claude
-rejects spaces; Grok/Pi/Oh My Pi/OpenCode/Codex/Command Code/Muse use a shell-safe token set — Windows `shell:true`
+rejects spaces; Grok/Pi/Oh My Pi/OpenCode/Codex/Command Code/Muse/MiniMax Code use a shell-safe token set, with `#` added for OpenCode and MiniMax Code variants — Windows `shell:true`
 launches, and Oh My Pi's and Muse's flag-injection defense even without a shell).
 
 ## Helpers

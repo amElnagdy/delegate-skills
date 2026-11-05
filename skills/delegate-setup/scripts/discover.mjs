@@ -129,6 +129,17 @@ function resolveLaunch(impl) {
     }
     return null;
   }
+  if (impl.key === "mcode" && process.env.MCODE_CLI) {
+    const configured = process.env.MCODE_CLI;
+    if (process.platform === "win32" && !isAbsolute(configured)) return null;
+    const command = /[\\/]/.test(configured) ? resolve(configured) : resolveBinary(configured);
+    try {
+      if (command && statSync(command).isFile()) return { path: command, command, prefixArgs: [] };
+    } catch {
+      // report it missing below
+    }
+    return null;
+  }
   if (process.platform === "win32" && impl.key === "commandcode") {
     const command = resolveBinary("cmdc");
     return command ? { path: command, command, prefixArgs: [] } : null;

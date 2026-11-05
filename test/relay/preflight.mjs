@@ -62,7 +62,7 @@ if (!h.WIN) {
 // Node 24 warns for shell:true plus an args array. Exercise both each .cmd
 // version probe and its dispatch through the native Windows shim harness.
 if (h.WIN && Number(process.versions.node.split(".")[0]) >= 24) {
-  for (const skill of ["cline", "codex", "commandcode", "copilot", "grok", "opencode", "pi", "zcode"]) {
+  for (const skill of ["cline", "codex", "commandcode", "copilot", "grok", "mcode", "opencode", "pi", "zcode"]) {
     const workDir = h.freshRepo(`work-dep0190-${skill}`);
     const outDir = join(h.scratch, `out-dep0190-${skill}`);
     const argsPath = join(h.scratch, `args-dep0190-${skill}.json`);
