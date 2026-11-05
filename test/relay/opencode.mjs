@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { basename, join } from "node:path";
 
 export async function runOpencode(h) {
   const workDir = h.freshRepo("work-opencode");
@@ -367,4 +367,71 @@ export async function runOpencode(h) {
       "--model", "fake/model",
       "--auto",
     ]));
+
+  // 2.x --isolated: a private server and an empty config root, so the shared background service's
+  // plugins and the user's or project's config never reach the run.
+  const isolatedOutDir = join(h.scratch, "out-opencode-v2-isolated");
+  const isolatedArgsFile = join(h.scratch, "args-opencode-v2-isolated");
+  const isolated = spawnSync(process.execPath, [
+    h.relayPath("opencode"),
+    "--brief", h.briefPath,
+    "--cd", workDir,
+    "--out-dir", isolatedOutDir,
+    "--model", "fake/model",
+    "--read-only",
+    "--isolated",
+  ], {
+    env: {
+      ...h.baseEnv,
+      SMOKE_MODE: "opencode-success",
+      SMOKE_ARGS_FILE: isolatedArgsFile,
+      SMOKE_VERSION: "opencode v2.0.32",
+      // Inherited config inputs that would bring user config back.
+      OPENCODE_CONFIG: join(h.scratch, "user-opencode.json"),
+      OPENCODE_CONFIG_CONTENT: '{"plugin":["user-plugin"]}',
+      OPENCODE_CONFIG_PROJECT_DISABLE: "0",
+    },
+    encoding: "utf8",
+  });
+  const isolatedCapture = existsSync(isolatedArgsFile) ? JSON.parse(readFileSync(isolatedArgsFile, "utf8")) : {};
+  const isolatedConfig = isolatedCapture.opencodeEnv?.OPENCODE_CONFIG_DIR ?? "";
+  h.check("opencode 2.x --isolated: runs on a private server",
+    isolated.status === 0 &&
+    JSON.stringify(isolatedCapture.args) === JSON.stringify([
+      "run", "--format", "json", "--standalone",
+      "--agent", "plan",
+      "--model", "fake/model",
+    ]));
+  h.check("opencode 2.x --isolated: user and project config are off",
+    isolatedCapture.opencodeEnv?.OPENCODE_DISABLE_PROJECT_CONFIG === "1" &&
+    isolatedCapture.opencodeEnv?.OPENCODE_DISABLE_CLAUDE_CODE === "1" &&
+    basename(isolatedConfig).startsWith("opencode-isolated-") &&
+    existsSync(isolatedConfig) && readdirSync(isolatedConfig).length === 0);
+  h.check("opencode 2.x --isolated: inherited config inputs are dropped",
+    ["OPENCODE_CONFIG", "OPENCODE_CONFIG_CONTENT", "OPENCODE_CONFIG_PROJECT_DISABLE"]
+      .every((key) => isolatedCapture.opencodeEnv && !(key in isolatedCapture.opencodeEnv)));
+  h.check("opencode 2.x --isolated: recorded in result.json",
+    JSON.parse(readFileSync(join(isolatedOutDir, "result.json"), "utf8")).isolated === true);
+
+  // 1.x has no --standalone, and its OPENCODE_CONFIG_DIR only adds a config root.
+  const isolated1ArgsFile = join(h.scratch, "args-opencode-v1-isolated");
+  const isolated1 = spawnSync(process.execPath, [
+    h.relayPath("opencode"),
+    "--brief", h.briefPath,
+    "--cd", workDir,
+    "--out-dir", join(h.scratch, "out-opencode-v1-isolated"),
+    "--model", "fake/model",
+    "--isolated",
+  ], {
+    env: {
+      ...h.baseEnv,
+      SMOKE_MODE: "opencode-success",
+      SMOKE_ARGS_FILE: isolated1ArgsFile,
+      SMOKE_VERSION: "1.18.30",
+    },
+    encoding: "utf8",
+  });
+  h.check("opencode 1.x --isolated is a usage error",
+    isolated1.status === 2 && /--isolated needs opencode 2\.x/.test(isolated1.stderr));
+  h.check("opencode 1.x --isolated: the CLI is never dispatched", !existsSync(isolated1ArgsFile));
 }

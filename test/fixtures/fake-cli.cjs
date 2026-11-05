@@ -570,7 +570,8 @@ if (["omp-success", "omp-error"].includes(process.env.SMOKE_MODE)) {
   process.stdin.setEncoding("utf8");
   process.stdin.on("data", (chunk) => { brief += chunk; });
   process.stdin.on("end", () => {
-    fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify({ args, brief }));
+    const opencodeEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.startsWith("OPENCODE_")));
+    fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify({ args, brief, opencodeEnv }));
     const sid = "ses_smoke_opencode";
     const emit = (value) => fs.writeSync(1, `${JSON.stringify(value)}\n`);
     emit({ type: "step_start", sessionID: sid, part: { type: "step-start" } });
