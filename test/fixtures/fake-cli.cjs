@@ -48,7 +48,6 @@ if (versionProbe && process.env.SMOKE_MODE === "grok-spawn-error" && process.pla
   console.log(fakeVersion);
   process.exit(0);
 }
-if (process.env.SMOKE_FORWARD_ARGS_FILE) fs.writeFileSync(process.env.SMOKE_FORWARD_ARGS_FILE, JSON.stringify(args));
 // cursor stall-watchdog modes: emit Cursor-shaped stream-json, then misbehave or finish.
 //   cursor-stall      init, then silent forever without exiting (the observed live hang)
 //   cursor-slow-tool  a tool call that stays in flight longer than --stall-timeout, then completes
