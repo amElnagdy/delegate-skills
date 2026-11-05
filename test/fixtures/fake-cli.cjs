@@ -565,6 +565,32 @@ if (["omp-success", "omp-error"].includes(process.env.SMOKE_MODE)) {
       console.log(JSON.stringify(resultEvent));
     }
   });
+} else if (["opencode-stall", "opencode-delayed-shutdown", "opencode-steady"].includes(process.env.SMOKE_MODE)) {
+  // opencode stall-watchdog modes: opencode-stall emits one event then goes silent without
+  // exiting (a live hang); opencode-delayed-shutdown does the same but lingers 2.5s after
+  // SIGTERM, keeping the stall poll ticking during a wall-clock kill; opencode-steady keeps
+  // emitting past --stall-timeout, then completes.
+  const sid = "ses_smoke_opencode_stall";
+  const emit = (value) => fs.writeSync(1, `${JSON.stringify(value)}\n`);
+  process.stdin.resume();
+  process.stdin.on("end", () => {
+    emit({ type: "step_start", sessionID: sid, part: { type: "step-start" } });
+    const mode = process.env.SMOKE_MODE;
+    if (mode === "opencode-delayed-shutdown") {
+      // Windows delivers no catchable SIGTERM (taskkill /f), so this lingers on POSIX only.
+      process.once("SIGTERM", () => setTimeout(() => process.exit(0), 2500));
+      setInterval(() => {}, 1000);
+    } else if (mode === "opencode-stall") {
+      setInterval(() => {}, 1000);
+    } else {
+      const tick = setInterval(() => emit({ type: "text", sessionID: sid, part: { id: "prt_1", type: "text", text: "working" } }), 200);
+      setTimeout(() => {
+        clearInterval(tick);
+        emit({ type: "text", sessionID: sid, part: { id: "prt_1", type: "text", text: "fake opencode finished" } });
+        process.exit(0);
+      }, 2500);
+    }
+  });
 } else if (process.env.SMOKE_MODE === "opencode-success") {
   let brief = "";
   process.stdin.setEncoding("utf8");

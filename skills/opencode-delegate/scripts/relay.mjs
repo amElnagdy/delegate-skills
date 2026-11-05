@@ -50,6 +50,13 @@
  *   --timeout <dur>         Relay-side watchdog (default: off). Durations use h/m/s
  *                           strings like 30m or 2h. On expiry the opencode child is
  *                           killed and result.json gets status "timeout".
+ *   --stall-timeout <dur>   Opt-in stall watchdog, h/m/s like 10m (default: off). If
+ *                           opencode writes nothing to stdout or stderr for this long it
+ *                           is killed and result.json gets status "stalled". Any output
+ *                           resets the clock. OpenCode's JSON stream reports a tool call
+ *                           only once it completes, so the clock cannot pause while a
+ *                           tool runs: set this longer than your slowest silent command
+ *                           (a full test run, a build).
  *   --out-dir <dir>         Where to write run artifacts (default: a fresh dir under
  *                           the system temp dir, so the repo under review stays clean).
  *   -h, --help              Show this help.
@@ -65,10 +72,11 @@
  * If the child dies on a signal, the exit code is 128 plus the signal number and
  * `result.json` records the signal.
  * Once the brief validates, `result.json` is written on every outcome —
- * completed, failed, timeout (the --timeout watchdog fired), aborted (the relay
- * itself was killed and forwarded the kill to opencode), or
- * opencode_unavailable. An orchestrator that polls for the
- * file must therefore also treat a non-zero exit with no file as a usage error.
+ * completed, failed, timeout (the --timeout watchdog fired), stalled (the
+ * --stall-timeout watchdog fired), aborted (the relay itself was killed and
+ * forwarded the kill to opencode), or opencode_unavailable. An orchestrator
+ * that polls for the file must therefore also treat a non-zero exit with no
+ * file as a usage error.
  */
 
 import {spawn, execSync, execFileSync, spawnSync } from "node:child_process";
@@ -210,6 +218,7 @@ function parseArgs(argv) {
     session: null,
     pure: false,
     timeout: null,
+    stallTimeout: null,
     outDir: null,
   };
   for (let i = 0; i < argv.length; i += 1) {
@@ -239,6 +248,7 @@ function parseArgs(argv) {
       case "--session": opts.session = next(); break;
       case "--pure": opts.pure = true; break;
       case "--timeout": opts.timeout = next(); flagged.add("timeout"); break;
+      case "--stall-timeout": opts.stallTimeout = next(); break;
       case "--out-dir": opts.outDir = resolve(next()); break;
       default:
         fail(`unknown option: ${arg}`);
@@ -260,6 +270,9 @@ function parseArgs(argv) {
   // --timeout must fail loudly here - a silent no-watchdog fallback would be wrong.
   if (opts.timeout !== null && parseDuration(opts.timeout) === null) {
     fail(`--timeout "${opts.timeout}" is invalid or too long; use a positive h/m/s duration no longer than about 24 days`);
+  }
+  if (opts.stallTimeout !== null && parseDuration(opts.stallTimeout) === null) {
+    fail(`--stall-timeout "${opts.stallTimeout}" is invalid or too long; use a positive h/m/s duration no longer than about 24 days`);
   }
   return opts;
 }
@@ -467,6 +480,7 @@ function makeResultWriter(opts, version, run) {
       resumed: resuming,
       resumeLast: opts.resumeLast,
       opencodeVersion: version,
+      stallTimeout: opts.stallTimeout,
       startedAt: run.startedAt,
       finishedAt: new Date().toISOString(),
       briefPath: run.briefPath,
@@ -544,6 +558,9 @@ function dispatchToOpenCode(opts, brief, run, writeResult, version) {
   const textParts = new Map(); // part.id -> latest text
   const textOrder = []; // part.ids in first-seen order
   const stderrTail = [];
+  // Stall clock: any stdout/stderr output counts as activity. OpenCode reports a tool call
+  // only on completion, so there is no in-flight signal to pause on.
+  let lastActivity = Date.now();
 
   const scan = makeEventScanner((event) => {
     // Session id: real events carry `sessionID` (camelCase); plugin notify objects
@@ -570,11 +587,13 @@ function dispatchToOpenCode(opts, brief, run, writeResult, version) {
   const stderrDecoder = new StringDecoder("utf8");
 
   child.stdout.on("data", (chunk) => {
+    lastActivity = Date.now();
     appendFileSync(run.eventsPath, chunk); // faithful raw record of the event stream
     scan(stdoutDecoder.write(chunk));
   });
 
   child.stderr.on("data", (chunk) => {
+    lastActivity = Date.now();
     process.stderr.write(chunk); // surface OpenCode progress live for the orchestrator
     const text = stderrDecoder.write(chunk);
     for (const line of text.split("\n")) {
@@ -591,25 +610,38 @@ function dispatchToOpenCode(opts, brief, run, writeResult, version) {
 
   let settled = false;
   let watchdogFired = false;
+  let stallFired = false;
   let watchdogTimer = null;
+  let stallPoll = null;
   let sigkillTimer = null;
+  const fireWatchdog = () => {
+    if (watchdogFired || settled) return;
+    watchdogFired = true;
+    child.once("exit", () => {
+      child.stdout.destroy();
+      child.stderr.destroy();
+    });
+    killChild(child);
+    sigkillTimer = setTimeout(() => {
+      if (!settled) killChild(child, "SIGKILL");
+    }, 10_000);
+  };
   const timeoutMs = opts.timeout === null ? null : parseDuration(opts.timeout);
-  if (timeoutMs !== null) {
-    watchdogTimer = setTimeout(() => {
-      watchdogFired = true;
-      child.once("exit", () => {
-        child.stdout.destroy();
-        child.stderr.destroy();
-      });
-      killChild(child);
-      sigkillTimer = setTimeout(() => {
-        if (!settled) killChild(child, "SIGKILL");
-      }, 10_000);
-    }, timeoutMs);
+  if (timeoutMs !== null) watchdogTimer = setTimeout(fireWatchdog, timeoutMs);
+  const stallMs = opts.stallTimeout === null ? null : parseDuration(opts.stallTimeout);
+  if (stallMs !== null) {
+    stallPoll = setInterval(() => {
+      if (watchdogFired || settled) return;
+      if (Date.now() - lastActivity >= stallMs) {
+        stallFired = true;
+        fireWatchdog();
+      }
+    }, Math.min(5_000, Math.max(250, Math.floor(stallMs / 4))));
   }
 
   const clearWatchdog = () => {
     if (watchdogTimer) clearTimeout(watchdogTimer);
+    if (stallPoll) clearInterval(stallPoll);
     if (sigkillTimer) clearTimeout(sigkillTimer);
   };
 
@@ -685,7 +717,7 @@ function dispatchToOpenCode(opts, brief, run, writeResult, version) {
     const succeeded = code === 0 && !watchdogFired;
     const mapped = code ?? (constants.signals[signal] ? 128 + constants.signals[signal] : 1);
     const result = writeResult({
-      status: succeeded ? "completed" : watchdogFired ? "timeout" : "failed",
+      status: succeeded ? "completed" : stallFired ? "stalled" : watchdogFired ? "timeout" : "failed",
       exitCode: succeeded ? 0 : mapped === 0 ? 1 : mapped,
       signal: signal ?? null,
       sessionId,
@@ -693,7 +725,8 @@ function dispatchToOpenCode(opts, brief, run, writeResult, version) {
       touchedFiles: gitTouchedFiles(opts.cd),
       cost: sawCost ? Number(totalCost.toFixed(6)) : null,
       ...(succeeded ? {} : { stderrTail: stderrTail.slice(-20) }),
-      ...(watchdogFired ? { error: `opencode did not finish within --timeout ${opts.timeout}; killed by the relay watchdog` } : {}),
+      ...(watchdogFired && !stallFired ? { error: `opencode did not finish within --timeout ${opts.timeout}; killed by the relay watchdog` } : {}),
+      ...(stallFired ? { error: `opencode produced no output for --stall-timeout ${opts.stallTimeout}; killed by the relay stall watchdog — inspect the working tree, then resume the session with a delta brief` } : {}),
     });
     printSummary(result, run.resultPath);
     process.exit(result.exitCode);
@@ -754,7 +787,7 @@ function printSummary(result, resultPath) {
   lines.push("");
   lines.push(`relay: ${result.status} (exit ${result.exitCode}${result.signal ? `, killed by ${result.signal}` : ""})  ·  opencode ${result.opencodeVersion ?? "?"}`);
   if (result.signal === "SIGKILL" && result.status === "failed") lines.push("hint: the host killed the process (commonly the OOM killer or a supervisor timeout) — this is not an opencode error; check host memory and re-dispatch, or split the task into smaller briefs.");
-  if (result.signal === "SIGTERM" && result.status === "failed") lines.push("hint: something outside the relay terminated opencode (a supervisor, the session ending, or a manual kill) — when the relay itself does the killing it reports status \"timeout\" or \"aborted\" instead; inspect the working tree before re-dispatching.");
+  if (result.signal === "SIGTERM" && result.status === "failed") lines.push("hint: something outside the relay terminated opencode (a supervisor, the session ending, or a manual kill) — when the relay itself does the killing it reports status \"timeout\", \"stalled\", or \"aborted\" instead; inspect the working tree before re-dispatching.");
   if (result.resumed) lines.push("mode: resumed existing session");
   if (result.sessionId) lines.push(`session id (resume with: --session ${result.sessionId}): ${result.sessionId}`);
   if (typeof result.cost === "number") lines.push(`cost: $${result.cost}`);

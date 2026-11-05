@@ -393,7 +393,8 @@ Per skill — platform, CLI version, and what the run exercised:
   whole-process-tree timeout/abort cleanup. Upstream's launcher is UNIX-only. No Windows or Linux
   run is recorded.
 - `opencode-delegate`, `vibe-delegate` — contract-tested only: argument validation, bounded version
-  preflight, missing binary, result parsing, and whole-process-tree timeout/abort cleanup. No
+  preflight, missing binary, result parsing, and whole-process-tree timeout/abort cleanup
+  (`opencode-delegate` also `--stall-timeout`, against a fake CLI that goes silent). No
   end-to-end run is recorded here.
 - `cline-delegate` — macOS, `cline` 3.0.52: current-binary unauthenticated plan probe reached
   `run_start` with the fixed positional instruction plus the real brief on stdin, accepted a
