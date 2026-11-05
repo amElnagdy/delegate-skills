@@ -234,6 +234,36 @@ h.check("codex ignore-user-config: forwarded before exec options",
   isolatedRun.status === 0 && isolatedArgs[0] === "exec" && isolatedArgs[1] === "--ignore-user-config");
 h.check("codex ignore-user-config: recorded in result.json",
   existsSync(join(isolatedOutDir, "result.json")) && h.result(isolatedOutDir).ignoreUserConfig === true);
+// ---- codex --no-project-doc keeps project AGENTS.md docs out of the run ----
+const PROJECT_DOC_OVERRIDE = "project_doc_max_bytes=0";
+const projectDocOverrides = (args) => configOverrides(args).filter((override) => override.startsWith("project_doc_max_bytes"));
+const captureProjectDoc = (name, flags) => {
+  const outDir = join(h.scratch, `out-project-doc-${name}-codex`);
+  const argsFile = join(h.scratch, `args-project-doc-${name}-codex`);
+  const run = spawnSync(process.execPath,
+    [h.relayPath("codex"), "--brief", h.briefPath, "--cd", h.freshRepo(`work-project-doc-${name}-codex`), "--out-dir", outDir, ...flags],
+    { env: { ...h.baseEnv, SMOKE_MODE: "capture", SMOKE_ARGS_FILE: argsFile }, encoding: "utf8" });
+  const args = existsSync(argsFile) ? JSON.parse(readFileSync(argsFile, "utf8")) : [];
+  const result = existsSync(join(outDir, "result.json")) ? h.result(outDir) : null;
+  return { status: run.status, args, result };
+};
+const projectDocFresh = captureProjectDoc("fresh", ["--read-only", "--no-project-doc"]);
+h.check("codex no-project-doc: forwarded as the only project_doc_max_bytes override and recorded",
+  projectDocFresh.status === 0
+    && JSON.stringify(projectDocOverrides(projectDocFresh.args)) === JSON.stringify([PROJECT_DOC_OVERRIDE])
+    && projectDocFresh.result?.noProjectDoc === true);
+const projectDocOmitted = captureProjectDoc("omitted", ["--read-only"]);
+h.check("codex no-project-doc: omitted, no project_doc_max_bytes override is sent and false is recorded",
+  projectDocOmitted.status === 0 && projectDocOmitted.args.length > 0
+    && projectDocOverrides(projectDocOmitted.args).length === 0 && projectDocOmitted.result?.noProjectDoc === false);
+// Codex keeps every -c that follows `resume` and drops any placed before it.
+const projectDocSession = captureProjectDoc("session", ["--session", "thread-abc", "--no-project-doc"]);
+h.check("codex no-project-doc: re-applied after resume on --session",
+  projectDocSession.status === 0 && projectDocSession.args.slice(0, 3).join(" ") === "exec resume thread-abc"
+    && JSON.stringify(projectDocOverrides(projectDocSession.args.slice(3))) === JSON.stringify([PROJECT_DOC_OVERRIDE]));
+const projectDocHelp = spawnSync(process.execPath, [h.relayPath("codex"), "--help"], { encoding: "utf8" });
+h.check("codex no-project-doc: help documents the flag",
+  projectDocHelp.status === 0 && projectDocHelp.stdout.includes("--no-project-doc"));
 // ---- codex --clean-env isolates both preflight and dispatch ----
 const cleanEnvHelp = spawnSync(process.execPath, [h.relayPath("codex"), "--help"], { encoding: "utf8" });
 h.check("codex clean-env: help scopes the flag to inherited variables, not same-user secrets",

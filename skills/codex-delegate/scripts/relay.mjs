@@ -65,6 +65,10 @@
  *                           same-user secrets.
  *   --ignore-user-config    Do not load Codex user config. Authentication still uses CODEX_HOME;
  *                           useful for isolated reviews that must not start ambient MCP servers.
+ *   --no-project-doc        Do not load project AGENTS.md docs, passed as
+ *                           `-c project_doc_max_bytes=0`. Codex's user-level instructions
+ *                           in CODEX_HOME still load. Pass it again on every resume: Codex
+ *                           does not carry it over.
  *   --keep-env <name>       Keep one additional variable under --clean-env (repeatable).
  *                           Required for environment-backed auth and other stripped variables.
  *   --skip-git-repo-check   Allow running outside a git repository.
@@ -187,6 +191,7 @@ function parseArgs(argv) {
     session: null,
     cleanEnv: false,
     ignoreUserConfig: false,
+    noProjectDoc: false,
     keepEnv: [],
     skipGitRepoCheck: false,
     timeout: null,
@@ -221,6 +226,7 @@ function parseArgs(argv) {
       case "--session": opts.session = next(); break;
       case "--clean-env": opts.cleanEnv = true; break;
       case "--ignore-user-config": opts.ignoreUserConfig = true; break;
+      case "--no-project-doc": opts.noProjectDoc = true; break;
       case "--keep-env": opts.keepEnv.push(next()); break;
       case "--skip-git-repo-check": opts.skipGitRepoCheck = true; break;
       case "--timeout": opts.timeout = next(); flagged.add("timeout"); break;
@@ -457,14 +463,15 @@ function buildArgv(opts, finalPath) {
     argv.push("-s", opts.sandbox);
   }
   if (opts.model) argv.push("-m", opts.model);
-  // `-c` is accepted by the resume subcommand, so the effort, subagent, web search and network overrides
-  // apply to fresh and resumed runs alike. Keep every `-c` after `resume`: once one
+  // `-c` is accepted by the resume subcommand, so the effort, subagent, web search, network and
+  // project-doc overrides apply to fresh and resumed runs alike. Keep every `-c` after `resume`: once one
   // follows it, Codex drops any placed before it.
   if (opts.effort !== null) argv.push("-c", `model_reasoning_effort=${opts.effort}`);
   if (opts.subagentModel !== null) argv.push("-c", `agents.default_subagent_model=${opts.subagentModel}`);
   if (opts.subagentEffort !== null) argv.push("-c", `agents.default_subagent_reasoning_effort=${opts.subagentEffort}`);
   if (opts.webSearch !== null) argv.push("-c", `web_search=${opts.webSearch}`);
   if (opts.networkAccess) argv.push("-c", "sandbox_workspace_write.network_access=true");
+  if (opts.noProjectDoc) argv.push("-c", "project_doc_max_bytes=0");
   if (opts.skipGitRepoCheck) argv.push("--skip-git-repo-check");
   argv.push("-"); // read the prompt from stdin
   return argv;
@@ -533,6 +540,7 @@ function makeResultWriter(opts, version, run) {
       session: opts.session,
       cleanEnv: opts.cleanEnv,
       ignoreUserConfig: opts.ignoreUserConfig,
+      noProjectDoc: opts.noProjectDoc,
       keepEnv: opts.keepEnv,
       codexVersion: version,
       startedAt: run.startedAt,
@@ -626,7 +634,7 @@ function dispatchToCodex(opts, brief, run, writeResult, env) {
   // shell:true on Windows so the codex.cmd shim resolves (see codexVersion). Safe:
   // the brief is fed via child.stdin below — never argv — and argv holds only
   // sandbox enums, model names (including subagents), pattern-checked efforts
-  // and web search modes, the fixed network override, and file paths.
+  // and web search modes, the fixed network and project-doc overrides, and file paths.
   // detached on POSIX: the child leads a new process group so killChild can fell the whole tree
   const child = spawnShellLaunch("codex", argv, { cwd: opts.cd, stdio: ["pipe", "pipe", "pipe"], detached: process.platform !== "win32", env }, process.platform === "win32");
 
