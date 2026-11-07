@@ -30,7 +30,7 @@
  *     missMeansFalse?: boolean,
  *   },
  *   modelProbe: null
- *     | { args: string[], format: "lines"|"cursor"|"grok"|"table"|"commandcode" }
+ *     | { args: string[], format: "lines"|"cursor"|"grok"|"table"|"commandcode"|"trae" }
  *     | { envDir: string, homeSubdir: string, file: string, format: "codex-cache" }
  *     | { static: readonly string[] },
  *   usageProbe: null | {
@@ -428,6 +428,28 @@ export const IMPLEMENTERS = Object.freeze([
 
     winShell: false,
 
+  },
+  {
+    key: "trae",
+    skill: "trae-delegate",
+    binary: "traecli",
+    versionArgs: ["--version"],
+    // traecli is a Codex fork and, like codex, writes login status to stderr
+    // (stdout stays empty), so the probe must read stderr.
+    authProbe: {
+      args: ["login", "status"],
+      successPattern: /logged in/i,
+      failPattern: /not logged in/i,
+    },
+    // `traecli models` prints nothing usable, but `traecli debug models` renders
+    // the account's catalog as JSON ({"models":[{"slug":...}, ...]}). It needs a
+    // signed-in session, and fails gracefully to an empty list when there is none.
+    modelProbe: { args: ["debug", "models"], format: "trae" },
+    // No verified one-per-session local store; TRAE CLI keeps its state in
+    // ~/.trae/cli/*.sqlite, which this script must not open. Unknown, not guessed.
+    usageProbe: null,
+    supports: ["model", "permissionMode", "sandbox", "timeout", "readOnly"],
+    winShell: true,
   },
 ]);
 
