@@ -290,6 +290,19 @@ function failedModels() {
 }
 
 function parseModelLines(raw, format) {
+  if (format === "trae") {
+    // `traecli debug models` prints a JSON document ({"models":[{"slug":...}]}),
+    // not line-oriented text, so it is parsed whole instead of split into lines.
+    try {
+      const parsed = JSON.parse(raw);
+      const slugs = (parsed.models || [])
+        .map((model) => model && model.slug)
+        .filter((slug) => typeof slug === "string" && slug);
+      return modelResult(slugs);
+    } catch {
+      return failedModels();
+    }
+  }
   const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   let identifiers;
   if (format === "cursor") {

@@ -65,12 +65,18 @@ later-edited project config fails closed until it is reviewed and written again 
 | `copilot` | copilot-delegate | `copilot` | model, effort, timeout, readOnly |
 | `warp` | warp-delegate | `oz` | model, timeout |
 | `zcode` | zcode-delegate | `zcode` | permissionMode, timeout, readOnly |
+| `trae` | trae-delegate | `traecli` | model, permissionMode, sandbox, timeout, readOnly |
 
 ZCode carries its `--mode` as `permissionMode`, and only `plan` and `yolo` are accepted: ZCode also
 documents `build` and `edit`, but a headless run has no permission client, so those two block every
 write tool and exit 0 having changed nothing. ZCode has no `--model` flag — the model is chosen in
 the CLI's own config file — so `model` is not a dial for `zcode` lanes. ZCode also ships its CLI
 inside the desktop app rather than on PATH, so discovery falls back to the installed app bundle.
+
+TRAE CLI (`traecli`) is a fork of the OpenAI Codex CLI. Its `sandbox` dial
+(`read-only`/`workspace-write`/`danger-full-access`) governs autonomy, alongside the
+`--permission-mode` dial (`default`/`bypass_permissions`/`auto`); traecli exposes no `effort` or
+`variant`, so reasoning intensity is not a `trae` lane dial.
 
 OpenCode uses `variant` for reasoning intensity, not `effort`. Do not write `effort` on an `opencode` lane.
 Muse `effort` is `--reasoning-effort` (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`). Muse `--provider echo|meta` is relay-only — do not write `provider` on a `muse` lane.
