@@ -164,6 +164,58 @@ export function runDelegateSetup(h) {
     agyReport?.discovered.find(({ key }) => key === "agy")?.version === "1.2.3",
   );
 
+  const opencodeProbeDir = join(h.scratch, "discover-opencode");
+  mkdirSync(opencodeProbeDir);
+  const opencodeProbeSource = `
+const [command, subcommand] = process.argv.slice(2);
+if (command === "--version") {
+  console.log("fake-opencode");
+} else if (command === "auth" && subcommand === "list") {
+  process.stdout.write(process.env.OPENCODE_AUTH_OUTPUT || "");
+  process.exitCode = Number(process.env.OPENCODE_AUTH_EXIT);
+} else if (command !== "models") {
+  process.exitCode = 2;
+}
+`;
+  if (h.WIN) {
+    writeFileSync(join(opencodeProbeDir, "fake-opencode.cjs"), opencodeProbeSource);
+    writeFileSync(
+      join(opencodeProbeDir, "opencode.cmd"),
+      `@"${process.execPath}" "%~dp0fake-opencode.cjs" %*\r\n`,
+    );
+  } else {
+    const opencodeProbePath = join(opencodeProbeDir, "opencode");
+    writeFileSync(opencodeProbePath, `#!${process.execPath}\n${opencodeProbeSource}`);
+    chmodSync(opencodeProbePath, 0o755);
+  }
+  for (const [label, output, exitCode, authenticated] of [
+    ["legacy credential row", "● OpenAI oauth\n", 0, true],
+    ["ANSI-colored legacy row", "\u001b[32m●\u001b[0m OpenAI oauth\n", 0, true],
+    ["stored credential rows", "neon      neon                        stored\nOpenAI    OpenAI                      stored\nsupabase  supabase                    stored\n", 0, true],
+    ["renamed stored credential with trailing whitespace", "OpenAI-2\tOpenAI\tstored  \r\n", 0, true],
+    ["empty list", "", 0, false],
+    ["legacy empty list", "┌ Credentials\n└ 0 credentials\n", 0, false],
+    ["failed probe", "Unable to list credentials\n", 1, null],
+  ]) {
+    const opencodeDiscover = spawnSync(process.execPath, [join(setupDir, "discover.mjs")], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: opencodeProbeDir,
+        HOME: opencodeProbeDir,
+        USERPROFILE: opencodeProbeDir,
+        COMMANDCODE_BIN: "",
+        OPENCODE_AUTH_OUTPUT: output,
+        OPENCODE_AUTH_EXIT: String(exitCode),
+      },
+    });
+    const opencodeReport = opencodeDiscover.status === 0 ? JSON.parse(opencodeDiscover.stdout) : null;
+    h.check(
+      `OpenCode auth discovery: ${label} → ${authenticated}`,
+      opencodeReport?.discovered.find(({ key }) => key === "opencode")?.authenticated === authenticated,
+    );
+  }
+
   const grokProbeDir = join(h.scratch, "discover-grok");
   mkdirSync(grokProbeDir);
   const grokProbeSource = `
