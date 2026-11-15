@@ -47,6 +47,12 @@
  *   --session <id>          Continue a specific session id (ses_...); send only the delta brief.
  *   --pure                  Run OpenCode without external plugins (cleaner event stream).
  *                           1.x only; rejected on 2.x, which dropped the flag.
+ *   --isolated              Run on a private server (--standalone) without the user's global
+ *                           config or the project's: user plugins (memory plugins included),
+ *                           global opencode.json and AGENTS.md, project .opencode/ and .claude
+ *                           skills stay out; the login is kept. Skills in ~/.agents/skills are
+ *                           still discovered (2.x has no switch for them).
+ *                           2.x only; rejected on 1.x (use --pure there).
  *   --timeout <dur>         Relay-side watchdog (default: off). Durations use h/m/s
  *                           strings like 30m or 2h. On expiry the opencode child is
  *                           killed and result.json gets status "timeout".
@@ -72,7 +78,7 @@
  */
 
 import {spawn, execSync, execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync, renameSync, readFileSync, existsSync, appendFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, renameSync, readFileSync, existsSync, appendFileSync } from "node:fs";
 import {join, resolve, basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { constants, tmpdir } from "node:os";
@@ -209,6 +215,7 @@ function parseArgs(argv) {
     resumeLast: false,
     session: null,
     pure: false,
+    isolated: false,
     timeout: null,
     outDir: null,
   };
@@ -238,6 +245,7 @@ function parseArgs(argv) {
       case "--resume-last": opts.resumeLast = true; break;
       case "--session": opts.session = next(); break;
       case "--pure": opts.pure = true; break;
+      case "--isolated": opts.isolated = true; break;
       case "--timeout": opts.timeout = next(); flagged.add("timeout"); break;
       case "--out-dir": opts.outDir = resolve(next()); break;
       default:
@@ -403,6 +411,9 @@ function timestamp() {
 function buildArgv(opts, version) {
   const argv = ["run", "--format", "json"];
   if (opts.pure) argv.push("--pure");
+  // Without --standalone, `run` attaches to the shared background service, whose plugins
+  // and config were loaded from the service's own environment, not this child's.
+  if (opts.isolated) argv.push("--standalone");
   // Resume continues an existing session; --session pins a specific id, otherwise
   // --continue picks up the most recent one. OpenCode selects the agent for each
   // prompt, so preserve the relay's requested autonomy on resumed turns too.
@@ -466,6 +477,7 @@ function makeResultWriter(opts, version, run) {
       auto: opts.auto,
       resumed: resuming,
       resumeLast: opts.resumeLast,
+      isolated: opts.isolated,
       opencodeVersion: version,
       startedAt: run.startedAt,
       finishedAt: new Date().toISOString(),
@@ -519,6 +531,27 @@ function spawnShellLaunch(binary, argv, options, useShell) {
   return spawn([binary, ...argv].join(" "), { ...options, shell: true });
 }
 
+// Config inputs an inherited environment could use to bring user config back into an isolated run.
+const INHERITED_CONFIG_VARS = ["OPENCODE_CONFIG", "OPENCODE_CONFIG_CONTENT", "OPENCODE_CONFIG_PROJECT_DISABLE"];
+
+// An empty OPENCODE_CONFIG_DIR replaces the global config root on 2.x (plugins/, opencode.json,
+// AGENTS.md); credentials live in the data dir, so the login survives. The private server reads
+// these from its own environment, which is why --isolated also forces --standalone. mkdtemp gives
+// a fresh owner-only dir per run, so a reused or pre-created --out-dir cannot seed that root.
+function childEnv(opts) {
+  const env = { ...process.env, PWD: opts.cd };
+  if (!opts.isolated) return env;
+  for (const key of Object.keys(env)) {
+    if (INHERITED_CONFIG_VARS.includes(key.toUpperCase())) delete env[key];
+  }
+  return {
+    ...env,
+    OPENCODE_CONFIG_DIR: mkdtempSync(join(tmpdir(), "opencode-isolated-")),
+    OPENCODE_DISABLE_PROJECT_CONFIG: "1",
+    OPENCODE_DISABLE_CLAUDE_CODE: "1",
+  };
+}
+
 function dispatchToOpenCode(opts, brief, run, writeResult, version) {
   const argv = buildArgv(opts, version);
   // Pin the working root two ways: `cwd` sets the child's real directory, and PWD
@@ -533,7 +566,7 @@ function dispatchToOpenCode(opts, brief, run, writeResult, version) {
   // metacharacters or spaceable paths.
   const child = spawnShellLaunch("opencode", argv, {
     cwd: opts.cd,
-    env: { ...process.env, PWD: opts.cd },
+    env: childEnv(opts),
     stdio: ["pipe", "pipe", "pipe"],
     detached: process.platform !== "win32", // POSIX: lead a new process group so killChild can fell the whole tree
   }, process.platform === "win32");
@@ -743,7 +776,11 @@ function main() {
   }
   // 2.x dropped --pure from `opencode run` (same version gate as the variant dial).
   if (opts.pure && opencodeJoinsVariant(probe.version)) {
-    fail("--pure is not supported on opencode 2.x: `opencode run` dropped the flag and has no replacement; drop --pure");
+    fail("--pure is not supported on opencode 2.x: `opencode run` dropped the flag; use --isolated");
+  }
+  // 1.x has no --standalone, and its OPENCODE_CONFIG_DIR adds to the global config instead of replacing it.
+  if (opts.isolated && !opencodeJoinsVariant(probe.version)) {
+    fail("--isolated needs opencode 2.x; on 1.x use --pure");
   }
 
   dispatchToOpenCode(opts, brief, run, writeResult, probe.version);
