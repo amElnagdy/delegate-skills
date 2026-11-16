@@ -367,4 +367,60 @@ export async function runOpencode(h) {
       "--model", "fake/model",
       "--auto",
     ]));
+
+  // --stall-timeout: a live-but-silent opencode is killed early and reported "stalled";
+  // a steadily streaming run must not trip it.
+  const stallRun = (name, mode, extra = ["--stall-timeout", "1s"], timeout = "60s") => {
+    const outDir = join(h.scratch, `out-${name}-opencode`);
+    const started = Date.now();
+    const run = spawnSync(process.execPath, [
+      h.relayPath("opencode"),
+      "--brief", h.briefPath,
+      "--cd", h.freshRepo(`work-${name}-opencode`),
+      "--out-dir", outDir,
+      "--model", "fake/model",
+      "--timeout", timeout,
+      ...extra,
+    ], { env: { ...h.baseEnv, SMOKE_MODE: mode }, encoding: "utf8", timeout: 30_000 });
+    return { run, elapsed: Date.now() - started, value: existsSync(join(outDir, "result.json")) ? h.result(outDir) : {} };
+  };
+  const stall = stallRun("stall", "opencode-stall");
+  h.check("opencode stall: silent live run is killed well before --timeout and reported stalled",
+    stall.value.status === "stalled" &&
+    stall.run.status !== 0 &&
+    stall.elapsed < 20_000 &&
+    stall.value.stallTimeout === "1s" &&
+    stall.value.error?.includes("--stall-timeout 1s") &&
+    stall.value.sessionId === "ses_smoke_opencode_stall");
+  const steady = stallRun("steady", "opencode-steady");
+  h.check("opencode stall: a steadily streaming run longer than --stall-timeout completes",
+    steady.run.status === 0 && steady.value.status === "completed" &&
+    steady.value.finalMessage === "fake opencode finished");
+  const wallClock = stallRun("wall-clock-first", "opencode-stall", ["--stall-timeout", "30s"], "2s");
+  h.check("opencode stall: a wall-clock timeout that fires first keeps its cause",
+    wallClock.value.status === "timeout" &&
+    wallClock.value.error?.includes("--timeout 2s") &&
+    !wallClock.value.error?.includes("--stall-timeout"));
+  // The stall poll keeps ticking after a wall-clock kill until the child is gone, so a
+  // catcher that lingers must not relabel the run. opencode-delayed-shutdown exits 2.5s
+  // after SIGTERM: long enough for a 2s stall clock to trip if the poll did not stand
+  // down. Windows delivers no catchable SIGTERM (taskkill /f), so the fake cannot linger.
+  if (!h.WIN) {
+    const delayed = stallRun("wall-clock-delayed", "opencode-delayed-shutdown", ["--stall-timeout", "2s"], "1s");
+    h.check("opencode stall: a wall-clock timeout keeps its cause while the child shuts down",
+      delayed.run.status === 1 &&
+      delayed.value.status === "timeout" &&
+      delayed.value.exitCode === 1 &&
+      delayed.value.signal === null &&
+      delayed.value.error?.includes("--timeout 1s") &&
+      !delayed.value.error?.includes("--stall-timeout") &&
+      delayed.elapsed >= 3000);
+  }
+  const off = stallRun("stall-off", "opencode-steady", []);
+  h.check("opencode stall: --stall-timeout is opt-in (stallTimeout null by default)",
+    off.value.status === "completed" && off.value.stallTimeout === null);
+  const bad = spawnSync(process.execPath, [
+    h.relayPath("opencode"), "--brief", h.briefPath, "--model", "fake/model", "--stall-timeout", "soon",
+  ], { env: h.baseEnv, encoding: "utf8" });
+  h.check("opencode stall: invalid --stall-timeout is a usage error (exit 2)", bad.status === 2);
 }

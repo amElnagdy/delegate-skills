@@ -41,6 +41,7 @@ Options:
 | `--session <id>` | Continue a specific session id (`ses_…`); send only the delta brief. |
 | `--pure` | Run OpenCode without external plugins (cleaner event stream). Version-gated: 1.x only — opencode 2.x dropped the flag from `run` with no replacement, so the relay rejects `--pure` there (usage error) after probing the version. |
 | `--timeout <dur>` | Relay-side watchdog (e.g. `30m`, `2h`); on expiry the child is killed and `result.json` gets `status: "timeout"`. Off by default. |
+| `--stall-timeout <dur>` | Opt-in stall watchdog (e.g. `15m`): if `opencode` writes nothing to stdout or stderr for this long it is killed and `result.json` gets `status: "stalled"`. Off by default. OpenCode's JSON stream reports a tool call only once it completes, so the clock cannot pause while a command runs — set it longer than your slowest silent command (a full test run, a build). |
 | `--out-dir <dir>` | Where artifacts go (default: a fresh dir under the system temp dir). |
 
 Artifacts default to the system temp dir on purpose: the repo under review stays clean, so the
@@ -52,8 +53,8 @@ touched-files report shows only OpenCode's edits and nothing of the helper's own
 
 - `schema` — the result-format version (currently `delegate-relay.result.v1`)
 - `tool` — `opencode`
-- `status` — `completed` | `failed` | `timeout` | `aborted` | `opencode_unavailable`
-- `exitCode` — mirrors OpenCode's exit code; `128` plus the signal number if the child was killed; `127` if `opencode` isn't on PATH; on a `timeout` the relay forces a non-zero code even when the child exited `0` after the watchdog's SIGTERM
+- `status` — `completed` | `failed` | `timeout` | `stalled` | `aborted` | `opencode_unavailable`
+- `exitCode` — mirrors OpenCode's exit code; `128` plus the signal number if the child was killed; `127` if `opencode` isn't on PATH; on a `timeout` or `stalled` run the relay forces a non-zero code even when the child exited `0` after the watchdog's SIGTERM
 - `signal` — the signal that killed the child, otherwise `null`
 - `opencodeVersion` — the binary that actually ran
 - `agent` — the agent selected for this dispatch (`build`, `plan`, …)
@@ -66,10 +67,11 @@ touched-files report shows only OpenCode's edits and nothing of the helper's own
 - `cost` — total run cost in USD, summed from the step events (`null` if none were reported)
 - `briefPath` / `eventsPath` / `finalPath` — the exact brief relay sent, the raw JSON event stream, and
   the final-message file
-- `workdir`, `model`, `auto`, `resumed`, `resumeLast`, `startedAt`, `finishedAt`
-- `stderrTail` — last ~20 stderr lines; present on every run that did not complete (`failed`, `timeout`, `aborted`), absent on `completed`,
+- `workdir`, `model`, `auto`, `resumed`, `resumeLast`, `stallTimeout` (the `--stall-timeout` you
+  passed, or `null`), `startedAt`, `finishedAt`
+- `stderrTail` — last ~20 stderr lines; present on every run that did not complete (`failed`, `timeout`, `stalled`, `aborted`), absent on `completed`,
   `opencode_unavailable`, and launch failures
-- `error` — present on a launch failure, and on `timeout` and `aborted` runs
+- `error` — present on a launch failure, and on `timeout`, `stalled`, and `aborted` runs
 
 The helper also prints a summary to stdout and exits with OpenCode's exit code, so a wrapping script can
 branch on success/failure directly.
@@ -105,6 +107,11 @@ process has exited and `result.json` is written — not when a status line says 
 - **`status: timeout`:** the `--timeout` watchdog killed the run. The working tree may hold a
   half-applied change — inspect it before deciding between a longer `--timeout`, a smaller brief,
   or a resume.
+- **`status: stalled`:** `--stall-timeout` was passed and `opencode` wrote nothing to stdout or stderr for
+  that long; the relay killed it the same way as `timeout`. The clock restarts on every chunk but cannot
+  pause during a tool call (OpenCode emits tool events only on completion), so a silent command longer
+  than the limit also trips it — raise `--stall-timeout` above your slowest gate. Inspect the working
+  tree, then resume the session (`--session <id>` from `result.json`) with a delta brief.
 - **`status: aborted`:** the relay itself was killed (its parent's timeout, a stopped task, a
   closed terminal) and forwarded the kill to opencode. The result is written before the relay exits;
   inspect the working tree before re-dispatching. On native Windows a hard kill of the relay is
