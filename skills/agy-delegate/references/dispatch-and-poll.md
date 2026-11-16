@@ -30,7 +30,7 @@ Options:
 | --- | --- |
 | `--brief <file>` | The brief. Omit it to read the brief from stdin before passing it to `agy --print`. |
 | `--cd <dir>` | Working root for Antigravity (default: current directory). |
-| `--lane <name>` | Fleet lane from `delegate-setup` config. Applies that lane's dials; fails if the lane's `implementer` is not this relay. Explicit dial flags win. |
+| `--lane <name>` | Fleet lane from `delegate-setup` config. Applies that lane's dials; fails if the lane's `implementer` is not this relay. Explicit dial flags win. Per-orchestrator global fleets: export `DELEGATE_ORCHESTRATOR=<identity>` with the dispatch — the relay passes its environment to the fleet resolver, never guessing the identity from the implementer key, and an invalid or unconfigured selector exits 2 before the implementer starts. See the delegate-setup fleet schema. |
 | `--model <name>` | Antigravity model label. Optional; a fresh run can use Antigravity's configured default. |
 | `--effort <level>` | Reasoning effort: `low`, `medium`, or `high` (passed as agy's own `--effort`). |
 | `--project <id>` | Use an existing Antigravity project. |

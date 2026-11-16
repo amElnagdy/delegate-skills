@@ -71,6 +71,10 @@ To pick another model:
 A fleet lane (`--lane`) can set `provider`, `model`, and `effort`. Lane `effort` becomes
 `--thinking`; an explicit `--thinking` / `--model` / `--provider` flag wins over the lane.
 
+Per-orchestrator fleets: with the delegate-setup skill's global `agents` map in
+place, export `DELEGATE_ORCHESTRATOR=<identity>` when dispatching — the relay passes its
+environment to the fleet resolver and never guesses the identity from the implementer key.
+
 The relay does not forward `--api-key`, `--smol`, `--slow`, or `--plan`. Those stay omp's own CLI.
 
 ## The loop

@@ -30,7 +30,7 @@ If no CLI is found — including when you name one explicitly that does not exis
 | --- | --- |
 | `--brief <file>` | Path to the brief. Omitted → read from stdin. |
 | `--cd <dir>` | Working root for ZCode (default: current directory). |
-| `--lane <name>` | Fleet lane from `delegate-setup` config. Explicit flags win over lane dials. |
+| `--lane <name>` | Fleet lane from `delegate-setup` config. Explicit flags win over lane dials. Per-orchestrator global fleets: export `DELEGATE_ORCHESTRATOR=<identity>` with the dispatch — the relay passes its environment to the fleet resolver, never guessing the identity from the implementer key, and an invalid or unconfigured selector exits 2 before the implementer starts. See the delegate-setup fleet schema. |
 | `--mode <mode>` | ZCode's `--mode`. **Only `plan` and `yolo` are accepted** (see below). Default `yolo`. |
 | `--read-only` | Shortcut for `--mode plan` (review/diagnosis, no edits). |
 | `--disallowed-tools <list>` | Comma/space-separated denylist, e.g. `"Write,Edit,Bash"`. Enforced by ZCode. |

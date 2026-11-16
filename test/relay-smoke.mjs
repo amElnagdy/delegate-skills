@@ -69,6 +69,9 @@ function parseOnly(argv) {
 }
 
 const only = parseOnly(process.argv.slice(2));
+// Each fake relay run must start without a seat inherited from the developer's
+// shell. Individual fleet tests set DELEGATE_ORCHESTRATOR explicitly where needed.
+delete process.env.DELEGATE_ORCHESTRATOR;
 const h = createHarness();
 const shimless = new Set(["package-shape", "syntax"]);
 const needsShim = !only || [...only].some((name) => !shimless.has(name));
