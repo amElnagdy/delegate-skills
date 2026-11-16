@@ -2,14 +2,14 @@
 
 This repo is a [Skills CLI](https://github.com/vercel-labs/skills) package of **delegation skills** —
 skills that let an orchestrating agent drive a separate CLI coding agent as an implementer, then review
-and land the result. Nineteen implementer skills ship today: `claude-delegate` (Claude Code),
+and land the result. Twenty implementer skills ship today: `claude-delegate` (Claude Code),
 `cline-delegate` (Cline CLI), `codex-delegate` (OpenAI Codex), `opencode-delegate` (OpenCode),
 `agy-delegate` (Google Antigravity), `grok-delegate` (Grok Build), `kimi-delegate` (Kimi Code),
 `muse-delegate` (Muse Code),
 `qoder-delegate` (Qoder CLI), `vibe-delegate` (Mistral Vibe), `cursor-delegate` (Cursor Agent CLI),
 `pi-delegate` (Pi CLI), `omp-delegate` (Oh My Pi), `aider-delegate` (Aider), `copilot-delegate` (GitHub Copilot CLI),
-`warp-delegate` (Warp Agent CLI), `zcode-delegate` (Z.AI ZCode), `commandcode-delegate` (Command Code), and
-`mcode-delegate` (MiniMax Code); siblings like
+`warp-delegate` (Warp Agent CLI), `zcode-delegate` (Z.AI ZCode), `commandcode-delegate` (Command Code),
+`mcode-delegate` (MiniMax Code), and `trae-delegate` (TRAE CLI); siblings like
 `gemini-delegate` can be added
 later without renaming the repo. One **utility** skill
 ships alongside them: `delegate-setup` (configure fleet lanes — setup only, never dispatches).
@@ -23,7 +23,7 @@ jargon. Use these terms; don't invent synonyms.
 | --- | --- | --- |
 | **delegate** / **delegation** | the activity, and this skill family | "relay" (as the activity), "hand-off", "offload" |
 | **orchestrator** | the driving agent (Claude Code, …) | "controller", "driver" |
-| **implementer** | the separate agent (Claude, Cline, Codex, OpenCode, Antigravity, Grok, Kimi, Muse, Qoder, Vibe, Cursor, Pi, Oh My Pi, Aider, Copilot, Warp, ZCode, Command Code, MiniMax Code) | "worker", "sub-agent", "executor" |
+| **implementer** | the separate agent (Claude, Cline, Codex, OpenCode, Antigravity, Grok, Kimi, Muse, Qoder, Vibe, Cursor, Pi, Oh My Pi, Aider, Copilot, Warp, ZCode, Command Code, MiniMax Code, TRAE) | "worker", "sub-agent", "executor" |
 | **brief** | the self-contained task spec sent to the implementer | "task file", "the prompt", "the spec" |
 | **gates** | the project's test/lint/build commands | "checks", "CI" |
 | **dispatch** | sending the brief to the implementer | "fire off", "kick off" |
@@ -51,6 +51,7 @@ jargon. Use these terms; don't invent synonyms.
 | `session`, `-p`/`--prompt`, `--output-format json` (JSONL), `tools`, `--allow-all-tools`, `mode plan`, `--resume`/`--continue`, `--model`, `--effort`, `copilot login` / env tokens, `sandbox` (experimental, MXC) | GitHub Copilot CLI's own terms — use verbatim when discussing `copilot` | don't paraphrase them |
 | `exec`, `--input -`, `--output-format stream-json`, `--permission` (`smart`/`full`/`off`), `session` / `--session`, `--model` (`provider/model#variant`), `--effort`, `--append-system-prompt-file`, `exec.completed` | MiniMax Code's own terms — use verbatim when discussing `mcode` | never say `mcode exec` has a sandbox or a read-only/plan mode: the relay's `--read-only` is a prompt plus the tripwire, and `smart` already approves writes and deletes headlessly. `ask` is TUI/ACP-only |
 | `mode` (`build`/`edit`/`plan`/`yolo`), `session` (`sess_…`), `goal` (`--target`), `--attach`, `app-server`, `plugins`, `skills` | ZCode's own terms — use verbatim when discussing `zcode` | don't call `mode` a sandbox or a permission mode; never present `build`/`edit` as usable headlessly |
+| `exec`, `--json`, `-o`/`--output-last-message`, `-C`/`--cd`, `-s`/`--sandbox` (`read-only`/`workspace-write`/`danger-full-access`), `--permission-mode` (`default`/`bypass_permissions`/`auto`), `--ephemeral`, `exec resume`, `login status` | TRAE CLI's own terms — use verbatim when discussing `traecli` (a fork of the OpenAI Codex CLI) | don't paraphrase them |
 
 Banned on sight: coined umbrella terms in user-facing surfaces (README headings, `skills.sh.json`
 titles); any reference to the author's local machine or config; model/version pins (`GPT-5.x` →
@@ -59,7 +60,7 @@ version a run was made against is what makes the claim checkable; and claims tha
 ("verified" without a run → hedge or cut). Every
 CLI flag, field, and command in the docs must match the installed implementer CLI (`claude` /
 `cline` / `codex` / `opencode` / `agy` / `grok` / `kimi` / `muse` / `qodercli` / `vibe` / `cursor-agent` / `pi` /
-`aider` / `copilot` / `oz` / `omp` / `zcode` / `cmd` / `mcode`) and the skill's `relay.mjs`.
+`aider` / `copilot` / `oz` / `omp` / `zcode` / `cmd` / `mcode` / `traecli`) and the skill's `relay.mjs`.
 
 ## Conventions
 

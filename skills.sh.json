@@ -23,7 +23,8 @@
         "warp-delegate",
         "zcode-delegate",
         "commandcode-delegate",
-        "mcode-delegate"
+        "mcode-delegate",
+        "trae-delegate"
       ]
     },
     {

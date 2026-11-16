@@ -79,6 +79,7 @@ Skip setup when you want one implementer or one-off dials. Pick the skill for a 
 | [`pi-delegate`](skills/pi-delegate/SKILL.md) | [Pi](https://github.com/earendil-works/pi-mono) (`pi`) | full local tools — no sandbox, no permission modes [^none]; project trust opt-in | `--read-only` (`read,grep,find,ls`) | `--resume-last`, `--session <id>` |
 | [`omp-delegate`](skills/omp-delegate/SKILL.md) | [Oh My Pi](https://github.com/can1357/oh-my-pi) (`omp`) | `--yolo` (`tools.approvalMode: yolo`); project `.omp` extras off unless `--approve` | `--read-only` (`read,grep,glob`) | `--resume-last`, `--session <id>` |
 | [`qoder-delegate`](skills/qoder-delegate/SKILL.md) | [Qoder](https://docs.qoder.com/en/cli/quick-start) (`qodercli`) | `auto` permission mode; bypass opt-in | `--permission-mode plan` | `--resume-last`, `--resume <id>` |
+| [`trae-delegate`](skills/trae-delegate/SKILL.md) | TRAE CLI 2.0 (`traecli`) — a fork of the OpenAI Codex CLI | `--sandbox workspace-write` | `--read-only` (`--sandbox read-only`) | `--resume-last`, `--session <id>` |
 | [`vibe-delegate`](skills/vibe-delegate/SKILL.md) | [Mistral Vibe](https://github.com/mistralai/mistral-vibe) (`vibe`) | `accept-edits`; `--full-access` opt-in | `--plan-only` (`plan` agent) | `--resume-last`, `--session <id>` |
 | [`copilot-delegate`](skills/copilot-delegate/SKILL.md) | [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-cli) (`copilot`) | `--allow-all-tools` opt-in; headless auto-deny otherwise | `--read-only` (`--mode plan`) | `--resume-last`, `--session <id>` |
 | [`warp-delegate`](skills/warp-delegate/SKILL.md) | [Warp Agent CLI](https://docs.warp.dev/cli/) (`oz`) | full local tools — no sandbox, no permission modes [^none] | — [^none] | `--conversation <id>` |
@@ -382,6 +383,8 @@ Per skill — platform, CLI version, and what the run exercised:
   the same binary ran normally outside it. No Store `pwsh` is installed here, so the shell-launch
   form of that denial (`0xC0070005` on every command) rests on the report in issue #116. No Linux
   run is recorded.
+- `trae-delegate` — contract-tested; a live read-only dispatch succeeded end-to-end against
+  `traecli` 0.213.1.
 - `muse-delegate` — macOS, Muse Code 1.4.7: a fresh write dispatch against a throwaway repo
   created only the briefed file (`touchedFiles` reported exactly it, `status: "completed"`, exit 0,
   a `sessionId` captured); a `--session <id>` continuation in that same session appended the briefed

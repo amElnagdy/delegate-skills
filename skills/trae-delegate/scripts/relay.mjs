@@ -1,0 +1,805 @@
+#!/usr/bin/env node
+/**
+ * delegate-skills · trae-delegate · relay.mjs
+ *
+ * Dispatch a self-contained brief to TRAE CLI 2.0 (`traecli exec`), capture the
+ * run, and write a structured result the orchestrating agent can review. The
+ * orchestrator runs this one command and reads the result JSON — every
+ * traecli-specific mechanic lives in here, which keeps the skill
+ * orchestrator-agnostic. TRAE CLI is a fork of the OpenAI Codex CLI and exposes
+ * the same `exec` surface, so this relay mirrors codex-delegate's, adapted to
+ * traecli's verified flags.
+ *
+ * Trust posture: relay.mjs itself makes no network calls, reads or writes no
+ * credentials, and sends no telemetry; it has no dependencies (Node built-ins
+ * only). It shells out only to `traecli` and `git`. The `traecli` process it
+ * launches does authenticate — exactly as you do at the terminal. Read this
+ * file before you run it.
+ *
+ * It deliberately does NOT commit. Whether traecli's sandbox can write `.git`
+ * varies by version, OS, and execution path, so committing is always the
+ * orchestrator's job — after it reviews the diff and re-runs the project gates.
+ *
+ * Usage:
+ *   node relay.mjs --brief <file> [options]
+ *   cat brief.txt | node relay.mjs [options]
+ *
+ * Options:
+ *   --brief <file>          Path to the brief. If omitted, the brief is read from stdin.
+ *   --cd <dir>              Working root for traecli (default: current directory).
+ *   --lane <name>           Fleet lane from delegate-setup config (dials apply; explicit flags win).
+ *   --model <name>          traecli model (default: traecli's own configured default).
+ *   --permission-mode <mode>
+ *                           Permission preset, passed to traecli as `--permission-mode`
+ *                           (default: traecli's own configured default). One of:
+ *                           default | bypass_permissions | auto.
+ *   --sandbox <mode>        read-only | workspace-write | danger-full-access
+ *                           (default: workspace-write).
+ *   --read-only             Shortcut for --sandbox read-only (review/diagnosis, no edits).
+ *   --ephemeral             Run without persisting session files to disk, passed to
+ *                           traecli as `--ephemeral`.
+ *   --resume-last           Continue the most recent traecli session; send only the delta brief.
+ *                           An explicit --sandbox/--read-only override applies to the resumed turn.
+ *   --session <id>          Continue a specific traecli session by thread id (from a prior
+ *                           result.json). Safer than --resume-last when other traecli runs
+ *                           may have happened since - "last" is global, not per-repo.
+ *                           Mutually exclusive with --resume-last.
+ *   --output-schema <file>  Path to a JSON Schema file describing the model's final
+ *                           response shape, passed to traecli as `--output-schema`.
+ *   --clean-env             Launch traecli and its version preflight with only runtime basics.
+ *                           Changes inherited variables only; does not protect files or other
+ *                           same-user secrets.
+ *   --ignore-user-config    Do not load traecli user config. Authentication still uses TRAE_HOME;
+ *                           useful for isolated reviews that must not start ambient MCP servers.
+ *   --keep-env <name>       Keep one additional variable under --clean-env (repeatable).
+ *                           Required for environment-backed auth and other stripped variables.
+ *   --skip-git-repo-check   Allow running outside a git repository.
+ *   --timeout <dur>         Relay-side watchdog (default: off). Durations use h/m/s
+ *                           strings like 30m or 2h. On expiry the traecli child is killed
+ *                           and result.json gets status "timeout". traecli has no timeout
+ *                           flag of its own, so the watchdog is relay-only.
+ *   --out-dir <dir>         Where to write run artifacts (default: a fresh dir under
+ *                           the system temp dir, so the repo under review stays clean).
+ *   -h, --help              Show this help.
+ *
+ * Result: written to <out-dir>/result.json and summarized on stdout —
+ *   status, exitCode, signal, traeVersion, threadId (for a later resume), finalMessage
+ *   (traecli's own report), touchedFiles (git porcelain, null if git can't report), stderrTail on a
+ *   run that did not succeed, and the paths to events.jsonl, final.txt and stderr.txt. stderr.txt
+ *   holds the complete stderr stream; stderrTail is up to 20 nonblank lines from its final
+ *   64 KiB, with a partial first line marked as truncated.
+ *
+ * Exit codes: a pre-run usage error (bad/missing args, empty brief) exits 2
+ * before any run and writes no result file; a missing `traecli` binary exits 127;
+ * otherwise the exit code mirrors traecli's own (0 success, non-zero failure).
+ * If the child dies on a signal, the exit code is 128 plus the signal number and
+ * `result.json` records the signal.
+ * Once the brief validates, `result.json` is written on every outcome —
+ * completed, failed, timeout (the --timeout watchdog fired), aborted (the relay
+ * itself was killed and forwarded the kill to traecli), or trae_unavailable. An
+ * orchestrator that polls for the file must therefore also treat a non-zero exit
+ * with no file as a usage error.
+ *
+ * Windows: a sandboxed run (read-only or workspace-write) gets a PATH with every
+ * `WindowsApps` entry removed, for the preflight and the dispatch alike. The Microsoft
+ * Store installs apps — including PowerShell 7 — under a folder whose ACLs deny
+ * execution to the restricted token traecli's sandbox runs commands with, and traecli
+ * prefers a `pwsh` found on PATH, so a Store `pwsh` makes every sandboxed command
+ * fail with 0xC0070005. Without those entries traecli falls back to System32
+ * powershell.exe. `--sandbox danger-full-access` runs without the restricted token
+ * and gets PATH unchanged.
+ */
+
+import {spawn, execSync, execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, writeFileSync, renameSync, readFileSync, existsSync, appendFileSync, openSync, fstatSync, readSync, closeSync } from "node:fs";
+import {join, resolve, basename, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { constants, tmpdir } from "node:os";
+import { StringDecoder } from "node:string_decoder";
+
+const VERSION_PROBE_TIMEOUT_MS = 10_000;
+const MAX_TIMER_MS = 2_147_483_647;
+const MAX_STDERR_TAIL_BYTES = 64 * 1024;
+const SANDBOX_MODES = new Set(["read-only", "workspace-write", "danger-full-access"]);
+const PERMISSION_MODES = new Set(["default", "bypass_permissions", "auto"]);
+const SAFE_SESSION = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+const SAFE_ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+// Model reaches cmd.exe on win32 (shell:true for the traecli.cmd shim) — same shell-safe
+// family as grok/pi. Keep in lockstep with delegate-setup MODEL_TOKEN.shellSafe.
+const SAFE_MODEL = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
+
+const IMPLEMENTER_KEY = "trae";
+
+function applyFleetLane(opts, flagged) {
+  if (!opts.lane) return;
+  const script = join(dirname(fileURLToPath(import.meta.url)), "../../delegate-setup/scripts/lane.mjs");
+  if (!existsSync(script)) {
+    fail("--lane requires the delegate-setup skill installed beside this relay");
+  }
+  const r = spawnSync(
+    process.execPath,
+    [script, "resolve", "--cwd", opts.cd, "--lane", opts.lane, "--implementer", IMPLEMENTER_KEY],
+    { encoding: "utf8", env: process.env },
+  );
+  if (r.error) fail(`lane resolve failed: ${r.error.message}`);
+  if (r.status !== 0) {
+    fail((r.stderr || "lane resolve failed").trim().replace(/^lane\.mjs:\s*/, ""));
+  }
+  let resolved;
+  try {
+    const lines = (r.stdout || "").trim().split("\n").filter(Boolean);
+    resolved = JSON.parse(lines[lines.length - 1]);
+  } catch {
+    fail("lane resolve returned invalid JSON");
+  }
+  opts.laneSource = resolved.source;
+  for (const [field, value] of Object.entries(resolved.dials || {})) {
+    if (flagged.has(field)) continue;
+    if (field === "autonomy" && (flagged.has("autonomy") || flagged.has("sandbox") || flagged.has("readOnly"))) continue;
+    if (field === "agent" && (flagged.has("agent") || flagged.has("readOnly"))) continue;
+    if (field === "sandbox" && (flagged.has("sandbox") || flagged.has("readOnly"))) continue;
+    if (field === "permissionMode" && (flagged.has("permissionMode") || flagged.has("readOnly"))) continue;
+    if (field === "planOnly" && (flagged.has("planOnly") || flagged.has("readOnly"))) continue;
+    if (field === "readOnly" && flagged.has("readOnly")) continue;
+    if (field === "force" && flagged.has("force")) continue;
+    // A lane's readOnly dial is the same sugar as the --read-only flag (see
+    // parseArgs): it means the read-only sandbox. Without this it lands on
+    // opts.readOnly, which nothing downstream reads, so a lane that says
+    // read-only would quietly run writable.
+    if (field === "readOnly" && value === true) {
+      if (!flagged.has("sandbox")) {
+        opts.sandbox = "read-only";
+        opts.sandboxConfigured = true;
+      }
+      continue;
+    }
+    opts[field] = value;
+    if (field === "sandbox") opts.sandboxConfigured = true;
+  }
+}
+
+function fail(message, code = 2) {
+  process.stderr.write(`relay: ${message}\n`);
+  process.exit(code);
+}
+
+function parseArgs(argv) {
+  const flagged = new Set();
+  const opts = {
+    lane: null,
+    laneSource: null,
+    brief: null,
+    cd: process.cwd(),
+    model: null,
+    permissionMode: null,
+    sandbox: "workspace-write",
+    sandboxConfigured: false,
+    ephemeral: false,
+    resumeLast: false,
+    session: null,
+    cleanEnv: false,
+    ignoreUserConfig: false,
+    keepEnv: [],
+    skipGitRepoCheck: false,
+    outputSchema: null,
+    timeout: null,
+    outDir: null,
+  };
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    const next = () => {
+      const value = argv[i + 1];
+      if (value === undefined) fail(`${arg} requires a value`);
+      i += 1;
+      return value;
+    };
+    switch (arg) {
+      case "-h":
+      case "--help":
+        process.stdout.write(headerComment());
+        process.exit(0);
+        break;
+      case "--brief": opts.brief = next(); break;
+      case "--cd": opts.cd = resolve(next()); break;
+      case "--lane": opts.lane = next(); break;
+      case "--model": opts.model = next(); flagged.add("model"); break;
+      case "--permission-mode": opts.permissionMode = next(); flagged.add("permissionMode"); break;
+      case "--sandbox": opts.sandbox = next(); opts.sandboxConfigured = true; flagged.add("sandbox"); break;
+      case "--read-only": opts.sandbox = "read-only"; opts.sandboxConfigured = true; flagged.add("sandbox"); flagged.add("readOnly"); break;
+      case "--ephemeral": opts.ephemeral = true; break;
+      case "--resume-last": opts.resumeLast = true; break;
+      case "--session": opts.session = next(); break;
+      case "--clean-env": opts.cleanEnv = true; break;
+      case "--ignore-user-config": opts.ignoreUserConfig = true; break;
+      case "--keep-env": opts.keepEnv.push(next()); break;
+      case "--skip-git-repo-check": opts.skipGitRepoCheck = true; break;
+      case "--output-schema": opts.outputSchema = next(); break;
+      case "--timeout": opts.timeout = next(); flagged.add("timeout"); break;
+      case "--out-dir": opts.outDir = resolve(next()); break;
+      default:
+        fail(`unknown option: ${arg}`);
+    }
+  }
+  applyFleetLane(opts, flagged);
+  if (!SANDBOX_MODES.has(opts.sandbox)) {
+    fail(`invalid --sandbox "${opts.sandbox}" (expected: ${[...SANDBOX_MODES].join(", ")})`);
+  }
+  if (opts.permissionMode !== null && !PERMISSION_MODES.has(opts.permissionMode)) {
+    fail(`invalid --permission-mode "${opts.permissionMode}" (expected: ${[...PERMISSION_MODES].join(", ")})`);
+  }
+  if (opts.model !== null && !SAFE_MODEL.test(opts.model)) {
+    fail("--model contains unsupported characters (allowed: letters, digits, . _ : / -)");
+  }
+  if (opts.keepEnv.length && !opts.cleanEnv) {
+    fail("--keep-env requires --clean-env");
+  }
+  const invalidEnvName = opts.keepEnv.find((name) => !SAFE_ENV_NAME.test(name));
+  if (invalidEnvName) {
+    fail(`invalid --keep-env "${invalidEnvName}" (expected an environment variable name)`);
+  }
+  const missingEnvName = opts.keepEnv.find((name) => process.env[name] === undefined);
+  if (missingEnvName) {
+    fail(`--keep-env "${missingEnvName}" is not set`);
+  }
+  // The watchdog is relay-only (traecli has no timeout flag), so a malformed
+  // --timeout must fail loudly here - a silent no-watchdog fallback would be wrong.
+  if (opts.timeout !== null && parseDuration(opts.timeout) === null) {
+    fail(`--timeout "${opts.timeout}" is invalid or too long; use a positive h/m/s duration no longer than about 24 days`);
+  }
+  if (opts.session !== null && opts.resumeLast) {
+    fail("--session and --resume-last are mutually exclusive; pass only one");
+  }
+  // This value reaches cmd.exe on win32 (shell:true for the traecli.cmd shim), so
+  // accept only the same shell-safe session token shape used by sibling relays.
+  if (opts.session !== null && !SAFE_SESSION.test(opts.session)) {
+    fail("--session must be a shell-safe thread id (letters, digits, . _ : -)");
+  }
+  return opts;
+}
+
+function parseDuration(duration) {
+  const match = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/.exec(duration);
+  if (!match || (!match[1] && !match[2] && !match[3])) return null;
+  try {
+    const seconds =
+      BigInt(match[1] || 0) * 3600n +
+      BigInt(match[2] || 0) * 60n +
+      BigInt(match[3] || 0);
+    const milliseconds = seconds * 1000n;
+    if (milliseconds <= 0n || milliseconds > BigInt(MAX_TIMER_MS)) return null;
+    return Number(milliseconds);
+  } catch {
+    return null;
+  }
+}
+
+function killChild(child, signal = "SIGTERM") {
+  if (!child || !child.pid) return;
+  if (process.platform === "win32") {
+    if (signal !== "SIGTERM") return;
+    try {
+      execFileSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
+        stdio: ["ignore", "ignore", "inherit"],
+      });
+    } catch {
+      // The process tree already exited.
+    }
+    return;
+  }
+  try {
+    process.kill(-child.pid, signal);
+  } catch {
+    try {
+      child.kill(signal);
+    } catch {
+      // The process group already exited.
+    }
+  }
+}
+
+function headerComment() {
+  // The leading block comment doubles as --help text.
+  const src = readFileSync(new URL(import.meta.url), "utf8");
+  const match = src.match(/\/\*\*([\s\S]*?)\*\//);
+  if (!match) return "relay.mjs — dispatch a brief to traecli exec\n";
+  return match[1].replace(/^\s*\* ?/gm, "").trim() + "\n";
+}
+
+function readBrief(opts) {
+  if (opts.brief) {
+    if (!existsSync(opts.brief)) fail(`brief file not found: ${opts.brief}`);
+    return readFileSync(opts.brief, "utf8");
+  }
+  // No --brief: read from stdin (fd 0). Empty stdin is an error.
+  if (process.stdin.isTTY) {
+    fail("no --brief given and stdin is a TTY; pass --brief <file> or pipe the brief on stdin");
+  }
+  let stdin = "";
+  try {
+    stdin = readFileSync(0, "utf8");
+  } catch {
+    stdin = "";
+  }
+  return stdin;
+}
+
+function versionProbeTimeout(opts) {
+  // The watchdog is only armed once traecli is running, so the preflight needs a bound of
+  // its own: a `traecli --version` that never returns would wedge the relay here, before
+  // any result.json exists, and --timeout could not reach it.
+  const timeoutMs = opts.timeout === null ? null : parseDuration(opts.timeout);
+  return timeoutMs === null ? VERSION_PROBE_TIMEOUT_MS : Math.min(timeoutMs, VERSION_PROBE_TIMEOUT_MS);
+}
+
+function traeEnv(opts) {
+  const env = opts.cleanEnv ? cleanEnvironment(opts) : { ...process.env };
+  if (process.platform === "win32" && opts.sandbox !== "danger-full-access") removeWindowsAppsFromPath(env);
+  return env;
+}
+
+function cleanEnvironment(opts) {
+  const keep = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "LC_CTYPE", "TERM",
+    "TMPDIR", "TRAE_HOME", "CODEX_HOME", "SystemRoot", "SystemDrive", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
+    "TEMP", "TMP", "PATHEXT", "COMSPEC", ...opts.keepEnv];
+  return Object.fromEntries(keep.filter((key) => process.env[key] !== undefined).map((key) => [key, process.env[key]]));
+}
+
+// Both Store roots: "C:\Program Files\WindowsApps\<package>" and the per-user alias
+// folder "%LOCALAPPDATA%\Microsoft\WindowsApps" (a symlink into the same protected tree).
+const WINDOWS_APPS_PATH_ENTRY = /(^|[\\/])WindowsApps([\\/]|$)/i;
+
+function removeWindowsAppsFromPath(env) {
+  // process.env is case-insensitive on win32, but a spread copy keeps the original key
+  // casing ("Path"), and a caller-built env may carry both spellings — rewrite every one.
+  for (const key of Object.keys(env)) {
+    if (key.toUpperCase() !== "PATH") continue;
+    env[key] = env[key].split(";").filter((entry) => !WINDOWS_APPS_PATH_ENTRY.test(entry)).join(";");
+  }
+}
+
+function traeVersion(probeTimeoutMs, env) {
+  try {
+    // TRAE CLI's installer may provide a `traecli.cmd` shim on Windows, and Node's
+    // CreateProcess only auto-appends .exe, never .cmd, so launching it needs
+    // shell:true there or it ENOENTs on a working install. POSIX is unaffected.
+    // (git installs a real git.exe and must NOT get this flag — see gitTouchedFiles.)
+    const options = {
+      encoding: "utf8",
+      shell: process.platform === "win32",
+      timeout: probeTimeoutMs,
+      killSignal: "SIGKILL",
+      env,
+    };
+    const output = (process.platform === "win32"
+      ? execSync("traecli --version", options)
+      : execFileSync("traecli", ["--version"], options)).trim();
+    // traecli prints two stdout lines (`traecli <version>` then `installation: …`);
+    // only the first is the version. Strip the program name so the stored value is
+    // the bare version and printSummary's `traecli ${version}` does not double it.
+    // A benign PATH warning goes to stderr and is ignored.
+    const version = output.split("\n")[0].trim().replace(/^traecli\s+/i, "");
+    return { version: version || "unknown", error: null };
+  } catch (error) {
+    if (error?.code === "ENOENT") return { version: null, error: null };
+    // shell:true routes a missing binary through cmd.exe, which reports it as a non-zero
+    // exit rather than ENOENT; that is still "not installed", not a broken install.
+    if (process.platform === "win32" &&
+        /not recognized as an internal or external command/i.test(String(error?.stderr || ""))) {
+      return { version: null, error: null };
+    }
+    // Anything else — a hung probe we killed, or a real non-zero exit — means traecli is
+    // installed but not usable. Reporting that as "unavailable" would send the caller
+    // off to reinstall a binary that is already there.
+    return { version: null, error };
+  }
+}
+
+function gitTouchedFiles(cwd) {
+  try {
+    const output = execFileSync("git", ["status", "--porcelain"], {
+      cwd,
+      encoding: "utf8",
+      timeout: 10_000,
+      killSignal: "SIGKILL",
+      stdio: ["ignore", "pipe", "ignore"],
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    return output.split("\n").map((line) => line.trimEnd()).filter(Boolean);
+  } catch {
+    return null;
+  }
+}
+
+function timestamp() {
+  // Local script (not a workflow): Date is available and fine here.
+  return new Date().toISOString().replace(/[:.]/g, "-");
+}
+
+function buildArgv(opts, finalPath) {
+  const argv = ["exec"];
+  if (opts.ignoreUserConfig) argv.push("--ignore-user-config");
+  const resuming = Boolean(opts.session || opts.resumeLast);
+  // traecli accepts shared exec options before the resume subcommand. Reapply only
+  // an explicitly selected sandbox; otherwise leave the active traecli config alone.
+  if (resuming && opts.sandboxConfigured) argv.push("-s", opts.sandbox);
+  if (opts.session) argv.push("resume", opts.session);
+  else if (opts.resumeLast) argv.push("resume", "--last");
+  // ponytail: shell:true on win32 (needed for the traecli.cmd shim) doesn't quote
+  // args, so a temp path with spaces (C:\Users\First Last\...) splits and the
+  // trailing "-" misparses. Quote the only spaceable arg in argv.
+  // Ceiling: if quoting proves too blunt, drop shell:true and resolve the shim.
+  const outPath = process.platform === "win32" ? `"${finalPath}"` : finalPath;
+  argv.push("--json", "-o", outPath);
+  if (!resuming) {
+    argv.push("-s", opts.sandbox);
+  }
+  if (opts.model) argv.push("-m", opts.model);
+  // `--permission-mode` is accepted on the resume subcommand, so it applies to fresh
+  // and resumed runs alike.
+  if (opts.permissionMode !== null) argv.push("--permission-mode", opts.permissionMode);
+  if (opts.ephemeral) argv.push("--ephemeral");
+  if (opts.outputSchema) argv.push("--output-schema", opts.outputSchema);
+  if (opts.skipGitRepoCheck) argv.push("--skip-git-repo-check");
+  argv.push("-"); // read the prompt from stdin
+  return argv;
+}
+
+function extractThreadId(event) {
+  return (
+    event.thread_id ??
+    event.threadId ??
+    (event.thread && (event.thread.thread_id ?? event.thread.id)) ??
+    null
+  );
+}
+
+function recordEventLine(eventsPath, line) {
+  // Append one stdout line to the event log and pull a thread id from it when the
+  // line is a JSON event. Non-JSON progress lines (and a newline-less final line)
+  // are preserved in events.jsonl regardless; they just carry no thread id.
+  appendFileSync(eventsPath, `${line}\n`, "utf8");
+  try {
+    return extractThreadId(JSON.parse(line));
+  } catch {
+    return null;
+  }
+}
+
+function prepareRunDir(opts, brief) {
+  const startedAt = new Date().toISOString();
+  // Default the run dir to system temp so the repo under review stays pristine —
+  // the touched-files report must show only traecli's edits, not relay's artifacts.
+  const outDir = opts.outDir || join(tmpdir(), "delegate-relay", `${basename(opts.cd) || "repo"}-${timestamp()}`);
+  mkdirSync(outDir, { recursive: true });
+  const run = {
+    startedAt,
+    eventsPath: join(outDir, "events.jsonl"),
+    finalPath: join(outDir, "final.txt"),
+    briefPath: join(outDir, "brief.txt"),
+    stderrPath: join(outDir, "stderr.txt"),
+    resultPath: join(outDir, "result.json"),
+  };
+  writeFileSync(run.briefPath, brief, "utf8");
+  writeFileSync(run.eventsPath, "", "utf8");
+  writeFileSync(run.stderrPath, "", "utf8");
+  return run;
+}
+
+function makeResultWriter(opts, version, run) {
+  // Returns writeResult(extra): merges the per-outcome fields onto the run's
+  // standing metadata, persists result.json, and returns the object it just
+  // wrote so the caller can hand it straight to printSummary.
+  return (extra) => {
+    const resuming = Boolean(opts.resumeLast || opts.session);
+    const result = {
+      schema: "delegate-relay.result.v1",
+      lane: opts.lane,
+      laneSource: opts.laneSource,
+      workdir: opts.cd,
+      sandbox: !resuming || opts.sandboxConfigured ? opts.sandbox : "(TRAE CLI config on resume)",
+      model: opts.model,
+      permissionMode: opts.permissionMode,
+      ephemeral: opts.ephemeral,
+      outputSchema: opts.outputSchema,
+      resumeLast: opts.resumeLast,
+      session: opts.session,
+      cleanEnv: opts.cleanEnv,
+      ignoreUserConfig: opts.ignoreUserConfig,
+      keepEnv: opts.keepEnv,
+      traeVersion: version,
+      startedAt: run.startedAt,
+      finishedAt: new Date().toISOString(),
+      briefPath: run.briefPath,
+      eventsPath: run.eventsPath,
+      finalPath: existsSync(run.finalPath) ? run.finalPath : null,
+      stderrPath: run.stderrPath,
+      ...extra,
+    };
+    // Publish atomically so a polling orchestrator never reads a half-written file
+    // (same idiom as claude-delegate's writeJsonAtomic and qoder-delegate).
+    const temporary = `${run.resultPath}.${process.pid}.tmp`;
+    writeFileSync(temporary, `${JSON.stringify(result, null, 2)}\n`, "utf8");
+    renameSync(temporary, run.resultPath);
+    return result;
+  };
+}
+
+function reportUnavailable(writeResult, resultPath) {
+  const result = writeResult({ status: "trae_unavailable", exitCode: 127, signal: null, threadId: null, finalMessage: "", touchedFiles: null });
+  printSummary(result, resultPath);
+  process.stderr.write("relay: `traecli` not found on PATH. Install TRAE CLI 2.0 and run `traecli login`.\n");
+  process.exit(127);
+}
+
+// ponytail: bound the summary to the final 64 KiB; read stderrPath for longer diagnostics.
+// Reading the whole log here can exhaust memory before publishing a failure or forwarding an abort.
+function stderrTail(stderrPath) {
+  let fd;
+  try {
+    fd = openSync(stderrPath, "r");
+    const size = fstatSync(fd).size;
+    const start = Math.max(0, size - MAX_STDERR_TAIL_BYTES);
+    const readStart = Math.max(0, start - 1);
+    const buffer = Buffer.alloc(size - readStart);
+    let bytesRead = 0;
+    while (bytesRead < buffer.length) {
+      const count = readSync(fd, buffer, bytesRead, buffer.length - bytesRead, readStart + bytesRead);
+      if (count === 0) break;
+      bytesRead += count;
+    }
+    let offset = start - readStart;
+    // The preceding byte distinguishes a cut line from a line starting at the window boundary.
+    const partialLine = offset > 0 && buffer[0] !== 0x0a;
+    while (partialLine && offset < bytesRead && (buffer[offset] & 0xc0) === 0x80) offset += 1;
+    const lines = buffer.subarray(offset, bytesRead).toString("utf8")
+      .split(/\r?\n/)
+      .map((line) => line.trimEnd());
+    if (partialLine && lines[0]?.trim()) lines[0] = `[truncated; read stderrPath] ${lines[0]}`;
+    return lines.filter((line) => line.trim()).slice(-20);
+  } catch {
+    // A missing or unreadable diagnostic must not prevent the run result from being published.
+    return [];
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
+function reportVersionFailure(opts, writeResult, run, error, probeTimeoutMs) {
+  const timedOut = error?.code === "ETIMEDOUT";
+  const stderr = String(error?.stderr || "").trim();
+  if (stderr) writeFileSync(run.stderrPath, `${stderr}\n`, "utf8");
+  const message = timedOut
+    ? `traecli --version preflight timed out after ${probeTimeoutMs}ms; TRAE CLI was not dispatched`
+    : `traecli --version preflight failed${Number.isInteger(error?.status) ? ` with exit ${error.status}` : ""}; TRAE CLI was not dispatched`;
+  const result = writeResult({
+    status: timedOut ? "timeout" : "failed",
+    exitCode: timedOut ? 124 : Number.isInteger(error?.status) ? error.status : 1,
+    signal: null,
+    threadId: null,
+    finalMessage: "",
+    touchedFiles: gitTouchedFiles(opts.cd),
+    stderrTail: stderrTail(run.stderrPath),
+    error: message,
+  });
+  printSummary(result, run.resultPath);
+  process.stderr.write(`relay: ${message}\n`);
+  process.exit(result.exitCode);
+}
+
+function spawnShellLaunch(binary, argv, options, useShell) {
+  if (!useShell) return spawn(binary, argv, options);
+  // Node 24 warns when shell:true is paired with an args array. The args here
+  // are already token-validated or quoted for cmd.exe, so serialize them once.
+  return spawn([binary, ...argv].join(" "), { ...options, shell: true });
+}
+
+function dispatchToTrae(opts, brief, run, writeResult, env) {
+  const argv = buildArgv(opts, run.finalPath);
+  // shell:true on Windows so the traecli.cmd shim resolves (see traeVersion). Safe:
+  // the brief is fed via child.stdin below — never argv — and argv holds only
+  // sandbox and permission-mode enums, model names, file paths, and fixed flags.
+  // detached on POSIX: the child leads a new process group so killChild can fell the whole tree
+  const child = spawnShellLaunch("traecli", argv, { cwd: opts.cd, stdio: ["pipe", "pipe", "pipe"], detached: process.platform !== "win32", env }, process.platform === "win32");
+
+  let threadId = null;
+  let stdoutBuf = "";
+
+  // Decode across chunk boundaries: a multibyte UTF-8 character split between
+  // two data events would otherwise decode as U+FFFD and corrupt the report.
+  const stdoutDecoder = new StringDecoder("utf8");
+
+  child.stdout.on("data", (chunk) => {
+    stdoutBuf += stdoutDecoder.write(chunk);
+    let nl;
+    while ((nl = stdoutBuf.indexOf("\n")) !== -1) {
+      const line = stdoutBuf.slice(0, nl);
+      stdoutBuf = stdoutBuf.slice(nl + 1);
+      if (!line.trim()) continue;
+      const tid = recordEventLine(run.eventsPath, line);
+      if (tid) threadId = tid;
+    }
+  });
+
+  child.stderr.on("data", (chunk) => {
+    process.stderr.write(chunk); // surface traecli progress live for the orchestrator
+    appendFileSync(run.stderrPath, chunk);
+  });
+
+  let settled = false;
+  let watchdogFired = false;
+  let watchdogTimer = null;
+  let sigkillTimer = null;
+  const timeoutMs = opts.timeout === null ? null : parseDuration(opts.timeout);
+  if (timeoutMs !== null) {
+    watchdogTimer = setTimeout(() => {
+      watchdogFired = true;
+      child.once("exit", () => {
+        child.stdout.destroy();
+        child.stderr.destroy();
+      });
+      killChild(child);
+      sigkillTimer = setTimeout(() => {
+        if (!settled) killChild(child, "SIGKILL");
+      }, 10_000);
+    }, timeoutMs);
+  }
+
+  const clearWatchdog = () => {
+    if (watchdogTimer) clearTimeout(watchdogTimer);
+    if (sigkillTimer) clearTimeout(sigkillTimer);
+  };
+
+  // The relay's own death must still produce a result: without this, a kill from the
+  // orchestrator's side (its command timeout, a stopped task, a closed terminal) writes
+  // no result.json and leaves the traecli child running or dying mid-edit with nothing
+  // recording why. SIGTERM/SIGHUP registration is a no-op on Windows; SIGINT works there.
+  for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) {
+    process.on(sig, () => {
+      if (settled) return;
+      settled = true;
+      clearWatchdog();
+      const finalMessage = existsSync(run.finalPath) ? readFileSync(run.finalPath, "utf8").trim() : "";
+      const abortedFields = {
+        status: "aborted",
+        exitCode: 128 + (constants.signals[sig] || 15),
+        signal: sig,
+        threadId,
+        finalMessage,
+        touchedFiles: gitTouchedFiles(opts.cd),
+        stderrTail: stderrTail(run.stderrPath),
+        error: `the relay was killed by ${sig}; traecli was terminated with it — inspect the working tree before re-dispatching`,
+      };
+      const result = writeResult(abortedFields);
+      printSummary(result, run.resultPath);
+      killChild(child);
+      setTimeout(() => {
+        killChild(child, "SIGKILL");
+        // the child may flush files during the grace window; refresh the snapshot so the
+        // artifact matches the tree the orchestrator will actually find
+        writeResult({ ...abortedFields, touchedFiles: gitTouchedFiles(opts.cd) });
+        process.exit(result.exitCode);
+      }, 2000);
+    });
+  }
+
+  // A grandchild that outlives traecli and inherited the pipes keeps stdout/stderr open, so
+  // "close" never fires and the relay waits forever, writing no result. Once traecli itself is
+  // gone the pipes hold nothing we still need — finalMessage is read from the -o file, and the
+  // stderr log is appended synchronously as it arrives — so drop them after a short drain
+  // grace and let "close" run. This is the normal-exit twin of the stream teardown the
+  // watchdog already does on the timeout path.
+  child.once("exit", () => {
+    // The implementer already exited. Leaving the watchdog armed lets a drain that
+    // overlaps the remaining budget fire, set watchdogFired, and report timeout.
+    if (!watchdogFired) clearWatchdog();
+    const drain = setTimeout(() => {
+      if (settled) return;
+      child.stdout.destroy();
+      child.stderr.destroy();
+    }, 500);
+    if (typeof drain.unref === "function") drain.unref();
+  });
+
+  child.on("error", (err) => {
+    if (settled) return;
+    settled = true;
+    clearWatchdog();
+    const result = writeResult({ status: "failed", exitCode: 1, signal: null, threadId, finalMessage: "", touchedFiles: gitTouchedFiles(opts.cd), error: String(err && err.message ? err.message : err) });
+    printSummary(result, run.resultPath);
+    process.exit(1);
+  });
+
+  child.on("close", (code, signal) => {
+    if (settled) return;
+    settled = true;
+    clearWatchdog();
+    // a descendant that ignored SIGTERM must not outlive the timeout report: once the
+    // parent is down, sweep the group (no-op where taskkill already felled the tree)
+    if (watchdogFired) killChild(child, "SIGKILL");
+    if (stdoutBuf.trim()) {
+      const tid = recordEventLine(run.eventsPath, stdoutBuf);
+      if (tid) threadId = tid;
+    }
+    const finalMessage = existsSync(run.finalPath) ? readFileSync(run.finalPath, "utf8").trim() : "";
+    // A timed-out run is never a success even if traecli handles SIGTERM by exiting 0 -
+    // orchestrators key off status and the relay exit code.
+    const succeeded = code === 0 && !watchdogFired;
+    const mapped = code ?? (constants.signals[signal] ? 128 + constants.signals[signal] : 1);
+    const result = writeResult({
+      status: succeeded ? "completed" : watchdogFired ? "timeout" : "failed",
+      exitCode: succeeded ? 0 : mapped === 0 ? 1 : mapped,
+      signal: signal ?? null,
+      threadId,
+      finalMessage,
+      touchedFiles: gitTouchedFiles(opts.cd),
+      ...(succeeded ? {} : { stderrTail: stderrTail(run.stderrPath) }),
+      ...(watchdogFired ? { error: `traecli did not finish within --timeout ${opts.timeout}; killed by the relay watchdog` } : {}),
+    });
+    printSummary(result, run.resultPath);
+    process.exit(result.exitCode);
+  });
+
+  // If the child failed to launch, writing to its stdin can emit a stray 'error'
+  // on the pipe; the 'error' handler above owns that outcome, so swallow it here.
+  child.stdin.on("error", () => {});
+  child.stdin.write(brief);
+  child.stdin.end();
+}
+
+function main() {
+  const opts = parseArgs(process.argv.slice(2));
+  const brief = readBrief(opts);
+  if (!brief.trim()) fail("empty brief (pass --brief <file> or pipe the brief on stdin)");
+
+  // Prepare the run dir before probing, so a preflight that times out or fails still has
+  // somewhere to publish result.json rather than exiting silently.
+  const run = prepareRunDir(opts, brief);
+  const probeTimeoutMs = versionProbeTimeout(opts);
+  const env = traeEnv(opts);
+  const probe = traeVersion(probeTimeoutMs, env);
+  const writeResult = makeResultWriter(opts, probe.version, run);
+
+  if (!probe.version && !probe.error) {
+    reportUnavailable(writeResult, run.resultPath);
+    return;
+  }
+  if (probe.error) {
+    reportVersionFailure(opts, writeResult, run, probe.error, probeTimeoutMs);
+    return;
+  }
+
+  dispatchToTrae(opts, brief, run, writeResult, env);
+}
+
+function printSummary(result, resultPath) {
+  const lines = [];
+  lines.push("");
+  lines.push(`relay: ${result.status} (exit ${result.exitCode}${result.signal ? `, killed by ${result.signal}` : ""})  ·  traecli ${result.traeVersion ?? "?"}`);
+  if (result.signal === "SIGKILL" && result.status === "failed") lines.push("hint: the host killed the process (commonly the OOM killer or a supervisor timeout) — this is not a traecli error; check host memory and re-dispatch, or split the task into smaller briefs.");
+  if (result.signal === "SIGTERM" && result.status === "failed") lines.push("hint: something outside the relay terminated traecli (a supervisor, the session ending, or a manual kill) — when the relay itself does the killing it reports status \"timeout\" or \"aborted\" instead; inspect the working tree before re-dispatching.");
+  if (result.resumeLast) lines.push("mode: resumed most recent session");
+  if (result.session) lines.push(`mode: resumed session ${result.session}`);
+  if (result.threadId) lines.push(`thread id (resume with: --session ${result.threadId}): ${result.threadId}`);
+  const touched = result.touchedFiles;
+  if (touched === null) {
+    lines.push("touched files: git unavailable — inspect the working tree directly");
+  } else {
+    lines.push(`touched files: ${touched.length}`);
+    for (const file of touched.slice(0, 40)) lines.push(`  ${file}`);
+    if (touched.length > 40) lines.push(`  … and ${touched.length - 40} more`);
+  }
+  if (result.stderrTail && result.stderrTail.length) {
+    lines.push("last stderr:");
+    for (const line of result.stderrTail.slice(-8)) lines.push(`  ${line}`);
+  }
+  lines.push("");
+  lines.push("--- traecli final report ---");
+  lines.push(result.finalMessage || "(no final message captured)");
+  lines.push("--- end report ---");
+  lines.push("");
+  lines.push(`result: ${resultPath}`);
+  lines.push("relay does not commit. Review the diff, re-run the project gates yourself, then commit from the orchestrator.");
+  process.stdout.write(`${lines.join("\n")}\n`);
+}
+
+main();
