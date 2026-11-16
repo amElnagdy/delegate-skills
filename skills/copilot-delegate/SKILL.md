@@ -79,7 +79,8 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 ```
 
 The child's cwd pins the workspace. The relay writes artifacts under the system temp dir by
-default and never commits. See [references/dispatch-and-poll.md](references/dispatch-and-poll.md).
+default, grants copilot read access to that directory with `--add-dir` (so a custom `--out-dir`
+outside the repo works too), and never commits. See [references/dispatch-and-poll.md](references/dispatch-and-poll.md).
 
 ### 3. Wait for completion
 
