@@ -159,6 +159,30 @@ export const IMPLEMENTERS = Object.freeze([
     winShell: true,
   },
   {
+    key: "codeneter",
+    skill: "codeneter-delegate",
+    binary: "codeneter",
+    versionArgs: ["--version"],
+    // `codeneter whoami` prints the signed-in account, or fails with "Not authenticated."
+    // It asks the service, so a network failure reads as unknown rather than signed out.
+    authProbe: { args: ["whoami"], failPattern: /Not authenticated/ },
+    // A "Model ID  Supported effort" table; every selectable id carries a provider slash
+    // (the bare `auto` row is the default, which omitting --model already gives).
+    modelProbe: { args: ["models"], format: "commandcode" },
+    // ~/.codeneter/workspaces/<workspace>/sessions/session-<id>/ — one directory per CLI
+    // session (the desktop app's sessions sit beside them as desktop-session-<id>).
+    usageProbe: {
+      homeSubdir: ".codeneter",
+      path: ["workspaces", "*", "sessions"],
+      entry: "dir",
+      match: /^session-/,
+    },
+    // No sandbox, read-only, or permission-mode dial: edits run in every --mode, and
+    // --auto is a per-dispatch choice the user must accept, never a lane default.
+    supports: ["model", "effort", "timeout"],
+    winShell: true,
+  },
+  {
     key: "opencode",
     skill: "opencode-delegate",
     binary: "opencode",

@@ -22,6 +22,7 @@ import { runAider } from "./aider.mjs";
 import { runCopilot } from "./copilot.mjs";
 import { runCommandcode } from "./commandcode.mjs";
 import { runMcode } from "./mcode.mjs";
+import { runCodeneter } from "./codeneter.mjs";
 import { runZcode } from "./zcode.mjs";
 import { runGrokGitTrust } from "./grok-git-trust.mjs";
 import { runMuse } from "./muse.mjs";
@@ -46,6 +47,7 @@ export const runners = [
   ["copilot", runCopilot],
   ["commandcode", runCommandcode],
   ["mcode", runMcode],
+  ["codeneter", runCodeneter],
   ["read-only-tripwire", runReadOnlyTripwire],
   ["grok-git-trust", runGrokGitTrust],
   ["timeout-tree", runTimeoutTree],

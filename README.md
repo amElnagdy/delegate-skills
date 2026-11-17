@@ -68,6 +68,7 @@ Skip setup when you want one implementer or one-off dials. Pick the skill for a 
 | [`agy-delegate`](skills/agy-delegate/SKILL.md) | Google Antigravity (`agy`) | Antigravity's own `permissions`; bypass opt-in | `--read-only` (`plan` mode) | `--resume-last`, `--conversation <id>` |
 | [`claude-delegate`](skills/claude-delegate/SKILL.md) | [Claude Code](https://code.claude.com/docs/en/overview) (`claude`) | `acceptEdits` + explicit tool surface | `--read-only` (`plan` mode) | `--resume-last`, `--session <id>` |
 | [`cline-delegate`](skills/cline-delegate/SKILL.md) | [Cline](https://github.com/cline/cline) (`cline`) | `--auto-approve true` in act mode; upstream sandbox not configured by the relay | `--plan` + `--auto-approve false` (relay-enforced pair) | — (headless JSON resume unsupported) |
+| [`codeneter-delegate`](skills/codeneter-delegate/SKILL.md) | [CodeNeter](https://codeneter.com) (`codeneter`) | approvals off: edits run, commands and deletions refused; `--auto` opt-in; no sandbox [^codeneter] | — [^codeneter] | `--session <id>` |
 | [`codex-delegate`](skills/codex-delegate/SKILL.md) | [OpenAI Codex](https://github.com/openai/codex) (`codex`) | `--sandbox workspace-write` | `--read-only` | `--resume-last`, `--session <id>` |
 | [`commandcode-delegate`](skills/commandcode-delegate/SKILL.md) | [Command Code](https://commandcode.ai/docs/headless) (`cmd`; `cmdc` on Windows) | `--yolo` — the only headless write state; no sandbox [^commandcode] | `--read-only` (withheld tools + `plan`) | `--continue-last`, `--session <id>` |
 | [`cursor-delegate`](skills/cursor-delegate/SKILL.md) | [Cursor Agent](https://cursor.com/cli) (`cursor-agent`) | `--force`; `--no-force` withholds command approval | `--read-only` (plan mode) | `--resume-last`, `--session <id>` |
@@ -99,6 +100,14 @@ ran with no confirmation), so the brief and a clean tree are the scope. The rela
 appends a system prompt forbidding edits and then runs the Git-visible tripwire: a change is
 detected after the run, not prevented. The relay refuses `--permission off`, whose effect is
 undocumented.
+
+[^codeneter]: `codeneter run` has no sandbox and no read-only mode: file edits run in every `--mode`
+(`agent`, `plan`, `ask`), and its file tools accept paths outside the workspace. Without `--auto` the
+CLI refuses terminal commands and file deletions, so the implementer cannot run the gates;
+`tools.refused` counts what it was turned down. `--auto` approves commands, deletions, and MCP calls
+for the run. The config key `autoApprove: true` does the same with no flag, so the relay reads that one
+key of `~/.codeneter/config.json` (no credentials live there) and refuses to launch while it is on
+unless `--auto` was passed.
 
 [^none]: No CLI-enforced read-only mode. `touchedFiles` and the diff are what you review against, not
 a guarantee: they are post-run `git status` in the workspace, so they cannot show ignored files,
@@ -417,6 +426,18 @@ Per skill — platform, CLI version, and what the run exercised:
   verified too: an `--effort` the model does not offer (mcode exit 2, no `exec.completed`) and an
   unavailable `--model` (exit 4, `execStatus: failed`) both report `status: failed` with the cause.
   Windows `mcode.cmd` shim launch is contract-tested only.
+- `codeneter-delegate` — macOS, `codeneter` 0.18.1: **live edit run verified**. An approvals-off
+  dispatch against a throwaway git repository fixed a planted off-by-one bug in the one named file:
+  `touchedFiles` showed only that file, `HEAD` was untouched, and the CLI's refusal of `node test.js`
+  appeared as `tools.refused: 1`, matching the report's "refused". The orchestrator's own gate run
+  passed. A second dispatch resumed that session with `--session` and `--auto` and a delta brief: same
+  `sessionId`, `resumed: true`, the saved model kept, the test command ran (`tools.refused: 0`), and
+  only the briefed test file changed. Live failure paths verified too: an unknown `--model` and a
+  `--session` resumed from another `--cd` both report `status: failed` with the CLI's own error.
+  Contract-tested against the shared smoke matrix (argv exactness, stdin brief delivery, sign-in and
+  usage-limit failures, a missing result event, the `autoApprove` refusal, bounded version preflight,
+  missing binary, and whole-process-tree timeout/abort cleanup). Windows `codeneter.cmd` shim launch is
+  contract-tested only.
 - `delegate-setup` — contract-tested: discover JSON shape, config validate/write/load, whole-lane
   project overlay, global write without creating `.delegate/`, and `--lane` resolve / wrong-skill /
   flag-override against relays. The smoke suite runs live discovery against installed CLIs
@@ -424,7 +445,7 @@ Per skill — platform, CLI version, and what the run exercised:
 
 Not yet verified: native Windows launches for a directly spawned `claude.exe` (the npm `claude.cmd`
 shim path has a run above), exact-head `cline`, `grok`, `kimi`, `muse`,
-`pi`, `qoder`, `vibe`, and `omp` (`codex`/`opencode`/`grok`/`commandcode`/`mcode` have contract-tested `.cmd` shim handling;
+`pi`, `qoder`, `vibe`, and `omp` (`codex`/`opencode`/`grok`/`commandcode`/`mcode`/`codeneter` have contract-tested `.cmd` shim handling;
 Cursor serializes a pre-joined, quoted command; Qoder and Vibe target their documented native executables).
 Claude's own shell sandbox is unsupported on native Windows regardless of launch mechanics, upstream
 Vibe officially targets UNIX, and Muse's upstream launcher is UNIX-only. A native Linux `cursor-agent` run is unverified. The full delegate →
