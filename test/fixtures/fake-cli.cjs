@@ -450,6 +450,40 @@ if (["omp-success", "omp-error"].includes(process.env.SMOKE_MODE)) {
     process.exit(0);
   });
 } else if ([
+  "codeneter-success",
+  "codeneter-sign-in",
+  "codeneter-limit",
+  "codeneter-no-result",
+].includes(process.env.SMOKE_MODE)) {
+  let brief = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (chunk) => { brief += chunk; });
+  process.stdin.on("end", () => {
+    const mode = process.env.SMOKE_MODE;
+    if (process.env.SMOKE_ARGS_FILE) fs.writeFileSync(process.env.SMOKE_ARGS_FILE, JSON.stringify({ args, brief, cwd: process.cwd() }));
+    const emit = (value) => console.log(JSON.stringify(value));
+    const sessionId = "session-1790000000000-fake01";
+    if (mode === "codeneter-sign-in") {
+      // The real CLI checks its sign-in before anything runs: no init, one failing result.
+      emit({ type: "result", ok: false, error: "Not authenticated. Run `codeneter login` first or set CODENETER_AUTH_TOKEN.", errorKind: "sign_in_required" });
+      process.exit(1);
+    }
+    emit({ type: "init", sessionId, resumed: args.includes("--resume"), workspaceRoot: process.cwd(), model: "anthropic/fake-model", mode: "agent" });
+    emit({ type: "tool_start", toolCallId: "t1", tool: "read_file", args: { target_file: "README.md" } });
+    emit({ type: "tool_result", toolCallId: "t1", tool: "read_file", ok: true });
+    // Without --auto the CLI refuses a terminal command and the agent carries on.
+    emit({ type: "tool_start", toolCallId: "t2", tool: "run_terminal_cmd", args: { command: "npm test" } });
+    emit({ type: "tool_result", toolCallId: "t2", tool: "run_terminal_cmd", ok: false, error: "User rejected terminal command" });
+    emit({ type: "assistant_message", text: "fake codeneter streamed report" });
+    if (mode === "codeneter-no-result") process.exit(0);
+    if (mode === "codeneter-limit") {
+      emit({ type: "result", ok: false, model: "anthropic/fake-model", limit: { title: "Usage limit reached", message: "Try again later" }, sessionId });
+      process.exit(1);
+    }
+    emit({ type: "result", ok: true, response: "fake codeneter completed", model: "anthropic/fake-model", sessionId });
+    process.exit(0);
+  });
+} else if ([
   "mcode-success",
   "mcode-limit",
   "mcode-no-completion",

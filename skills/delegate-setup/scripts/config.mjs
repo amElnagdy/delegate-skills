@@ -236,7 +236,7 @@ function validateDialValue(implementer, field, value, laneName, label) {
       return `${label}: lane ${laneName}.effort must be one of: ${MUSE_EFFORT.join(", ")}`;
     }
     if (
-      (implementer === "codex" || implementer === "grok" || implementer === "commandcode" || implementer === "mcode") &&
+      (implementer === "codex" || implementer === "grok" || implementer === "commandcode" || implementer === "mcode" || implementer === "codeneter") &&
       !/^[a-z][a-z0-9-]*$/i.test(value)
     ) {
       return `${label}: lane ${laneName}.effort must be a bare token`;

@@ -51,6 +51,7 @@ later-edited project config fails closed until it is reviewed and written again 
 | `codex` | codex-delegate | `codex` | model, effort, sandbox, timeout, readOnly |
 | `commandcode` | commandcode-delegate | `cmd` | model, effort, timeout, readOnly |
 | `mcode` | mcode-delegate | `mcode` | model, effort, timeout, readOnly |
+| `codeneter` | codeneter-delegate | `codeneter` | model, effort, timeout |
 | `opencode` | opencode-delegate | `opencode` | model, **variant**, timeout, readOnly |
 | `agy` | agy-delegate | `agy` | model, effort, timeout, readOnly |
 | `grok` | grok-delegate | `grok` | model, effort, sandbox, timeout, readOnly |
@@ -75,6 +76,7 @@ inside the desktop app rather than on PATH, so discovery falls back to the insta
 OpenCode uses `variant` for reasoning intensity, not `effort`. Do not write `effort` on an `opencode` lane.
 Muse `effort` is `--reasoning-effort` (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`). Muse `--provider echo|meta` is relay-only — do not write `provider` on a `muse` lane.
 MiniMax Code (`mcode`) `model` is `provider/model` or `provider/model#variant`; its `effort` levels are model-specific and `mcode` checks them at dispatch. An `mcode` lane `readOnly: true` is advisory — a prompt plus the Git-visible tripwire — because `mcode exec` has no read-only setting.
+CodeNeter (`codeneter`) `model` is a Model ID from `codeneter models` (`provider/model`); `effort` must be one that list shows for that model, and the relay sends it as `<id>?effort=<level>`, so an `effort` lane also needs `model`. CodeNeter has no `readOnly` dial: `codeneter run` edits files in every mode.
 Oh My Pi (`omp`) uses the lane `effort` dial for omp's `--thinking` (`off`, `auto`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`). Do not write `thinking` as a lane field.
 OpenCode lanes **require** `model` in `provider/model` form, with a non-empty provider before the first
 `/` and at least one non-`/` character after it. Cline accepts `provider` and `model` as separate
