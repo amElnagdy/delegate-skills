@@ -26,6 +26,16 @@
  * human explicitly accepts it. Pass --sandbox to enable Antigravity's terminal
  * sandbox for the run.
  *
+ * A write run asks agy for its Auto mode with `--settings '{"agentMode":"auto"}'`
+ * (this session only, never saved). Auto approves edits inside the workspace and
+ * runs commands in the terminal sandbox. In agy's default mode every edit and
+ * command needs a prompt, which headless --print auto-denies, ending the turn with
+ * no edits. agy's own `--mode auto` is not used: print mode checks it before
+ * sign-in and falls back to the default mode. Auto availability is still agy's
+ * call (rollout, account type, platform), and a `toolPermission` of `strict`
+ * still makes every tool ask; result.json records the `agentMode` and
+ * `toolPermission` agy logged so a denial can be traced to its cause.
+ *
  * `--read-only` composes both: `--sandbox --dangerously-skip-permissions`. That
  * pairing looks alarming and is deliberate — the sandbox is the enforcement and
  * the auto-approve only lets tools run *inside* it. Plan mode alone cannot do
@@ -87,7 +97,8 @@
  *   -h, --help              Show this help.
  *
  * Result: written to <out-dir>/result.json and summarized on stdout -
- *   status, exitCode, agyVersion, projectId, conversationId, finalMessage
+ *   status, exitCode, agyVersion, projectId, conversationId, agentMode and
+ *   toolPermission (as agy logged them; null if the log lacks them), finalMessage
  *   (Antigravity's own report), touchedFiles (git porcelain, null if git can't report),
  *   readOnlyViolation (on --read-only), and the paths to brief.txt, final.txt, agy.log, and stderr.txt.
  *
@@ -486,7 +497,20 @@ function buildArgv(opts, brief, run) {
     argv.push("--sandbox", "--dangerously-skip-permissions");
   } else {
     if (opts.sandbox) argv.push("--sandbox");
-    if (opts.dangerouslySkipPermissions) argv.push("--dangerously-skip-permissions");
+    if (opts.dangerouslySkipPermissions) {
+      argv.push("--dangerously-skip-permissions");
+    } else {
+      // A write run needs agy's Auto mode: in the default mode every file edit and
+      // every shell command needs a prompt, which headless --print soft-denies and
+      // the turn ends with nothing done. agy only starts headless runs in Auto when
+      // no `agentMode` is saved, so a Default picked in /config silently disables
+      // edits. Ask for Auto per session instead. Not `--mode auto`: print mode
+      // checks that flag before sign-in, logs "rollout flag off", and continues in
+      // the default mode. Not `--mode accept-edits`: it soft-denies the first shell
+      // command (even `ls`), ending the turn. `--settings` is merged for this
+      // session only and never saved; a `toolPermission` of `strict` still wins.
+      argv.push("--settings", JSON.stringify({ agentMode: "auto" }));
+    }
   }
   if (opts.printTimeout) argv.push("--print-timeout", opts.printTimeout);
   argv.push("--log-file", run.logPath);
@@ -498,7 +522,7 @@ function buildArgv(opts, brief, run) {
 }
 
 function parseIdsFromLog(logPath) {
-  if (!existsSync(logPath)) return { projectId: null, conversationId: null };
+  if (!existsSync(logPath)) return { projectId: null, conversationId: null, agentMode: null, toolPermission: null };
   const text = readFileSync(logPath, "utf8");
   const projectMatches = [
     /project: created project "[^"]*" \(id=([0-9a-f-]+)\)/i,
@@ -519,7 +543,33 @@ function parseIdsFromLog(logPath) {
   return {
     projectId: firstMatch(projectMatches),
     conversationId: firstMatch(conversationMatches),
+    ...parseModeFromLog(text),
   };
+}
+
+// The agent mode and tool-permission setting agy actually ran with, read from its log.
+// Diagnostic only: agy does not document this log format as stable, so a missing
+// line yields null rather than a guess.
+function parseModeFromLog(text) {
+  const toolPermission = text.match(/toolPermission=([A-Za-z-]+)/);
+  if (!/Print mode: starting/.test(text)) {
+    return { agentMode: null, toolPermission: toolPermission ? toolPermission[1] : null };
+  }
+  const modes = [...text.matchAll(/SetCycleMode called: ([A-Za-z-]+)/g)];
+  return {
+    agentMode: modes.length ? modes[modes.length - 1][1] : "default",
+    toolPermission: toolPermission ? toolPermission[1] : null,
+  };
+}
+
+function permissionDeniedError(tool, ids) {
+  let cause = "";
+  if (ids.toolPermission === "strict") {
+    cause = " agy ran with toolPermission \"strict\", which makes every tool ask even in Auto mode.";
+  } else if (ids.agentMode && ids.agentMode !== "auto") {
+    cause = ` agy ran in its "${ids.agentMode}" agent mode, not Auto (the relay requested Auto; Auto is gated by agy's own rollout, account type, and platform).`;
+  }
+  return `Antigravity auto-denied the ${tool} permission because headless --print cannot prompt.${cause} Add an allow-rule, or ask the human whether to re-dispatch with --dangerously-skip-permissions and treat that run as full access`;
 }
 
 // Returns a poll function: true when agy.log gained a generation line since the last poll.
@@ -581,6 +631,8 @@ function makeResultWriter(opts, version, run) {
       agyVersion: version,
       projectId: ids.projectId,
       conversationId: ids.conversationId,
+      agentMode: ids.agentMode,
+      toolPermission: ids.toolPermission,
       startedAt: run.startedAt,
       finishedAt: new Date().toISOString(),
       briefPath: run.briefPath,
@@ -833,7 +885,7 @@ function dispatchToAgy(opts, brief, run, writeResult, watchdogMs, stallMs) {
               : `agy did not exit within --print-timeout ${opts.printTimeout} plus 60s grace; killed by the relay watchdog`,
           }
         : permissionDenied
-          ? { error: `Antigravity auto-denied the ${permissionDenied[1]} permission because headless --print cannot prompt; ask the human whether to re-dispatch with --dangerously-skip-permissions and treat that run as full access` }
+          ? { error: permissionDeniedError(permissionDenied[1], parseIdsFromLog(run.logPath)) }
           : silentNoop
             ? { error: "agy exited 0 without a final message or observable working-tree changes; the relay cannot confirm this dispatch completed" }
             : abandonedBackground

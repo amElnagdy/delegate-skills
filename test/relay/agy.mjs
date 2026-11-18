@@ -56,6 +56,48 @@ export async function runAgy(h) {
     denied.value.error?.includes("headless --print") &&
     denied.value.stderrTail?.some((line) => line.includes("auto-denied")));
 
+  const deniedDefault = run("permission-denied-default", "agy-permission-denied-default");
+  h.check("agy permission denial: a run that stayed in the default agent mode says so",
+    deniedDefault.result.status === 1 &&
+    deniedDefault.value.status === "failed" &&
+    deniedDefault.value.agentMode === "default" &&
+    deniedDefault.value.toolPermission === "request-review" &&
+    deniedDefault.value.error?.includes("\"default\" agent mode, not Auto"));
+
+  const deniedStrict = run("permission-denied-strict", "agy-permission-denied-strict");
+  h.check("agy permission denial: strict toolPermission is named as the cause even in Auto",
+    deniedStrict.result.status === 1 &&
+    deniedStrict.value.status === "failed" &&
+    deniedStrict.value.agentMode === "auto" &&
+    deniedStrict.value.toolPermission === "strict" &&
+    deniedStrict.value.error?.includes("toolPermission \"strict\""));
+
+  h.check("agy permission denial: no agy log leaves the mode fields null",
+    denied.value.agentMode === null && denied.value.toolPermission === null);
+
+  // A write run must ask for Auto per session: headless agy only starts in Auto when no
+  // agentMode is saved, and its own `--mode auto` is checked before sign-in and ignored.
+  for (const [name, extra, wantsAuto] of [
+    ["write", [], true],
+    ["write-sandbox", ["--sandbox"], true],
+    ["bypass", ["--dangerously-skip-permissions"], false],
+    ["read-only", ["--read-only"], false],
+  ]) {
+    const argsFile = join(h.scratch, `args-mode-${name}-agy`);
+    spawnSync(process.execPath, [
+      h.relayPath("agy"),
+      "--brief", h.briefPath,
+      "--cd", h.freshRepo(`work-mode-${name}-agy`),
+      "--out-dir", join(h.scratch, `out-mode-${name}-agy`),
+      ...extra,
+    ], { env: { ...h.baseEnv, SMOKE_MODE: "agy-analysis", SMOKE_ARGS_FILE: argsFile }, encoding: "utf8", timeout: 15_000 });
+    const args = readArgs(argsFile);
+    h.check(`agy agent mode ${name}: ${wantsAuto ? "requests Auto via --settings" : "passes no agent-mode settings"}`,
+      args.length > 0 &&
+      !args.includes("--mode") &&
+      (wantsAuto ? h.pair(args, "--settings", JSON.stringify({ agentMode: "auto" })) : !args.includes("--settings")));
+  }
+
   const silent = run("silent-noop", "agy-silent-noop");
   h.check("agy silent no-op: no final message or edits cannot report completed",
     silent.result.status === 1 &&

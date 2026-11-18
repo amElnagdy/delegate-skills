@@ -60,6 +60,10 @@ touched-files report shows only Antigravity's edits and nothing of the helper's 
 - `signal` - the signal that killed the child, otherwise `null`
 - `agyVersion` - inferred from `agy changelog` when available
 - `projectId` / `conversationId` - parsed from the Antigravity log when present
+- `agentMode` / `toolPermission` - the agent mode (`auto`, `accept-edits`, or `default`) and
+  `toolPermission` setting agy logged for the run; `null` when the log lacks them. A write run that
+  shows `agentMode: "default"` could not edit headlessly - see
+  [Agent mode for write runs](#agent-mode-for-write-runs)
 - `finalMessage` - Antigravity's stdout response
 - `touchedFiles` - `git status --porcelain` lines in the working root: your review starting point.
   `null` (not `[]`) when git cannot report; `[]` means git ran and the tree is clean
@@ -120,6 +124,8 @@ process has exited and `result.json` is written.
   Common causes: auth lapse, an unknown model label, timeout, or a permission the run needed.
 - **Headless write permission denied:** the relay detects Antigravity's `no output produced ...
   auto-denied` stderr sentinel, reports `status: failed`, preserves `stderrTail`, and exits 1.
+  Check `agentMode` and `toolPermission` first: `default` means Auto mode did not engage, and
+  `strict` makes every tool ask even in Auto ([Agent mode for write runs](#agent-mode-for-write-runs)).
   Allow-rule matching and location vary by `agy` version and platform — a bare `command(<name>)` rule
   was insufficient on Windows/agy 1.2.5 but did work on macOS/agy 1.2.0 — so measure before assuming;
   see [Permission engine traps](#permission-engine-traps) below before re-dispatching or asking to use
@@ -134,10 +140,12 @@ process has exited and `result.json` is written.
 Under the hood the helper runs roughly:
 
 ```bash
-agy --new-project --add-dir <repo> --print-timeout 30m --print=<brief>
-agy --continue --print-timeout 30m --print=<delta brief>
-agy --conversation <id> --print-timeout 30m --print=<delta brief>
+agy --new-project --add-dir <repo> --settings '{"agentMode":"auto"}' --print-timeout 30m --print=<brief>
+agy --continue --settings '{"agentMode":"auto"}' --print-timeout 30m --print=<delta brief>
+agy --conversation <id> --settings '{"agentMode":"auto"}' --print-timeout 30m --print=<delta brief>
 ```
+
+`--read-only` and `--dangerously-skip-permissions` runs pass no `--settings`.
 
 `agy --print` requires the prompt as a flag argument, so keep briefs focused. The relay still accepts
 stdin or `--brief <file>` for your convenience; it reads the text first, then passes it to `agy` as
@@ -150,6 +158,30 @@ caps a single argument), so have `agy` read large context from the workspace ins
 
 The helper never commits - by design, not omission. The robust contract is: Antigravity edits the
 working tree, the orchestrator reviews and commits. See [review-and-land.md](review-and-land.md).
+
+## Agent mode for write runs
+
+A headless write run only edits when `agy` runs it in its **Auto** agent mode, which approves edits
+inside the workspace and runs commands in the terminal sandbox. In the **default** mode every file
+edit and every shell command needs a prompt; `--print` cannot prompt, so `agy` soft-denies the first
+one and the turn ends with no output and no edits (`write_file` or `command` in the denial).
+
+`agy` starts a headless run in Auto only when no `agentMode` is saved in its settings, so choosing
+Default for `Agent Mode` in `/config` silently stops every later headless run from editing. The relay
+therefore asks for Auto on each write run with `--settings '{"agentMode":"auto"}'`, which `agy`
+merges for that session only and never saves. Two launch alternatives were measured and rejected
+(agy 1.5.10, macOS):
+
+- `--mode auto`: print mode checks it before sign-in, logs `--mode auto is unavailable (rollout flag
+  off)`, and continues in the default mode.
+- `--mode accept-edits`: edits are approved, but the first shell command is soft-denied, even
+  `ls -la`, which ends the turn. A brief that has the agent explore or run gates first lands nothing.
+
+What the relay cannot override: Auto availability is `agy`'s call (its own rollout, your account
+type, and platform; `agy` documents Windows support as limited to Windows 11 24H2 and later for
+personal accounts), and a `toolPermission` of `strict` makes every tool ask, even reads, in any mode.
+Either way the run reports `status: failed` with `agentMode` / `toolPermission` naming the cause.
+Then use allow-rules (below) or, with the human's explicit approval, `--dangerously-skip-permissions`.
 
 ## Permission engine traps
 

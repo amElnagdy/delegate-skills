@@ -40,7 +40,7 @@ Code; treat other orchestrators as designed-for, not yet proven.
 
 These checks do not prove that a headless write will be approved. In `--print` mode, Antigravity
 cannot prompt for a write permission and may auto-deny it. The relay detects that denial instead of
-reporting completion.
+reporting completion, and records the agent mode agy actually ran in (`agentMode` in `result.json`).
 
 ## Choose the implementer model
 
@@ -77,7 +77,8 @@ node "<skill-dir>/scripts/relay.mjs" --brief brief.txt --cd /path/to/repo
 ```
 
 The helper starts a fresh Antigravity project by default and passes `--add-dir <repo>` (the `--cd`
-path, absolute) so `agy` has an explicit workspace. It does **not** pass `--dangerously-skip-permissions` by default.
+path, absolute) so `agy` has an explicit workspace. A write run asks for agy's Auto agent mode for that
+session only (`--settings '{"agentMode":"auto"}'`); it does **not** pass `--dangerously-skip-permissions` by default.
 Mechanics, flags, and the `result.json` shape: [references/dispatch-and-poll.md](references/dispatch-and-poll.md).
 
 ### 3. Wait for completion
@@ -116,7 +117,15 @@ diff holds:
 
 ## Permission model
 
-Antigravity owns its own permission policy. The relay does not bypass it by default. Use
+Antigravity owns its own permission policy. The relay does not bypass it by default. A headless write
+run can only edit in agy's **Auto** agent mode: in the default mode every edit and shell command needs a
+prompt, which `--print` soft-denies, ending the turn with no edits. agy picks Auto only when no
+`agentMode` is saved, so a Default chosen in `/config` would silently block edits; the relay therefore
+requests Auto per session with `--settings '{"agentMode":"auto"}'` (merged, never saved). agy's own
+`--mode auto` is not used (print mode checks it before sign-in and falls back to the default mode), nor
+`--mode accept-edits` (it soft-denies the first shell command, even `ls`). Auto availability stays agy's
+call (rollout, account type, platform), and `toolPermission: strict` still makes every tool ask; a
+denial then reports `agentMode` / `toolPermission` in `result.json` naming the cause. Use
 `--dangerously-skip-permissions` only when the human explicitly accepts that Antigravity may
 auto-approve tool permission requests. `--read-only` composes `--sandbox` with
 `--dangerously-skip-permissions`: the sandbox is the enforcement — writes inside the workspace
