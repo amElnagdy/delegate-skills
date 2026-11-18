@@ -194,6 +194,20 @@ if (process.env.SMOKE_MODE === "aider-exit-nonzero") {
   console.error("fake aider nonzero exit");
   process.exit(7);
 }
+if (process.env.SMOKE_MODE === "agy-permission-denied-default" || process.env.SMOKE_MODE === "agy-permission-denied-strict") {
+  // agy's own log lines for a run that stayed in the default agent mode, or ran under strict.
+  const logAt = args.indexOf("--log-file");
+  const strict = process.env.SMOKE_MODE === "agy-permission-denied-strict";
+  if (logAt !== -1) fs.writeFileSync(args[logAt + 1], [
+    `I1117 cli_setting_manager.go:98] CLI settings initialized: permissions=&{Allow:[] Deny:[] Ask:[]}, toolPermission=${strict ? "strict" : "request-review"}`,
+    "I1117 printmode.go:208] Print mode: starting (promptLength=42, model=\"\", conversationID=\"\")",
+    ...(strict ? ["I1117 manager.go:1730] SetCycleMode called: auto"] : []),
+    "I1117 tool_confirmation_manager.go:222] Print mode: soft-denying tool confirmation \"Edit\" at step 3",
+    "",
+  ].join("\n"));
+  console.error('jetski: no output produced — a tool required the "write_file" permission that headless mode cannot prompt for, so it was auto-denied.');
+  process.exit(0);
+}
 if (process.env.SMOKE_MODE === "agy-permission-denied") {
   console.error('jetski: no output produced — a tool required the "write_file" permission that headless\nmode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow\nin settings.json (e.g. write_file(<target>)). Alternatively, re-run with\n--dangerously-skip-permissions to auto-approve all tools.');
   process.exit(0);

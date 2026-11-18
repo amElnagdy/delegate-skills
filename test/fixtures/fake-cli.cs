@@ -45,6 +45,17 @@ class FakeCli {
       Console.Error.WriteLine("fake aider nonzero exit");
       return 7;
     }
+    if (mode == "agy-permission-denied-default" || mode == "agy-permission-denied-strict") {
+      var strict = mode == "agy-permission-denied-strict";
+      var deniedLogAt = Array.IndexOf(args, "--log-file");
+      if (deniedLogAt >= 0) File.WriteAllText(args[deniedLogAt + 1],
+        "I1117 cli_setting_manager.go:98] CLI settings initialized: permissions=&{Allow:[] Deny:[] Ask:[]}, toolPermission=" + (strict ? "strict" : "request-review") + "\n" +
+        "I1117 printmode.go:208] Print mode: starting (promptLength=42, model=\"\", conversationID=\"\")\n" +
+        (strict ? "I1117 manager.go:1730] SetCycleMode called: auto\n" : "") +
+        "I1117 tool_confirmation_manager.go:222] Print mode: soft-denying tool confirmation \"Edit\" at step 3\n");
+      Console.Error.WriteLine("jetski: no output produced — a tool required the \"write_file\" permission that headless mode cannot prompt for, so it was auto-denied.");
+      return 0;
+    }
     if (mode == "agy-permission-denied") {
       Console.Error.WriteLine("jetski: no output produced — a tool required the \"write_file\" permission that headless\nmode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow\nin settings.json (e.g. write_file(<target>)). Alternatively, re-run with\n--dangerously-skip-permissions to auto-approve all tools.");
       return 0;

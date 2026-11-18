@@ -65,7 +65,7 @@ Skip setup when you want one implementer or one-off dials. Pick the skill for a 
 | Skill | Implementer CLI | Write access (default) | Read-only run | Resume |
 | --- | --- | --- | --- | --- |
 | [`aider-delegate`](skills/aider-delegate/SKILL.md) | [Aider](https://aider.chat) (`aider`) — any OpenAI-compatible endpoint, including a local or self-hosted model via `--api-base` | `--yes-always` with `--no-suggest-shell-commands`; no sandbox or permission modes; commits force-disabled [^aider] | `--read-only` (`--dry-run`) | `--resume-last` (chat history, per-worktree) |
-| [`agy-delegate`](skills/agy-delegate/SKILL.md) | Google Antigravity (`agy`) | Antigravity's own `permissions`; bypass opt-in | `--read-only` (`plan` mode) | `--resume-last`, `--conversation <id>` |
+| [`agy-delegate`](skills/agy-delegate/SKILL.md) | Google Antigravity (`agy`) | Antigravity's own `permissions`, Auto agent mode requested per run; bypass opt-in | `--read-only` (`plan` mode) | `--resume-last`, `--conversation <id>` |
 | [`claude-delegate`](skills/claude-delegate/SKILL.md) | [Claude Code](https://code.claude.com/docs/en/overview) (`claude`) | `acceptEdits` + explicit tool surface | `--read-only` (`plan` mode) | `--resume-last`, `--session <id>` |
 | [`cline-delegate`](skills/cline-delegate/SKILL.md) | [Cline](https://github.com/cline/cline) (`cline`) | `--auto-approve true` in act mode; upstream sandbox not configured by the relay | `--plan` + `--auto-approve false` (relay-enforced pair) | — (headless JSON resume unsupported) |
 | [`codex-delegate`](skills/codex-delegate/SKILL.md) | [OpenAI Codex](https://github.com/openai/codex) (`codex`) | `--sandbox workspace-write` | `--read-only` | `--resume-last`, `--session <id>` |
@@ -259,7 +259,16 @@ Per skill — platform, CLI version, and what the run exercised:
   absolute `--add-dir` workspace pin. `--stall-timeout` is contract-tested, live stall pending: a fake
   whose log keeps growing without `streamGenerateContent` lines reports `stalled`, steady generation
   calls split across writes keep a run alive, and the watchdog is off unless passed; run on native
-  Windows against the compiled fake.
+  Windows against the compiled fake. macOS, `agy` 1.5.10: with `"agentMode": ""` (Default) saved in
+  `settings.json`, the previous launch failed 2 of 2 write runs on an auto-denied `write_file` or
+  `command`, and the launch with `--settings '{"agentMode":"auto"}'` landed the edits in 3 of 3 (edit
+  only, shell exploration first, and an edit plus a shell command), with `result.json` reporting
+  `agentMode` `auto`. With nothing saved, a further 3 write runs and a `--resume-last` delta run also
+  landed under `auto`. `--mode auto` was measured falling back to the default mode, and `--mode
+  accept-edits` landed nothing when the brief started with a shell command. macOS, `agy` 1.5.11, nothing
+  saved: one write run (a shell `ls`, then a new file) landed with `agentMode` `auto`, and a
+  `--read-only` run completed with no touched files. The `--settings` launch is not smoke-tested on
+  Windows.
 - `claude-delegate` — macOS, `claude` 2.1.220: write run under `acceptEdits`; plan mode refusing an
   edit, with the Git tripwire true on a violation and false on a clean run;
   `--session`/`--resume-last` resume; `claude_unavailable`/127 and usage errors exiting 2 without a
